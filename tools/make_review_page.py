@@ -55,6 +55,25 @@ DISTRICTS = [
      [("shipped", "parapet cap course"), ("flaw", "diagonal wall cells break into pillars")]),
 ]
 
+DISTRICTS += [
+    ("The Rampart", "10-rampart-walk", "Solid masonry, battlements facing out, a walk behind",
+     "The wall a party can actually be chased along. Merlons crown only the cells that look out "
+     "of town, so the parapet is a line rather than a hedge of teeth, and the weathered flags "
+     "behind them are a fighting surface two abreast. Until this rev the same circuit was four "
+     "parallel fins of curtain wall with 2.5 ft of daylight between them &mdash; an archer could "
+     "have shot straight through the fortification.",
+     [("shipped", "full-cell core: no daylight through the wall"),
+      ("shipped", "battlements face out; walk paved behind"),
+      ("next", "no arch, doors or flanking towers at the gate")]),
+    ("The Main Road", "11-level-streets", "Cobble laid flush with the verge",
+     "Cobble is 0.25 thick and grass is 0.5, and both were laid from a common bottom, so every "
+     "street sat a quarter tile low &mdash; a 15 inch kerb down both sides of every road in town, "
+     "on 1,234 tiles. Nothing in the tile grid could show it. Surfaces now align at the top, "
+     "which is the plane a creature stands on.",
+     [("shipped", "surfaces align at the top, not the bottom"),
+      ("shipped", "varied rooflines by storey count")]),
+]
+
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
 
 cards = ""
@@ -149,7 +168,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 9</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 12</div>
   <h1>Forest Church</h1>
   <p class="deck">A 117 &times; 113-tile TaleSpire village generated from a Watabou export &mdash;
   reviewed district by district at avatar eye level, the way a party will actually see it.
@@ -157,10 +176,11 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 179</b> (933 &times; 896 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>19,440</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,923</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
-    <span>reachable <b class="ok">99%</b></span>
+    <span>reachable <b class="ok">100%</b></span>
+    <span>ground-plane holes <b class="ok">0</b></span>
   </div>
 </header>
 
@@ -171,6 +191,22 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 12 &middot; Aug 19</span><div><b>A rampart that is actually solid.</b>
+    The medieval castle kit is <em>curtain wall</em> &mdash; its pieces are 0.5 deep, authored to
+    stand on a cell boundary. Laid one per cell across a wall four cells thick, they were four
+    parallel fins with a 0.5-tile slot between each pair: daylight through the whole circuit. The
+    mass is now a full-cell core with the thin pieces facing it. Gates stopped being unbuilt holes
+    &mdash; 18 cells of main street crossing the wall, open to the sky &mdash; and became tunnels
+    with the rampart carried over on a lintel. Battlements crown only the cells facing out of
+    town; the rest is paved as a wall-walk, its stone chosen by pasting six candidates side by
+    side rather than by guessing. Streets stopped sitting a quarter tile below the grass.</div></li>
+  <li><span class="when">rev 10 &middot; Aug 19</span><div><b>No more holes in the ground.</b>
+    Open-country chunks were judged one at a time, so two chunks the town had built all the way
+    around got dropped. An unpasted chunk is not grass &mdash; it is bare board &mdash; so that
+    pasted as a 24&times;48 tile rectangular void in the middle of the map. Trimming is now a
+    flood fill inward from the border, and a build fails if anything enclosed is dropped. Roof
+    ring depth now comes from a search inward from a block&#39;s real boundary instead of from its
+    bounding box, which had floated the edge cells of L-shaped terraces a course too high.</div></li>
   <li><span class="when">rev 9 &middot; Aug 19</span><div><b>Landscape given variety, water given
     a shore.</b> A forest of one species reads as a plantation, so trees now mix 62% conifer /
     29% broadleaf / 9% dead. A course of shingle along the waterline hides the cut edge where
