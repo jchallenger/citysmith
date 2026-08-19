@@ -44,7 +44,7 @@ CELL_ROLES = (
 ) + WALL_COURSE_ROLES
 
 #: Roles laid across a 2x2 block of cells.
-BLOCK_ROLES = ("ground_2x2", "field", "park")
+BLOCK_ROLES = ("ground_2x2", "field")
 
 
 @dataclass
@@ -204,15 +204,8 @@ MEDIEVAL = Style(
             _tile(name="Tilled Earth", **_MED),
             _tile(name="Grass - Sparse", **_MED),
         ],
-        "park": [
-            _tile(name="Grass - Sparse", **_MED),
-            _tile(name="Grass - Lush", **_MED),
-        ],
         "water": [
             _tile(name="tempWater1x1", **_MED),
-        ],
-        "gravel": [
-            _tile(name="gravel_1x1_01", **_MED),
         ],
         #: 1x1 stand-in for the 2x2 ``field`` block, for leftover cells the
         #: block pass cannot cover. Gravel reads as worked dirt at this scale;
@@ -227,9 +220,6 @@ MEDIEVAL = Style(
         # its position in the footprint.
         "roof_side": [_tile(name="Thatched Roof 01", **_MED)],
         "roof_corner": [_tile(name="Thatched Roof Corner 01", **_MED)],
-        "roof_inner_corner": [_tile(name="Thatched Roof Inner Corner 01", **_MED)],
-        "roof_gable": [_tile(name="Village Roof Side Wall 01", **_MED)],
-        "roof_gable_window": [_tile(name="Village Roof Side Wall With Window 01", **_MED)],
         "roof_chimney": [_tile(name="Thatched Chimney", **_MED)],
         # -- corners ------------------------------------------------------
         # An outside corner is one full-cell piece, not two wall segments
@@ -360,8 +350,44 @@ CYBERPUNK = Style(
             _tile(group="floor", **_SCIFI, **_UNIT),
         ],
         "ground": [
+            _tile(name="concrete floor 1x1", **_SCIFI),
             _tile(group="floor", any_tags=("concrete",), **_SCIFI, **_UNIT),
             _tile(group="floor", **_SCIFI, **_UNIT),
+        ],
+        # -- landscape ----------------------------------------------------
+        # These are *declared*, not left to the undeclared-role fallback. That
+        # fallback is a bare name search across the whole catalog with no pack
+        # filter, and on this install it resolves "water" to the medieval
+        # rowing boat "boat small v1 mid paddles" (2.37x2.0) and "park" to
+        # "balloon_cart_01" -- the exact failure asset-conventions.md records
+        # for the medieval style. `field_1x1` resolved to nothing at all,
+        # which made `--style cyberpunk` abort outright: _lay_terrain's 1x1
+        # pass calls require() for it on every leftover field cell.
+        #
+        # 2x2 twin of ``ground``, for the block pass in ``_lay_terrain``.
+        "ground_2x2": [
+            _tile(name="durable floor 2x2", **_SCIFI),
+            _tile(name="concrete floor 2x2 strip", **_SCIFI),
+        ],
+        #: MFCG farmland has no cyberpunk equivalent; a rusted industrial deck
+        #: reads as the open lot between blocks, which is what that space is
+        #: doing on this kind of map.
+        "field": [
+            _tile(name=("industrial_floor_2x2_01", "industrial_floor_2x2_02"), **_SCIFI),
+        ],
+        "field_1x1": [
+            _tile(name="industrial_floor_1x1_01", **_SCIFI),
+            _tile(name="concrete floor 1x1", **_SCIFI),
+        ],
+        #: No water tile ships in the sci-fi pack, so this is a deliberate
+        #: cross-pack pin rather than an accidental one. An explicit borrow
+        #: beats the bare-name fallback dragging in a rowing boat.
+        "water": [
+            _tile(name="tempWater1x1", pack="Medieval Fantasy"),
+        ],
+        "gravel": [
+            _tile(name=("concrete floor 1x1 cracked v1", "concrete floor 1x1 cracked v2",
+                        "concrete floor 1x1 cracked v3"), **_SCIFI),
         ],
         "city_wall": [
             _tile(group="wall", any_tags=("concrete", "metal"), height=2.0, **_SCIFI),

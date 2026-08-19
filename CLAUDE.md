@@ -16,6 +16,10 @@ This file is the internal engineering notes. User-facing docs:
 | `slab.py` | TaleSpire slab format V2 codec. Verified against real slabs. |
 | `catalog.py` | Loads assets from the user's TaleSpire install; query API. |
 | `palette.py` | Maps semantic roles (floor/wall/door) to catalog queries per style. |
+| `mfcg.py` | Imports Watabou MFCG GeoJSON -> `Layout`. The primary path. |
+| `layout.py` | Polygonal layout model; `TILE_FEET = 5.0` lives here. |
+| `raster.py` | Layout -> tile grid: footprints, walls, doors, reachability. |
+| `verify.py` | Playability report. Checks the TileMap, *not* the placements. |
 | `city.py` | BSP city generation: streets, blocks, plots, buildings, districts. |
 | `sites.py` | Scores buildings by encounter potential, with reasons. |
 | `floorplan.py` | Interior rooms, doors, stairs for one building. |

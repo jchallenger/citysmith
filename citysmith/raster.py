@@ -111,6 +111,15 @@ class TileMap:
             (a - x0, b - z0, c - x0, d - z0) for a, b, c, d in self.bridges
             if x0 <= a < x0 + width and z0 <= b < z0 + depth
         ]
+        # Storey counts must survive the crop, or every building in a staged
+        # test comes out single-storey -- which silently defeats the point of
+        # --crop, since the paste then exercises no wall stacking, no upper
+        # floor and no raised roof course.
+        out.floors = {
+            bid: self.floors[bid]
+            for bid in {v for row in out.building for v in row if v}
+            if bid in self.floors
+        }
         _find_perimeters(out, None)
         _place_doors(out, None)
         return out

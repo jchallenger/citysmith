@@ -23,8 +23,9 @@ it, so it is never a free parameter:
 enforces their footprints:
 
 ```python
-CELL_ROLES  = ("floor", "floor_upper", "ground", "street", "water", "gravel", "roof")
-BLOCK_ROLES = ("ground_2x2", "field", "park")
+CELL_ROLES  = ("floor", "floor_upper", "ground", "street", "water", "roof")
+              + WALL_COURSE_ROLES   # ("wall_corner", "wall_corner_civic")
+BLOCK_ROLES = ("ground_2x2", "field")
 ```
 
 A **cell role** is laid one per tile and must resolve to an asset with

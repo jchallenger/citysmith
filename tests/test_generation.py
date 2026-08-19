@@ -304,3 +304,36 @@ def test_walls_rest_on_the_floor_surface():
 def test_unknown_side_rejected():
     with pytest.raises(ValueError, match="side must be"):
         place_wall(WALL, 0, 0, "up")
+
+
+# -- palette integrity --------------------------------------------------------
+
+def test_every_style_resolves_cleanly():
+    """No style may ship an unresolved or wrong-footprint role.
+
+    Undeclared roles fall through to a bare name search with no pack filter,
+    which is how the cyberpunk style silently resolved "water" to a rowing
+    boat and "park" to a balloon cart. ``validate()`` cannot see a role a
+    style never declared, so the guard is: every style, every role, clean.
+    """
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import STYLES, Palette
+
+    catalog = load_or_build()
+    for name, style in STYLES.items():
+        problems = Palette(catalog, style).validate()
+        assert problems == [], f"style {name!r}: " + "; ".join(problems)
+
+
+def test_styles_declare_the_roles_the_builder_requires():
+    """Roles the tilemap builder calls ``require()`` on must be declared.
+
+    ``require()`` raises rather than degrading, so a missing one is a hard
+    build failure -- cyberpunk aborted on every map with a field in it.
+    """
+    from citysmith.palette import STYLES
+
+    needed = {"ground", "field_1x1", "street", "floor", "wall", "city_wall"}
+    for name, style in STYLES.items():
+        missing = sorted(needed - set(style.roles))
+        assert not missing, f"style {name!r} does not declare: {missing}"

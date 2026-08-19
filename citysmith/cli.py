@@ -284,7 +284,7 @@ def cmd_build(args) -> int:
     from .layout import Layout
     from .raster import rasterize
     from .build import build_from_tilemap
-    from .verify import tilemap_svg, verify
+    from .verify import check_placements, tilemap_svg, verify
 
     layout = Layout.load(args.layout)
     tm = rasterize(layout, bridges=not args.no_bridges)
@@ -313,6 +313,12 @@ def cmd_build(args) -> int:
     biggest = max((len(p.read_text(encoding="utf-8")) * 3 // 4 for p in written), default=0)
     report = verify(tm, asset_count=builder.stats.total,
                     slab_count=len(written), max_slab_bytes=biggest)
+
+    # The report above reads the tile grid -- the plan. These read the geometry
+    # we actually emitted, which is where doorways-turned-wall and off-grid
+    # tiles hide.
+    for problem in check_placements(builder, tm):
+        report.add("fail", "placements", problem)
 
     print(f"\n{builder.stats.total:,} assets in {len(written)} slab(s)")
     print("\n" + report.text())

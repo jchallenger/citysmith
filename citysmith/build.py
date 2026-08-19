@@ -475,7 +475,9 @@ _PROP_CATEGORY_BY_KIND: dict[str, str] = {
 # -- imported city boards -----------------------------------------------------
 
 #: Surfaces that can be tiled with a 2x2 asset, and the role that does it.
-_BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field", "park": "park"}
+#: Surfaces tiled with a 2x2 asset. Parks are painted as GROUND by the
+#: raster (there is no PARK surface), so they tile as ground.
+_BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field"}
 
 
 def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
@@ -530,11 +532,6 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
                     b.add(place_tile(water, x, z, -1.0 + water.size_y))
                 continue
             b.tile(surface_roles.get(s, ground_role), x, z, 0.0)
-
-
-#: Outward rotation for a roof piece whose slope faces this way. The kit's
-#: pieces are authored facing north at rot 0, matching the wall convention.
-_ROOF_ROT = {"n": ROT_N, "e": ROT_E, "s": ROT_S, "w": ROT_W}
 
 
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) -> None:
@@ -786,7 +783,13 @@ def build_from_tilemap(
         floors = min(max(1, tm.floors.get(bid, 1)), storeys)
         civic = bid.split("-")[0] in CIVIC_KINDS
         if civic:
-            face, glass, entry = civic_wall or ext_wall, civic_window, civic_door
+            # Fall back to the common-house piece per slot: a style with no
+            # civic kit (cyberpunk has none) otherwise gets entry=None, and the
+            # door branch below silently lays a solid wall across the doorway
+            # -- a temple with no way in, while verify still reports it
+            # enterable because verify reads the tilemap, not the placements.
+            face = civic_wall or ext_wall
+            glass, entry = civic_window or window, civic_door or door_asset
             nook = civic_corner
         else:
             variant = zlib.crc32(bid.encode()) % len(wall_variants)

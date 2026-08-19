@@ -143,7 +143,9 @@ The convention falls out of how a piece's min corner moves as `rot` changes.
 Pin by **exact name**, never by tag. Tags describe material, not look — selecting
 by tag once produced a medieval town with desert floors, shogun interiors and a
 fishing net for water. `Palette.validate()` enforces footprints and will refuse
-to build: `CELL_ROLES` must resolve to 1.0×1.0 assets, `BLOCK_ROLES` to 2.0×2.0,
+to build: `CELL_ROLES` must resolve to 1.0×1.0 assets (this includes the
+wall-course corner roles, which must also match the wall's height, or every
+storey above a corner drifts), `BLOCK_ROLES` to 2.0×2.0,
 and `WALL_SEGMENT_ROLES` must match the wall's footprint.
 
 Derive every placement offset from the asset's collider bounds

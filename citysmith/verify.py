@@ -206,6 +206,7 @@ def verify(tm: TileMap, *, asset_count: int | None = None, slab_count: int | Non
             "pass" if (max_slab_bytes or 0) <= 30720 else "fail", "slab export", detail
         )
 
+
     return report
 
 
@@ -302,3 +303,41 @@ def tilemap_svg(tm: TileMap, *, scale: int = 3, overlay: bool = True) -> str:
         )
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def check_placements(builder, tm) -> list[str]:
+    """Check the *emitted geometry*, not the tile grid.
+
+    Everything else in this module reads the TileMap, which is the plan --
+    not what was actually built. That blind spot is real: a style missing a
+    civic door once laid solid wall across five doorways while this report
+    still said 100% of buildings were enterable, because the tilemap still
+    had a doorway recorded there. These checks look at the placements.
+    """
+    problems: list[str] = []
+    placements = builder.placements
+
+    off_grid = [
+        p for p in placements
+        if abs(p.x * 2 - round(p.x * 2)) > 0.01 or abs(p.z * 2 - round(p.z * 2)) > 0.01
+    ]
+    # Props are deliberately jittered off-lattice; tiles never may be.
+    tiles_off = [p for p in off_grid if builder.palette.catalog.by_id(p.asset_id) is None
+                 or builder.palette.catalog.by_id(p.asset_id).kind != "prop"]
+    if tiles_off:
+        problems.append(
+            f"{len(tiles_off)} tile placements are off the half-tile grid "
+            f"(first at x={tiles_off[0].x}, z={tiles_off[0].z}) -- minis with "
+            "grid snap will not line up with the floors")
+
+    planned = sum(len(v) for v in tm.doors.values())
+    door_ids = {
+        a.id for a in builder.palette.catalog.assets if "door" in a.name.lower()
+    }
+    built = sum(1 for p in placements if p.asset_id in door_ids)
+    if built < planned:
+        problems.append(
+            f"{planned - built} of {planned} planned doorways were not built as "
+            "doors -- a doorway that resolves to nothing becomes solid wall")
+    return problems
+
