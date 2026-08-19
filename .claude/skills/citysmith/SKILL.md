@@ -23,7 +23,7 @@ Start here. Do not invent flags — check `python -m citysmith <cmd> --help`.
 python -m citysmith catalog build                       # once per TaleSpire install
 python -m citysmith import mytown.json                  # -> out/layout.json + layout.svg
 python -m citysmith verify out/layout.json              # cheap sanity check
-python -m citysmith build out/layout.json --stem mytown # -> out/mytown-NN.slab.txt
+python -m citysmith build out/layout.json --stem mytown # -> out/mytown-rNNcNN[+N].slab.txt
 ```
 `import`: `--house-ft` (scale anchor, default 20), `--feet-per-unit` (override),
 `--margin-ft` (suburb kept outside walls, default 60), `--no-clip`, `--name`,

@@ -10,8 +10,9 @@ It also has a self-contained procedural city generator and an interior
 floorplan builder, but the MFCG path is the one that produces a whole town.
 
 ```
-forest_church.json ──▶ layout.json ──▶ raster ──▶ forest-01.slab.txt ──▶ Ctrl+V
-  (Watabou export)      + layout.svg    + city-raster.svg   forest-02.slab.txt
+forest_church.json ──▶ layout.json ──▶ raster ──▶ forest-r00c00+126.slab.txt ──▶ Ctrl+V
+  (Watabou export)      + layout.svg    + city-raster.svg   forest-r08c12+126.slab.txt
+                                                            forest-r17c08+45.slab.txt
 ```
 
 ## Prerequisites
@@ -49,8 +50,10 @@ python -m citysmith import mytown.json
 ```
 
 Writes `out/layout.json` and `out/layout.svg`. The tile scale is *derived*: the
-map is anchored to a real median house frontage (`--house-ft`, default 20 ft),
-and the tile count follows. `--margin-ft` (default 60) sets how much suburb is
+map is anchored to a real median building width (`--house-ft`, default 35 ft),
+and the tile count follows. 35 is chosen for play: below about 30, most
+buildings are too small to stand a party in — at 20 only 31% of them clear a
+3×3 interior, at 35 it is 94%, and above 35 buys no further playability. `--margin-ft` (default 60) sets how much suburb is
 kept outside the walls; `--no-clip` keeps the entire export. Any playability
 warnings (buildings too small to fight in, streets too narrow) print here.
 
@@ -66,17 +69,34 @@ python -m citysmith verify out/layout.json
 python -m citysmith build out/layout.json --stem mytown
 ```
 
-Writes `out/mytown-01.slab.txt`, `-02`, … plus `out/city-raster.svg`, and
-prints the same verification report. Useful flags:
-`--style {medieval,cyberpunk}`, `--seed N`, `--storeys N` (ceiling on building
-height, default 3), `--no-roofs`, `--no-bridges`, `--max-assets N` (default
-9000, controls slab splitting), `--crop X,Z,W,D` to build one region for a
-staged in-game test, `--scale N` for the raster SVG.
+Writes one file per chunk — `out/mytown-r00c00+126.slab.txt` and friends —
+plus `out/city-raster.svg`, and prints the verification report followed by a
+map of which chunk covers which tile range.
+
+Chunks are cut on a **spatial grid** and the printed map shows which cells are
+written and which were skipped as open country — on a typical town about a
+fifth of the map is empty field and is never emitted at all.
+
+Detection and pasting pull opposite ways: a fine grid can see (and skip) more
+empty ground, but writing one file per cell would mean dozens of pastes. So
+`build` detects on a fine grid, then **packs** the surviving cells back up to
+the asset budget, walking the grid so each emitted slab is a contiguous run of
+neighbouring cells. Each file is therefore a connected swathe of the map — you
+can paste a subset and get a coherent piece of town, though the split is chosen
+by the byte budget, not by district boundaries.
+
+Useful flags: `--style {medieval,cyberpunk}`, `--seed N`, `--storeys N`
+(ceiling on building height, default 3), `--no-roofs`, `--no-bridges`,
+`--max-assets N` (per-chunk asset cap), `--chunk-tiles N` (detection grid, 8
+skips more but emits more before packing), `--keep-open-country` to write the
+empty chunks too, `--crop X,Z,W,D` to build one region for a staged in-game
+test, `--scale N` for the raster SVG.
 
 **6. Paste into TaleSpire.** Open a slab file, copy the whole contents, and in
 build mode press `Ctrl+V`. The slab arrives in hand at the cursor — commit it
-with a left press held for about a fifth of a second. Multi-chunk maps must all
-be committed at the *same* grid cell without moving the camera.
+with a left press held for about a fifth of a second. Every chunk is committed
+at the *same* grid cell without moving the camera; order does not matter, and
+you may paste a subset.
 
 **Read [docs/pasting-into-talespire.md](docs/pasting-into-talespire.md) before
 your first paste.** The interaction is unforgiving and the failure modes look
@@ -90,7 +110,7 @@ like the tool is broken.
 | `out/layout.json` | The imported town in 5 ft tiles: walls, gates, roads, districts, buildings, areas. The stable intermediate — hand-edit it if you like. |
 | `out/layout.svg` | Polygonal reference map of the import. |
 | `out/city-raster.svg` | The rasterised tile grid, with unreachable pockets in red, gates in yellow, added bridges in blue. This is the file to look at when something is wrong. |
-| `out/<stem>-NN.slab.txt` | The pasteable slabs, base64 of gzipped binary. |
+| `out/<stem>-rNNcNN[+N].slab.txt` | The pasteable chunks, base64 of gzipped binary. The name is the grid cell it starts at; `+N` means it spans N more cells. |
 
 The procedural path additionally writes `out/city.json` / `city.svg`,
 `out/<site>.plan.json` / `.plan.svg`, and `out/<site>.slab.txt`.
@@ -98,10 +118,14 @@ The procedural path additionally writes `out/city.json` / `city.svg`,
 ## Known limits
 
 - **30,720 compressed bytes per slab.** A whole town does not fit, so `build`
-  splits it into spatial chunks. Every chunk carries a registration marker tile
-  at the *whole map's* origin so all chunks share one bounding box — paste them
-  all at one anchor and they assemble. Move the camera between pastes and they
-  don't.
+  cuts it on a spatial grid. Every chunk carries a registration marker tile at
+  the *whole map's* origin so all chunks share one bounding box — paste them at
+  one anchor and they assemble, in any order. Move the camera between pastes
+  and they don't.
+- **Chunk size trades two ways.** Detection can only skip a region it can see,
+  so a fine grid skips more open country; pasting wants few files. `build`
+  detects fine and then packs surviving chunks back up to the asset budget,
+  walking the grid so each emitted slab is a contiguous region.
 - **1 tile = 5 ft, and a creature occupies one tile.** That is the scale
   everything is derived from. A town whose median house is under ~4 tiles across
   has no room to fight indoors; `import` warns when the derived scale lands there.
@@ -111,7 +135,8 @@ The procedural path additionally writes `out/city.json` / `city.svg`,
 - **No creatures.** `creatureCount` is always 0 in the slabs we emit.
 - **No UI.** `cli.py` is a thin shell over the core modules; a UI would slot in
   without touching generation code, but it does not exist yet.
-- **Multi-chunk pasting is manual.** The 17-chunk rollout was done by hand.
+- **Pasting is manual.** Each chunk is a separate `Ctrl+V` and commit; a
+  typical town is a handful of them.
 
 ## The other pipeline: procedural city + interiors
 

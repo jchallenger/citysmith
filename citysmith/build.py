@@ -379,10 +379,12 @@ def _fuse(run: list["SlabChunk"]) -> "SlabChunk":
     z0 = min(ch.z0 for ch in run); z1 = max(ch.z1 for ch in run)
     first = run[0]
     # quad suffixes the label, so "+3" reads as "starts here, spans 4 chunks".
+    covers = tuple(c for ch in run for c in (ch.covers or ((ch.row, ch.col),)))
     return SlabChunk(
         row=first.row, col=first.col,
         quad=f"+{len(run) - 1}",
         x0=x0, z0=z0, x1=x1, z1=z1, slab=Slab(placements), open_country=False,
+        covers=covers,
     )
 
 
@@ -404,6 +406,9 @@ class SlabChunk:
     z1: int
     slab: Slab
     open_country: bool = False
+    #: Grid cells this chunk covers. One cell normally; packing
+    #: fuses many, and the map must still mark all of them.
+    covers: tuple[tuple[int, int], ...] = ()
 
     @property
     def label(self) -> str:

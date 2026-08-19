@@ -52,21 +52,34 @@ arrives at the **cursor**, snapped to the global grid, anchored by its own
 bounding-box corner. Copying a placed slab back out returns it normalised to
 its own corner, which confirms the anchoring is relative.
 
-This is the whole reason multi-chunk boards need care. `build` cuts a town into
-spatial chunks; each chunk covers a different band of the map and would
+This is the whole reason multi-chunk boards need care. `build` cuts a town on a
+spatial grid; each chunk covers a different region of the map and would
 otherwise have a different bounding-box corner, so pasting them all at one
-anchor would stack them on top of each other. `Builder.to_slabs()` therefore
-adds one **registration marker** tile at the *whole map's* minimum corner to
-every chunk, giving them all an identical origin.
+anchor would scatter them. `Builder.chunk_plan()` therefore adds one
+**registration marker** tile at the *whole map's* minimum corner to every
+chunk, giving them all an identical origin.
+
+Chunk files are named for the grid cell they start at — `mytown-r08c12+126`
+begins at row 8, column 12 and spans 126 further cells. `build` prints a table
+of which chunk covers which tile range.
 
 The procedure that follows from that:
 
 1. Position the camera. **Do not move it again** until every chunk is down.
-2. Paste chunk 01, commit with a held left press.
-3. Right-click to clear, paste chunk 02, commit **over the same grid cell**.
-4. Repeat in order for every chunk.
+2. Paste a chunk, commit with a held left press.
+3. Right-click to clear, paste the next, commit **over the same grid cell**.
+4. Repeat for every chunk. **Order does not matter** — they share an origin,
+   so each lands where it belongs regardless of sequence.
 5. The registration markers stack in a single corner cell. Delete them
    afterwards if you care; they are one tile.
+
+You may paste a **subset**. Each chunk is a contiguous run of grid cells, so
+pasting two of five gives you a connected swathe of town on an otherwise empty
+board. The split is chosen by the slab byte budget rather than by district, so
+check the printed chunk map to see which file covers the ground you want.
+
+Chunks holding nothing but open country are not written at all, so a numbering
+gap in the filenames is expected, not a missing file.
 
 If the chunks come out offset from each other, the camera moved or a chunk was
 committed on a different cell — not a generator bug.

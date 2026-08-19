@@ -81,7 +81,12 @@ def _chunk_table(plan, stem: str) -> str:
         "",
     ]
 
-    emitted_cells = {(c.row, c.col) for c in plan.chunks}
+    # A packed chunk covers many cells; marking only its start cell would
+    # show most of a written map as skipped.
+    emitted_cells = {
+        cell for c in plan.chunks
+        for cell in (c.covers or ((c.row, c.col),))
+    }
     lines.append("      " + " ".join(f"c{c:02d}" for c in range(plan.cols)))
     for r in range(plan.rows):
         marks = [
@@ -96,9 +101,11 @@ def _chunk_table(plan, stem: str) -> str:
     for chunk in plan.chunks:
         name = (f"{stem}.slab.txt" if single
                 else f"{stem}-{chunk.label}.slab.txt")
+        span = f" ({len(chunk.covers)} cells)" if len(chunk.covers) > 1 else ""
         lines.append(
-            f"  {chunk.label:>10}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
-            f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets  {name}"
+            f"  {chunk.label:>12}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
+            f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets"
+            f"{span}  {name}"
         )
     for chunk in plan.skipped:
         lines.append(
