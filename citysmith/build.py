@@ -60,6 +60,48 @@ DEFAULT_CHUNK_TILES = 24
 _QUAD_Z = ("n", "s")
 _QUAD_X = ("w", "e")
 
+#: Full-cell corner pieces cost a whole tile each. On a 2x3 footprint that is
+#: four of six cells, leaving two -- not a room. Where cornering would leave
+#: fewer than this many usable interior tiles, thin edge walls are used
+#: instead: they sit on the cell boundary and consume no floor.
+MIN_USABLE_INTERIOR = 4
+
+#: Orthogonal neighbour offsets, in the same order as :data:`SIDES`.
+SIDE_OFFSETS = (("n", 0, -1), ("e", 1, 0), ("s", 0, 1), ("w", -1, 0))
+
+#: Just the offsets, for the many places that walk neighbours without caring
+#: which side they are.
+NEIGHBOURS = tuple((dx, dz) for _, dx, dz in SIDE_OFFSETS)
+
+
+def footprints(tm) -> dict[str, set[tuple[int, int]]]:
+    """The cells belonging to each building, keyed by building id.
+
+    Three separate passes used to rebuild this dict independently -- the wall
+    shell, the upper floors and the roofs -- which is how the roofs ended up
+    disagreeing with the walls about where a building was.
+    """
+    out: dict[str, set[tuple[int, int]]] = {}
+    for z in range(tm.depth):
+        row = tm.building[z]
+        for x in range(tm.width):
+            bid = row[x]
+            if bid:
+                out.setdefault(bid, set()).add((x, z))
+    return out
+
+
+def storeys_of(tm, bid: str | None, ceiling: int) -> int:
+    """A building's own storey count, clamped to ``1..ceiling``.
+
+    ``ceiling`` is the tallest building allowed on the map, not the height of
+    every building: a village is mostly single-storey cottages, and giving
+    them all the same wall made the first board look like a field of towers.
+    """
+    if not bid:
+        return 0
+    return min(max(1, tm.floors.get(bid, 1)), ceiling)
+
 
 def rotated_footprint(asset: Asset, rot: int) -> tuple[float, float]:
     """The asset's ground footprint after ``rot``, as ``(size_x, size_z)``.
@@ -146,6 +188,20 @@ class Builder:
         asset = self.palette.require(role, variant)
         self.add(place_tile(asset, tx, tz, y, rot))
         return y + asset.size_y
+
+    def surface(self, role: str, tx: int, tz: int, top_y: float,
+                variant: int = 0, rot: int = 0) -> float:
+        """Lay a ground tile so its *top* lands on ``top_y``.
+
+        Surface tiles are not all the same thickness -- cobble is 0.25 and
+        grass is 0.5 -- so laying them all from a common bottom sank every
+        street a quarter tile below the grass beside it. That is a 15 inch
+        kerb along both sides of every road on the map, on 1,234 tiles. What
+        has to line up is the surface a creature stands on, not the underside.
+        """
+        asset = self.palette.require(role, variant)
+        self.add(place_tile(asset, tx, tz, top_y - asset.size_y, rot))
+        return top_y
 
     def wall(self, role: str, tx: int, tz: int, side: str, y: float = 0.0, variant: int = 0) -> float:
         asset = self.palette.require(role, variant)
@@ -269,8 +325,7 @@ class Builder:
             for cell in cells
         ]
 
-        kept = [ch for ch in made if not ch.open_country]
-        skipped = [ch for ch in made if ch.open_country]
+        kept, skipped = _trim_open_country(made, rows, cols)
         if not skip_open_country or not kept:
             kept, skipped = made, []
 
@@ -442,6 +497,58 @@ class ChunkPlan:
     @property
     def assets_skipped(self) -> int:
         return sum(ch.count for ch in self.skipped)
+
+
+def _trim_open_country(
+    made: list["SlabChunk"], rows: int, cols: int,
+) -> tuple[list["SlabChunk"], list["SlabChunk"]]:
+    """Split chunks into kept and skipped, trimming only inward from the edge.
+
+    Open country is dropped to save bytes, but an unpasted chunk is not grass
+    -- it is *nothing*, a 24-tile square of bare board. Dropping a chunk the
+    town has built all the way around therefore punches a rectangular void
+    into the middle of the map. That is what "half generated chunks" was: two
+    enclosed cells on the Forest Church map, a 24x48 tile hole with hard
+    straight edges, surrounded on every side by finished town.
+
+    So skipping is a flood fill from outside the map rather than a per-chunk
+    test. A chunk is dropped only if it is open country *and* connected to the
+    edge of the grid through other open country. Anything the built map
+    encloses is kept, however empty it is -- a green between two districts
+    costs a few hundred assets and reads as a park; the hole where it was
+    reads as a bug.
+    """
+    # A cell over budget is subdivided into quadrants, so one (row, col) can
+    # hold several chunks. It only conducts the flood if *every* piece of it
+    # is open country -- one built quadrant makes the whole cell a barrier.
+    at_cell: dict[tuple[int, int], list[SlabChunk]] = {}
+    for ch in made:
+        at_cell.setdefault((ch.row, ch.col), []).append(ch)
+
+    # A grid cell with no placements at all conducts too, otherwise a blank
+    # column walls the fill out of the region beyond it and everything past it
+    # is kept as "enclosed".
+    porous = {
+        (r, c)
+        for r in range(rows) for c in range(cols)
+        if all(ch.open_country for ch in at_cell.get((r, c), ()))
+    }
+
+    outside: set[tuple[int, int]] = set()
+    stack = [(r, c) for r in range(rows) for c in (0, cols - 1)]
+    stack += [(r, c) for c in range(cols) for r in (0, rows - 1)]
+    while stack:
+        cell = stack.pop()
+        r, c = cell
+        if (cell in outside or cell not in porous
+                or not (0 <= r < rows and 0 <= c < cols)):
+            continue
+        outside.add(cell)
+        stack += [(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)]
+
+    kept = [ch for ch in made if (ch.row, ch.col) not in outside]
+    skipped = [ch for ch in made if (ch.row, ch.col) in outside]
+    return kept, skipped
 
 
 def _is_open_country(
@@ -781,7 +888,7 @@ _PROP_CATEGORY_BY_KIND: dict[str, str] = {
 _BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field"}
 
 
-def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
+def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float) -> None:
     """Lay the ground plane, preferring 2x2 tiles over 1x1 where it can.
 
     Open country is most of a map by area and almost all of it by tile count:
@@ -828,7 +935,7 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
                 continue
             if any(q in bank for q in quad):
                 continue   # shingle is laid one tile at a time
-            b.tile(role, x, z, 0.0)
+            b.surface(role, x, z, grade)
             covered.update(quad)
 
     # Pass 2: everything the blocks did not take.
@@ -844,15 +951,15 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
             if s == R.WATER:
                 # Water sits a tile low so it reads as a channel a creature can
                 # be pulled into, not a hole punched through the board.
-                b.tile(ground_role, x, z, -1.0)
+                b.surface(ground_role, x, z, grade - 1.0)
                 water = b.palette.resolve("water")
                 if water is not None:
-                    b.add(place_tile(water, x, z, -1.0 + water.size_y))
+                    b.add(place_tile(water, x, z, grade - 1.0))
                 continue
             role = surface_roles.get(s, ground_role)
             if (x, z) in bank and b.palette.resolve("field_1x1") is not None:
                 role = "field_1x1"          # shingle shore
-            b.tile(role, x, z, 0.0)
+            b.surface(role, x, z, grade)
 
 
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) -> None:
@@ -873,15 +980,8 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
     one with a flat cap piece; the Village kit has none, which is why our
     ridges showed an open trough.
     """
-    footprints: dict[str, set[tuple[int, int]]] = {}
-    for z in range(tm.depth):
-        for x in range(tm.width):
-            bid = tm.building[z][x]
-            if bid:
-                footprints.setdefault(bid, set()).add((x, z))
-
     def _floors_at(bid: str) -> int:
-        return min(max(1, tm.floors.get(bid, 1)), max_floors)
+        return storeys_of(tm, bid, max_floors)
 
     # Roof units are connected blocks sharing a storey count, so a terrace
     # gets one roof rather than one per party wall.
@@ -915,10 +1015,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
 
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
         roof_y = base_y + fl * storey_h
-        xs = [x for x, _ in cells]; zs = [z for _, z in cells]
-        x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
-
-        rings = {c: min(c[0] - x0, x1 - c[0], c[1] - z0, z1 - c[1]) for c in cells}
+        rings = _roof_rings(cells)
         top_ring = max(rings.values())
 
         chimney_at = None
@@ -932,22 +1029,159 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
             y = roof_y + r * rise
             if (x, z) == chimney_at and chimney is not None:
                 b.add(place_tile(chimney, x, z, y)); continue
-            if r == top_ring and cap is not None:
-                b.add(place_tile(cap, x, z, y)); continue
-            n, e, sth, w = (z - z0 == r), (x1 - x == r), (z1 - z == r), (x - x0 == r)
-            piece, rot = side, ROOF_EDGE_ROT["n"]
-            if n and w:   piece, rot = corner, ROOF_CORNER_ROT["nw"]
-            elif n and e: piece, rot = corner, ROOF_CORNER_ROT["ne"]
-            elif sth and w: piece, rot = corner, ROOF_CORNER_ROT["sw"]
-            elif sth and e: piece, rot = corner, ROOF_CORNER_ROT["se"]
-            elif n:   rot = ROOF_EDGE_ROT["n"]
-            elif e:   rot = ROOF_EDGE_ROT["e"]
-            elif sth: rot = ROOF_EDGE_ROT["s"]
-            elif w:   rot = ROOF_EDGE_ROT["w"]
-            if piece is None:
-                piece, rot = cap, 0
+            # Which way the slope falls: the sides where the roof steps back
+            # down towards the eaves. Read off the ring numbers rather than
+            # off a bounding box, so an L-shaped terrace slopes towards its
+            # real edges instead of towards the corners of the box round it.
+            fall = tuple(s for s, dx, dz in SIDE_OFFSETS
+                         if rings.get((x + dx, z + dz), -1) < r)
+            piece, rot = _roof_piece(fall, side, corner, cap)
             if piece is not None:
                 b.add(place_tile(piece, x, z, y, rot))
+
+
+#: Headroom to leave under a gate lintel, in tiles. Two tiles is 10 ft -- a
+#: loaded cart with a rider on top clears it, which is the traffic the main
+#: streets were widened for in the first place.
+GATE_HEADROOM_TILES = 2.0
+
+
+def _corners_affordable(cells: set[tuple[int, int]]) -> bool:
+    """Whether a footprint can spare a whole tile for each outside corner.
+
+    Corner pieces fill their cell. On a 2x3 cottage the four corners are four
+    of six cells, leaving two -- not a room. See :data:`MIN_USABLE_INTERIOR`.
+    """
+    xs = [x for x, _ in cells]
+    zs = [z for _, z in cells]
+    corners = sum(1 for (x, z) in cells
+                  if x in (min(xs), max(xs)) and z in (min(zs), max(zs)))
+    return (len(cells) - corners) >= MIN_USABLE_INTERIOR
+
+
+def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None:
+    """Build the town wall as a faced rampart, carried over its gates.
+
+    **The mass.** The raster gives the wall as a band of cells several thick --
+    a rampart, not a fence. The castle kit's wall pieces are 0.5 deep because
+    they are curtain wall, authored to stand *on* a cell boundary; laying one
+    per cell left a 0.5-tile slot between every pair of cells across the band,
+    so the whole circuit was daylight-striped. The mass is therefore built from
+    a full-cell block, and the thin pieces are hung on the faces that show.
+
+    **The gates.** A gate is where a main street crosses, so its cells are as
+    wide as the carriageway -- eighteen of them on the Forest Church map. They
+    used to be skipped and nothing took their place: a 35 ft breach open to the
+    sky. A gate is a *tunnel*. The passage courses stay clear so carts still
+    get through and every course above is built like the rest of the wall, so
+    the rampart runs unbroken over the road. A wall too low to give both
+    headroom and a lintel course keeps an open gate rather than a blocked one.
+
+    **The walk.** Battlements crown the cells that actually face out of town,
+    found by flooding the map from its border. Capping every cell with an
+    exposed side instead put a merlon on 61% of the mass; because the circuit
+    is a stair-stepped diagonal, those teeth pointed in every direction at
+    once and the rampart read as a comb. The cells behind the parapet are
+    paved instead, which is what makes the top of the wall a wall-walk.
+    """
+    core = b.palette.resolve("city_wall_core") or facing
+    cap_asset = b.palette.resolve("city_wall_cap")
+    walk = b.palette.resolve("city_wall_walk") or b.palette.resolve("street")
+    course = core.size_y
+
+    clear = math.ceil(GATE_HEADROOM_TILES / course) if course > 0 else wall_height
+    lintel_from = clear if clear < wall_height else None
+
+    # Gate cells are *not* flagged in ``tm.wall`` -- the raster clears the flag
+    # where a street crosses. They are still part of the mass, or the lintel
+    # has nowhere to sit and the breach stays open.
+    mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x]} | set(tm.gates)
+    outside = _outside_the_wall(tm, mass)
+
+    for (x, z) in sorted(mass):
+        gate = (x, z) in tm.gates
+        if gate and lintel_from is None:
+            continue
+        shows = [s for s, dx, dz in SIDE_OFFSETS if (x + dx, z + dz) not in mass]
+        for level in range(lintel_from if gate else 0, wall_height):
+            y = top + level * course
+            b.add(place_tile(core, x, z, y))
+            for s in shows:
+                b.add(place_wall(facing, x, z, s, y))
+
+        crown = top + wall_height * course
+        faces_out = any((x + dx, z + dz) in outside for _, dx, dz in SIDE_OFFSETS)
+        if faces_out and cap_asset is not None:
+            b.add(place_tile(cap_asset, x, z, crown))
+        elif walk is not None:
+            b.add(place_tile(walk, x, z, crown))
+
+
+def _outside_the_wall(tm, mass: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    """Open ground the wall shuts out, by flooding in from the map border.
+
+    What is left over inside the circuit is the town. The distinction is what
+    lets battlements face outwards: a parapet on every exposed cell is not a
+    battlement, it is a hedge of teeth.
+    """
+    out: set[tuple[int, int]] = set()
+    stack = [(x, z) for x in range(tm.width) for z in (0, tm.depth - 1)]
+    stack += [(x, z) for z in range(tm.depth) for x in (0, tm.width - 1)]
+    while stack:
+        x, z = stack.pop()
+        if (not (0 <= x < tm.width and 0 <= z < tm.depth)
+                or (x, z) in out or (x, z) in mass):
+            continue
+        out.add((x, z))
+        stack += [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)]
+    return out
+
+
+def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
+    """How many courses in from the eaves each cell sits, by breadth-first
+    search inward from the block's real boundary.
+
+    The predecessor measured distance to the block's *bounding box* instead.
+    On anything but a rectangle that is wrong twice over: cells on a real edge
+    get counted as interior and float a course too high, and the box's empty
+    corners are roofed over nothing. One L-shaped terrace on the Forest Church
+    map had 27 such cells.
+    """
+    rings: dict[tuple[int, int], int] = {}
+    frontier = [c for c in cells
+                if any((c[0] + dx, c[1] + dz) not in cells for dx, dz in NEIGHBOURS)]
+    depth = 0
+    while frontier:
+        nxt: list[tuple[int, int]] = []
+        for c in frontier:
+            if c in rings:
+                continue
+            rings[c] = depth
+            for dx, dz in NEIGHBOURS:
+                n = (c[0] + dx, c[1] + dz)
+                if n in cells and n not in rings:
+                    nxt.append(n)
+        frontier, depth = nxt, depth + 1
+    return rings
+
+
+def _roof_piece(fall: tuple[str, ...], side, corner, cap):
+    """The roof asset and rotation for a cell, given the sides it slopes to.
+
+    Two adjacent falls are an outside corner; one is a straight slope; none is
+    a cell with roof all round it, which takes the flat cap. Three or four --
+    the tip of a one-cell-wide arm -- also takes the cap: no single hip piece
+    describes a point, and a slope there would show its open underside.
+    """
+    if len(fall) == 1:
+        return side, ROOF_EDGE_ROT[fall[0]]
+    if len(fall) == 2:
+        which = CORNER_BY_SIDES.get(frozenset(fall))
+        if which is not None:
+            return corner or side, ROOF_CORNER_ROT[which]
+        return side, ROOF_EDGE_ROT[fall[0]]   # opposite sides: a ridge run
+    return cap, 0
 
 
 #: Roof rotations, measured from a hand-built community cottage. A quarter
@@ -990,9 +1224,6 @@ CORNER_BY_SIDES = {
 
 #: Building kinds built in civic fabric rather than common house fabric.
 CIVIC_KINDS = frozenset({"temple", "guildhall", "manor", "barracks"})
-
-#: Neighbour offsets in the same order as :data:`SIDES`.
-SIDE_OFFSETS = (("n", 0, -1), ("e", 1, 0), ("s", 0, 1), ("w", -1, 0))
 
 
 def build_from_tilemap(
@@ -1037,7 +1268,7 @@ def build_from_tilemap(
         R.PIER: "street",
         R.FLOOR: "floor",
     }
-    _lay_terrain(b, tm, surface_roles)
+    _lay_terrain(b, tm, surface_roles, grade=floor.size_y)
 
     top = floor.size_y
     storey_h = ext_wall.size_y
@@ -1082,26 +1313,13 @@ def build_from_tilemap(
     corner_variants = [_usable_corner(palette.resolve("wall_corner", v)) for v in range(3)]
     civic_corner = _usable_corner(palette.resolve("wall_corner_civic"))
 
-    # Full-cell corner pieces cost a whole tile each. On a 2x3 footprint that
-    # is four of six cells, leaving two -- not a room. Where cornering would
-    # leave fewer than this many usable interior tiles, fall back to thin edge
-    # walls, which sit on the cell boundary and consume no floor.
-    MIN_USABLE_INTERIOR = 4
-    _fp: dict[str, list[tuple[int, int]]] = {}
-    for _z in range(tm.depth):
-        for _x in range(tm.width):
-            _b = tm.building[_z][_x]
-            if _b:
-                _fp.setdefault(_b, []).append((_x, _z))
-    _corner_ok: dict[str, bool] = {}
-    for _b, _cs in _fp.items():
-        _xs = [c[0] for c in _cs]; _zs = [c[1] for c in _cs]
-        _c = sum(1 for (x, z) in _cs
-                 if x in (min(_xs), max(_xs)) and z in (min(_zs), max(_zs)))
-        _corner_ok[_b] = (len(_cs) - _c) >= MIN_USABLE_INTERIOR
+    plan = footprints(tm)
+    corner_ok = {
+        bid: _corners_affordable(cells) for bid, cells in plan.items()
+    }
 
     for bid, cells in tm.perimeter.items():
-        floors = min(max(1, tm.floors.get(bid, 1)), storeys)
+        floors = storeys_of(tm, bid, storeys)
         civic = bid.split("-")[0] in CIVIC_KINDS
         if civic:
             # Fall back to the common-house piece per slot: a style with no
@@ -1117,7 +1335,7 @@ def build_from_tilemap(
             face = wall_variants[variant]
             glass, entry = window, door_asset
             nook = corner_variants[variant]
-        if not _corner_ok.get(bid, True):
+        if not corner_ok.get(bid, True):
             nook = None   # too small to spend cells on corners
 
         # Group the building's exposed edges by cell. A cell with two adjacent
@@ -1161,35 +1379,16 @@ def build_from_tilemap(
     # to the underside of the roof. One slab per cell per storey above ground.
     upper = palette.resolve("floor_upper")
     if upper is not None:
-        footprint: dict[str, list[tuple[int, int]]] = {}
-        for z in range(tm.depth):
-            for x in range(tm.width):
-                bid = tm.building[z][x]
-                if bid:
-                    footprint.setdefault(bid, []).append((x, z))
-        for bid, cells_xy in sorted(footprint.items()):
-            floors = min(max(1, tm.floors.get(bid, 1)), storeys)
-            for level in range(1, floors):
+        for bid, cells_xy in sorted(plan.items()):
+            for level in range(1, storeys_of(tm, bid, storeys)):
                 y = top + level * storey_h
-                for x, z in cells_xy:
+                for x, z in sorted(cells_xy):
                     b.add(place_tile(upper, x, z, y))
 
     if roof_asset is not None:
         _lay_roofs(b, tm, top, storey_h, storeys)
 
-    # Town wall: stacked, with gate cells left open, finished with a half-
-    # height parapet course so the wall top reads as a battlement rather than
-    # a sheared-off stack.
-    cap = b.palette.catalog.find(name="castle wall 1x1 half", pack="Medieval Fantasy")
-    cap_asset = cap[0] if cap else None  # absent pack -> no cap, harmless
-    for z in range(tm.depth):
-        for x in range(tm.width):
-            if not tm.wall[z][x] or (x, z) in tm.gates:
-                continue
-            for level in range(wall_height):
-                b.add(place_tile(town_wall, x, z, top + level * town_wall.size_y))
-            if cap_asset is not None:
-                b.add(place_tile(cap_asset, x, z, top + wall_height * town_wall.size_y))
+    _lay_town_wall(b, tm, town_wall, top, wall_height)
 
     _dress_districts(b, tm)
 

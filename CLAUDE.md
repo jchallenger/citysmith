@@ -108,6 +108,55 @@ actually matters, all confirmed in-game:
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
   `Shift`+scroll raise/lower.
 
+## Asset geometry rules (learned the hard way, in this order)
+
+Three separate defects on the same board all came from assuming an asset's
+shape instead of reading it. The rules that fall out:
+
+- **`place_tile` needs an asset that fills the cell.** The medieval castle kit
+  is *curtain wall*: `castle wall 1x1` is 1.0 x 2.0 x **0.5**, authored to
+  stand on a cell boundary. Laying one per cell across a rampart four cells
+  thick left a 0.5-tile slot between every pair of cells -- 2.5 ft of daylight
+  through the wall, for the whole circuit. A mass gets a full-cell block
+  (`city_wall_core`) with the thin pieces hung on the faces that show.
+- **Surface tiles align at the top, not the bottom.** Cobble is 0.25 thick and
+  grass is 0.5. Laid from a common bottom, every street sat a quarter tile
+  below the grass -- a 15 inch kerb along both sides of every road, on 1,234
+  tiles. `Builder.surface()` places by top height; use it for anything a
+  creature stands on.
+- **A crenellation is not a cap.** Merlons belong on the cells that face out
+  of town, found by flooding the map from its border. Putting one on every
+  cell with an exposed side crowned 61% of the mass, and because the circuit
+  is a stair-stepped diagonal those teeth pointed every which way; the wall
+  read as a comb. The cells behind the parapet are paved as a wall-walk.
+
+The general form: **an asset's `ColliderBoundsBound` is data, and shape
+assumptions are bugs waiting for a big enough map to become visible.**
+
+## Metrics must read the artifact, not the plan
+
+This has now bitten four times, and each time the report said the map was
+fine while the board was visibly broken:
+
+1. `verify` read the TileMap, so doorways built as solid wall still scored
+   100% enterable.
+2. The street check read a tile's *class*, so a main-street tile with a house
+   on three sides scored compliant.
+3. Wall continuity was measured as orthogonal cell adjacency, which a rampart
+   of 0.5-deep fins passes perfectly.
+4. Chunk skipping was judged per chunk, so two chunks enclosed by finished
+   town were dropped and pasted as a rectangular hole in the ground.
+
+`verify.check_placements` and `verify.enclosed_voids` measure emitted boxes and
+the written chunk plan respectively. **New checks go there, not into the
+TileMap pass.** `verify._Occupancy` reconstructs solid geometry from the
+placements and is the tool for "is there actually anything here".
+
+Corollary that cost an hour: **when a measurement looks wrong, check for stale
+artifacts before debugging the code.** A tree-species count read 80/15/5
+against a 62/30/8 target purely because a previous build's chunk files were
+still in `out/`.
+
 ## Testing
 
 `python -m pytest -q`. Tests assert invariants (no overlapping buildings, no
@@ -120,5 +169,11 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
 - Local UI. Deliberately deferred; `cli.py` is a thin shell over the core
   modules so a UI can be added without touching generation code.
 - Creature/mini placement (`creatureCount` is always 0 in a v2 slab).
-- Automated rollout of the 17 city chunks. The mechanics are all verified, but
-  the pastes are still driven by hand one at a time.
+- Interiors. Footprints are now ~650 sq ft, which is finally big enough for
+  rooms to be worth generating; `floorplan.py` already does the geometry, but
+  nothing wires it onto a second board per building.
+- A tapered map edge. The border ring still ends on a hard straight cut, so
+  the map reads as a cropped rectangle from outside (finding 8).
+- Gate furniture. The gate is a tunnel through the rampart with the wall
+  carried over it, but there is no arch dressing, no doors and no gatehouse
+  towers flanking the opening.

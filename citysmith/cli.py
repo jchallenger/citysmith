@@ -364,7 +364,7 @@ def cmd_build(args) -> int:
     from .layout import Layout
     from .raster import rasterize
     from .build import build_from_tilemap
-    from .verify import check_placements, tilemap_svg, verify
+    from .verify import check_placements, enclosed_voids, tilemap_svg, verify
 
     layout = Layout.load(args.layout)
     tm = rasterize(layout, bridges=not args.no_bridges)
@@ -403,6 +403,8 @@ def cmd_build(args) -> int:
     # tiles hide.
     for problem in check_placements(builder, tm):
         report.add("fail", "placements", problem)
+    for problem in enclosed_voids(plan):
+        report.add("fail", "chunk coverage", problem)
 
     print(f"\n{plan.assets_emitted:,} assets in {len(written)} chunk(s)"
           + (f"; {len(plan.skipped)} open-country chunk(s) skipped "

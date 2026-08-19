@@ -272,6 +272,46 @@ MEDIEVAL = Style(
             _tile(group="wall", tags=("stone", "wall"), exclude_tags=_NOT_PLAIN_WALL,
                   height=2.0, exclude=_WRONG_SETTING, **_MED, **_WALLSZ),
         ],
+        # The rampart's mass. The castle kit's wall pieces are 0.5 deep --
+        # they are *curtain wall*, authored to stand on a cell boundary, not
+        # to fill a cell. Laying one per cell across a rampart four cells
+        # thick left a 0.5-tile slot between every course: 2.5 ft of daylight
+        # through the wall, the length of the whole circuit. The mass is built
+        # from a full-cell block and the thin pieces face it.
+        "city_wall_core": [
+            _tile(name="castle wall corner 1x1 base", **_MED),
+            _tile(name="Castle Ruins Wallbase 01", **_MED),
+            _tile(name="Cave Wall 01", **_MED),
+        ],
+        # Battlements, on the outer ring only, so the middle of the rampart
+        # stays walkable as a wall-walk. Full-cell, unlike the half piece this
+        # replaces -- which was also a 0.5-deep curtain fragment.
+        "city_wall_cap": [_tile(name="castle merlon 1x1", **_MED)],
+        # The wall-walk behind the parapet, so the top of the rampart is a
+        # surface a party can be fought along rather than the bare top face of
+        # the blocks that make up its mass.
+        #
+        # Weathered stone, not dressed floor. Six candidates were pasted side
+        # by side on wall blocks and looked at: "castle floor 1x1" is a clean
+        # interior flag that reads as a bright ribbon laid along the rampart,
+        # and "castle floor 1x1 edge" is brighter still. The ruins floors sit
+        # in the same tonal range as the wall they cap.
+        "city_wall_walk": [
+            _tile(name="Castle Ruins floor stone 1x1", **_MED),
+            _tile(name="Castle Ruins Floor - Small", **_MED),
+            _tile(name="castle floor 1x1", **_MED),
+        ],
+        # -- gatehouse -----------------------------------------------------
+        # A gate used to be an unbuilt hole: the cells were skipped and
+        # nothing took their place, leaving a 35 ft breach through a rampart.
+        # The portcullis is 4 tiles wide, which is also the main-street width,
+        # so a gate spans one carriageway.
+        "city_gate": [
+            _tile(name="Door - Portcullis double", **_MED),
+            _tile(name="Door - Portcullis", **_MED),
+            _tile(name="Door - Metal Gate double", **_MED),
+        ],
+        "city_gate_arch": [_tile(name="Castle Ruins Arch 02", **_MED)],
     },
     props={
         "tavern": [_prop("table", **_MED), _prop("chair", **_MED), _prop("barrel", **_MED),

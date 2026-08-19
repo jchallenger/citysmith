@@ -456,5 +456,115 @@ def check_placements(builder, tm) -> list[str]:
         problems.append(
             f"{planned - built} of {planned} planned doorways were not built as "
             "doors -- a doorway that resolves to nothing becomes solid wall")
+
+    problems.extend(_wall_solidity(builder, tm))
     return problems
+
+
+class _Occupancy:
+    """Where solid geometry actually sits, as boxes on a horizontal slice.
+
+    Reconstructed from the placements and each asset's measured bounds, so it
+    answers "is there anything at this point" for the thing that was emitted
+    -- not for the thing the tile grid says was intended.
+    """
+
+    def __init__(self, builder, y: float):
+        from .build import rotated_footprint
+
+        self._cells: dict[tuple[int, int], list[tuple[float, float, float, float]]] = {}
+        catalog = builder.palette.catalog
+        for p in builder.placements:
+            asset = catalog.by_id(p.asset_id)
+            if asset is None or asset.kind == "prop":
+                continue           # scenery is not structure
+            if not (p.y - 1e-6 <= y <= p.y + asset.size_y + 1e-6):
+                continue
+            sx, sz = rotated_footprint(asset, p.rot)
+            box = (p.x, p.z, p.x + sx, p.z + sz)
+            for cx in range(int(box[0]) - 1, int(box[2]) + 2):
+                for cz in range(int(box[1]) - 1, int(box[3]) + 2):
+                    self._cells.setdefault((cx, cz), []).append(box)
+
+    def solid_at(self, px: float, pz: float) -> bool:
+        for x0, z0, x1, z1 in self._cells.get((int(px), int(pz)), ()):
+            if x0 - 1e-6 <= px <= x1 + 1e-6 and z0 - 1e-6 <= pz <= z1 + 1e-6:
+                return True
+        return False
+
+
+#: Where inside a cell to sample for solidity. Corners and centre, kept off
+#: the cell boundary so a piece that merely abuts the cell does not count.
+_SAMPLES = (0.17, 0.5, 0.83)
+
+
+def _wall_solidity(builder, tm) -> list[str]:
+    """Check the town wall is solid masonry, not a row of fins.
+
+    The castle kit's wall pieces are 0.5 deep -- curtain wall, meant to stand
+    on a cell boundary. Laying one per cell across a rampart several cells
+    thick leaves a 0.5-tile slot between every pair of cells: 2.5 ft of
+    daylight straight through, for the whole circuit. Nothing in the tile grid
+    can show that, because in the grid every one of those cells is wall. Only
+    the emitted boxes can, so this samples them.
+    """
+    gates = set(tm.gates)
+    mass = [(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x] and (x, z) not in gates]
+    if not mass:
+        return []
+
+    core = builder.palette.resolve("city_wall_core") or builder.palette.resolve("city_wall")
+    if core is None:
+        return []
+    floor = builder.palette.resolve("floor")
+    base = floor.size_y if floor is not None else 0.0
+    # Mid-height of the second course: clear of the ground plane below and of
+    # the battlements above, so anything missing here is a hole in the wall.
+    occupancy = _Occupancy(builder, base + 1.5 * core.size_y)
+
+    holed = [
+        (x, z) for (x, z) in mass
+        if not all(occupancy.solid_at(x + i, z + j)
+                   for i in _SAMPLES for j in _SAMPLES)
+    ]
+    if not holed:
+        return []
+    return [
+        f"{len(holed)} of {len(mass)} town-wall cells have gaps in the masonry "
+        f"(first at x={holed[0][0]}, z={holed[0][1]}) -- a curtain-wall piece "
+        "laid one per cell does not fill the cell"
+    ]
+
+
+def enclosed_voids(plan) -> list[str]:
+    """Chunks dropped as open country that the map has built all the way round.
+
+    An unpasted chunk is not grass, it is bare board, so dropping one the town
+    encloses punches a rectangular hole into the middle of the map. Skipping
+    is supposed to trim inward from the edge only; this is the check that says
+    so, measured on the plan that will actually be written.
+    """
+    kept = {(ch.row, ch.col) for ch in plan.chunks}
+    reachable: set[tuple[int, int]] = set()
+    stack = [(r, c) for r in range(plan.rows) for c in (0, plan.cols - 1)]
+    stack += [(r, c) for c in range(plan.cols) for r in (0, plan.rows - 1)]
+    while stack:
+        r, c = stack.pop()
+        if (r, c) in reachable or (r, c) in kept:
+            continue
+        if not (0 <= r < plan.rows and 0 <= c < plan.cols):
+            continue
+        reachable.add((r, c))
+        stack += [(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)]
+
+    holes = [ch for ch in plan.skipped if (ch.row, ch.col) not in reachable]
+    if not holes:
+        return []
+    where = ", ".join(f"r{ch.row:02d}c{ch.col:02d}" for ch in holes[:4])
+    return [
+        f"{len(holes)} skipped chunk(s) are enclosed by built map ({where}) -- "
+        f"{sum(ch.count for ch in holes):,} assets missing from the middle of "
+        "the board, which pastes as a rectangular hole in the ground"
+    ]
 

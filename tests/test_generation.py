@@ -530,3 +530,123 @@ def test_packing_preserves_every_placement_and_one_origin():
     assert len(packed.chunks) <= len(loose.chunks)
     corners = {c.slab.bounds()[0] for c in packed.chunks}
     assert len(corners) == 1, f"chunks must share one origin, got {corners}"
+
+
+def test_enclosed_open_country_is_kept():
+    """A chunk the town has built all the way round is not trimmable.
+
+    An unpasted chunk is bare board, not grass, so dropping an enclosed one
+    punches a rectangular hole into the middle of the map. This is the
+    "half generated chunks" defect: two enclosed cells on the Forest Church
+    map left a 24x48 tile void with hard straight edges.
+    """
+    b = _builder()
+    _ground_field(b, 12, 12)
+    # Build on every chunk of a 3x3 grid except the middle one.
+    for tz in (1, 5, 9):
+        for tx in (1, 5, 9):
+            if (tx, tz) != (5, 5):
+                b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert (plan.rows, plan.cols) == (3, 3)
+    assert "r01c01" in [c.label for c in plan.chunks]
+    assert plan.skipped == []
+
+
+def test_open_country_is_still_trimmed_from_the_edges():
+    """Enclosure is the only thing that protects a chunk, not emptiness."""
+    b = _builder()
+    _ground_field(b, 12, 12)
+    b.add(place_wall(WALL, 1, 1, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert [c.label for c in plan.chunks] == ["r00c00"]
+    assert len(plan.skipped) == 8
+
+
+def test_enclosed_voids_reports_a_hole_in_the_middle():
+    from citysmith.build import SlabChunk, ChunkPlan
+    from citysmith.slab import Slab
+    from citysmith.verify import enclosed_voids
+
+    def chunk(r, c, empty):
+        return SlabChunk(row=r, col=c, quad="", x0=c, z0=r, x1=c + 1, z1=r + 1,
+                         slab=Slab([place_tile(GROUND, c, r, 0.0)]),
+                         open_country=empty)
+
+    made = [chunk(r, c, (r, c) == (1, 1)) for r in range(3) for c in range(3)]
+    plan = ChunkPlan([m for m in made if not m.open_country],
+                     [m for m in made if m.open_country], 3, 3, 1, (0, 0))
+    assert enclosed_voids(plan)
+
+    edge = [chunk(r, c, (r, c) == (0, 0)) for r in range(3) for c in range(3)]
+    plan = ChunkPlan([m for m in edge if not m.open_country],
+                     [m for m in edge if m.open_country], 3, 3, 1, (0, 0))
+    assert enclosed_voids(plan) == []
+
+
+def test_roof_rings_follow_the_real_shape_not_the_bounding_box():
+    """An L-shaped terrace slopes to its own edges.
+
+    Ring depth used to be distance to the block's bounding box. On an L that
+    counts cells on a real edge as interior, so they float a course too high.
+    """
+    from citysmith.build import _roof_rings
+
+    # An L: a 4x4 block with its whole north-east quarter bitten out.
+    cells = ({(x, z) for x in range(4) for z in range(4)}
+             - {(x, z) for x in (2, 3) for z in (0, 1)})
+    rings = _roof_rings(cells)
+
+    # (1, 1) sits one cell in from every side of the *bounding box*, so the
+    # old measure called it ring 1 and floated it a course above the eaves.
+    # Its east neighbour is part of the bite, so it is really on an edge.
+    assert rings[(1, 1)] == 0
+    assert (2, 1) not in rings, "the bite is not roofed"
+
+    # The one genuinely interior cell of the L is where the arms are widest.
+    assert rings[(1, 2)] == 1
+
+    solid = {(x, z) for x in range(4) for z in range(4)}
+    assert _roof_rings(solid)[(1, 1)] == 1
+
+
+def test_roof_piece_caps_the_tip_of_a_narrow_arm():
+    """Three or four falls is a point; no hip piece describes one."""
+    from citysmith.build import _roof_piece
+
+    side, corner, cap = "SIDE", "CORNER", "CAP"
+    assert _roof_piece(("n",), side, corner, cap)[0] == side
+    assert _roof_piece(("n", "w"), side, corner, cap)[0] == corner
+    assert _roof_piece(("e", "w"), side, corner, cap)[0] == side   # a ridge run
+    assert _roof_piece(("n", "e", "w"), side, corner, cap)[0] == cap
+    assert _roof_piece((), side, corner, cap)[0] == cap
+
+
+def test_surface_tiles_align_at_the_top_not_the_bottom():
+    """Cobble is 0.25 thick and grass is 0.5; what must line up is the walk.
+
+    Laying both from a common bottom sank every street a quarter tile below
+    the grass beside it -- a 15 inch kerb along both sides of every road.
+    """
+    from citysmith.build import Builder
+
+    thin = Asset(id="f" * 8 + "-1111-2222-3333-444444444444", name="cobble",
+                 kind="tile", pack="p", group_tag="floor", tags=(), folder="",
+                 size_x=1.0, size_y=0.25, size_z=1.0)
+
+    class TwoThicknesses:
+        def resolve(self, role, variant=0):
+            return thin if role == "street" else GROUND
+
+        def require(self, role, variant=0):
+            return self.resolve(role, variant)
+
+    b = Builder(TwoThicknesses())
+    b.surface("ground", 0, 0, 0.5)
+    b.surface("street", 1, 0, 0.5)
+
+    grass, cobble = b.placements
+    assert grass.y == 0.0 and cobble.y == 0.25
+    assert grass.y + GROUND.size_y == cobble.y + thin.size_y == 0.5
