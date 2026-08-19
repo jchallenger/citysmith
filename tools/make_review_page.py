@@ -149,7 +149,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 8</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 9</div>
   <h1>Forest Church</h1>
   <p class="deck">A 117 &times; 113-tile TaleSpire village generated from a Watabou export &mdash;
   reviewed district by district at avatar eye level, the way a party will actually see it.
@@ -157,7 +157,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 179</b> (933 &times; 896 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>19,172</b> in <b>3</b> chunks</span>
+    <span>assets <b>19,440</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">99%</b></span>
@@ -171,6 +171,12 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 9 &middot; Aug 19</span><div><b>Landscape given variety, water given
+    a shore.</b> A forest of one species reads as a plantation, so trees now mix 62% conifer /
+    29% broadleaf / 9% dead. A course of shingle along the waterline hides the cut edge where
+    grass met the sunken channel &mdash; 748 tiles of it. The citadel wall, which read as
+    disconnected pillars at the old scale, is now 307 of 308 cells orthogonally connected: the
+    scale change dissolved it. 19,440 assets, 3 pastes, 51 buildings, 100% access.</div></li>
   <li><span class="when">rev 8 &middot; Aug 19</span><div><b>Scale set by play; streets set by
     carts.</b> At the old scale only 31% of buildings had a 3&times;3 interior &mdash; most of
     the town could not meaningfully be entered. At <code>--house-ft 35</code>, 94% can, and

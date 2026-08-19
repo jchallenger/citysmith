@@ -53,6 +53,15 @@ def _write_chunks(chunks, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path
     the old ``forest-07.slab.txt`` only said which piece came seventh.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Chunk names encode grid position, and packing boundaries move between
+    # builds -- so a rebuild can leave last run's files sitting beside this
+    # run's. They paste without complaint and silently mix two revisions of
+    # the map, so clear the stem's previous output first.
+    for stale in out_dir.glob(f"{stem}-r*.slab.txt"):
+        stale.unlink()
+    for stale in out_dir.glob(f"{stem}.slab.txt"):
+        stale.unlink()
     written: list[pathlib.Path] = []
     for chunk in chunks:
         name = (f"{stem}.slab.txt" if len(chunks) == 1

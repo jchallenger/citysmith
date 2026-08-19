@@ -794,6 +794,21 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
 
     covered: set[tuple[int, int]] = set()
 
+    # A grass tile that ends flush at a sunken watercourse shows its bare side
+    # to anyone standing on the bank. A course of shingle along the waterline
+    # reads as a shore and hides the cut -- and gives a party somewhere to
+    # stand that is visibly not the river.
+    bank: set[tuple[int, int]] = set()
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] != R.GROUND or tm.building[z][x]:
+                continue
+            for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, nz = x + dx, z + dz
+                if 0 <= nx < tm.width and 0 <= nz < tm.depth                         and tm.surface[nz][nx] == R.WATER:
+                    bank.add((x, z))
+                    break
+
     def surface_at(x: int, z: int) -> str | None:
         if not (0 <= x < tm.width and 0 <= z < tm.depth):
             return None
@@ -811,6 +826,8 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
                 continue
             if any(tm.building[qz][qx] for qx, qz in quad):
                 continue
+            if any(q in bank for q in quad):
+                continue   # shingle is laid one tile at a time
             b.tile(role, x, z, 0.0)
             covered.update(quad)
 
@@ -832,7 +849,10 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str]) -> None:
                 if water is not None:
                     b.add(place_tile(water, x, z, -1.0 + water.size_y))
                 continue
-            b.tile(surface_roles.get(s, ground_role), x, z, 0.0)
+            role = surface_roles.get(s, ground_role)
+            if (x, z) in bank and b.palette.resolve("field_1x1") is not None:
+                role = "field_1x1"          # shingle shore
+            b.tile(role, x, z, 0.0)
 
 
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) -> None:
@@ -1234,15 +1254,19 @@ def _dress_districts(b: Builder, tm) -> None:
 
             elif surf == R.GROUND and not near(x, z, frozenset({R.STREET, R.PLAZA})):
                 roll = rng.random()
-                if roll < 0.04 and pine_top is not None:
-                    # One piece, not a stump+canopy stack: TaleSpire's paste
-                    # drops props whose colliders overlap (the community's
-                    # "copy paste: missing parts" bug), which decapitated a
-                    # third of the forest. The canopy piece alone reads as a
-                    # full pine at ground level -- verified by probe paste.
-                    jx, jz = rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25)
-                    b.add(place_centered(pine_top, x + 0.5 + jx, z + 0.5 + jz,
-                                         0.5, rng.randrange(24)), prop=True)
+                if roll < 0.04:
+                    # A forest of one species is a plantation. Weighted so
+                    # conifer still dominates -- this is pine country -- with
+                    # broadleaf for relief and the occasional dead trunk,
+                    # which is also the best cover a scout gets out here.
+                    pick = rng.random()
+                    role = ("tree_conifer" if pick < 0.62 else
+                            "tree_broadleaf" if pick < 0.92 else "tree_dead")
+                    tree = b.palette.resolve(role) or pine_top
+                    if tree is not None:
+                        jx, jz = rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25)
+                        b.add(place_centered(tree, x + 0.5 + jx, z + 0.5 + jz,
+                                             0.5, rng.randrange(24)), prop=True)
                 elif roll < 0.045 and pine_stump is not None:
                     # The stump stands alone as an occasional cut tree.
                     b.add(place_centered(pine_stump, x + 0.5, z + 0.5, 0.5,

@@ -210,6 +210,15 @@ MEDIEVAL = Style(
         #: 1x1 stand-in for the 2x2 ``field`` block, for leftover cells the
         #: block pass cannot cover. Gravel reads as worked dirt at this scale;
         #: plain grass is the fallback of last resort.
+        #: Broadleaf to stand beside the conifer. A forest of one species reads
+        #: as a plantation; the pack has exactly one other single-piece tree
+        #: that is neither jungle nor palm.
+        "tree_conifer": [_tile(name="Stackable Pine Top", kind="prop", **_MED)],
+        "tree_broadleaf": [_tile(name="Tree 01", kind="prop", **_MED)],
+        "tree_dead": [
+            _tile(name="Dead Tree 03", kind="prop", **_MED),
+            _tile(name="Dead Tree 02", kind="prop", **_MED),
+        ],
         "field_1x1": [
             _tile(name="gravel_1x1_01", **_MED),
             _tile(name="Grass 1x1", **_MED),
