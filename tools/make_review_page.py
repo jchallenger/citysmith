@@ -149,17 +149,17 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 7</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 8</div>
   <h1>Forest Church</h1>
   <p class="deck">A 117 &times; 113-tile TaleSpire village generated from a Watabou export &mdash;
   reviewed district by district at avatar eye level, the way a party will actually see it.
   This page is updated as the design changes.</p>
   <div class="stats">
-    <span>tiles <b>117 &times; 113</b> (585 &times; 565 ft)</span>
+    <span>tiles <b>187 &times; 179</b> (933 &times; 896 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>11,480</b> in <b>2</b> slabs</span>
+    <span>assets <b>19,172</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
-    <span>street width <b class="ok">100% &ge; 10 ft</b></span>
+    <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">99%</b></span>
   </div>
 </header>
@@ -171,6 +171,13 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 8 &middot; Aug 19</span><div><b>Scale set by play; streets set by
+    carts.</b> At the old scale only 31% of buildings had a 3&times;3 interior &mdash; most of
+    the town could not meaningfully be entered. At <code>--house-ft 35</code>, 94% can, and
+    playability saturates there. Main streets widen to 4 tiles because two 10 ft carts must
+    pass; gate arches and bridges match. Slabs now cut on a spatial grid: 8-tile detection skips
+    21% of the map as open country, then survivors pack back to 3 pastes. 187&times;179 tiles,
+    51 buildings, 19,172 assets, 100% access.</div></li>
   <li><span class="when">rev 7 &middot; Aug 19</span><div><b>Roof convention learned from a real
     build.</b> Downloaded 9 community slabs into a local study library and decoded them. A
     hand-built forest cottage gave up the whole convention: hip roofs assemble as concentric
