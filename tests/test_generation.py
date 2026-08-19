@@ -306,6 +306,167 @@ def test_unknown_side_rejected():
         place_wall(WALL, 0, 0, "up")
 
 
+# -- slab chunking ------------------------------------------------------------
+
+GROUND = Asset(id="d" * 8 + "-1111-2222-3333-444444444444", name="grass", kind="tile",
+               pack="p", group_tag="floor", tags=(), folder="", size_x=1.0, size_y=0.5, size_z=1.0)
+FERN = Asset(id="e" * 8 + "-1111-2222-3333-444444444444", name="fern", kind="prop",
+             pack="p", group_tag="prop", tags=(), folder="", size_x=0.4, size_y=0.4, size_z=0.4)
+
+
+class StubPalette:
+    """Just enough palette for the chunker: it only asks for ground roles."""
+
+    def resolve(self, role, variant=0):
+        return GROUND if role == "ground" else None
+
+
+def _builder():
+    from citysmith.build import Builder
+
+    return Builder(StubPalette())
+
+
+def _ground_field(b, width=8, depth=8):
+    for tz in range(depth):
+        for tx in range(width):
+            b.add(place_tile(GROUND, tx, tz, 0.0))
+
+
+def _key(p):
+    return (p.asset_id, p.x, p.y, p.z, p.rot)
+
+
+def _multiset(placements):
+    import collections
+
+    return collections.Counter(_key(p) for p in placements)
+
+
+def test_chunks_are_spatial_regions_not_bands():
+    """Every placement lands in the chunk whose tile box contains it.
+
+    The band cutter this replaced sliced the sorted placement list every N
+    entries, so a chunk was a z-band spanning the whole map rather than a
+    region anyone could point at.
+    """
+    b = _builder()
+    _ground_field(b)
+    for tx, tz in ((1, 1), (6, 6), (1, 6), (6, 1)):
+        b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    assert (plan.rows, plan.cols) == (2, 2)
+    for chunk in plan.chunks:
+        for pl in chunk.slab.placements:
+            if (pl.x, pl.y, pl.z) == (0.0, 0.0, 0.0):
+                continue                      # registration marker
+            assert chunk.x0 <= pl.x < chunk.x1
+            assert chunk.z0 <= pl.z < chunk.z1
+
+
+def test_chunk_labels_name_the_row_and_column():
+    b = _builder()
+    _ground_field(b)
+    b.add(place_wall(WALL, 6, 6, "n", 0.5))
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+
+    labels = [c.label for c in plan.chunks]
+    assert len(labels) == len(set(labels))
+    assert "r01c01" in labels
+    by_label = {c.label: c for c in plan.chunks}
+    assert (by_label["r01c01"].x0, by_label["r01c01"].z0) == (4, 4)
+
+
+def test_every_chunk_shares_one_bounding_box_origin():
+    """The registration invariant: multi-chunk maps only line up because of it.
+
+    TaleSpire anchors a pasted slab by its own bounding box, so chunks pasted
+    at one anchor point must all report the same minimum corner.
+    """
+    b = _builder()
+    _ground_field(b)
+    for tx, tz in ((1, 1), (6, 6)):
+        b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert len(plan.chunks) > 1
+    corners = {chunk.slab.bounds()[0] for chunk in plan.chunks}
+    assert corners == {(0.0, 0.0, 0.0)}
+
+
+def test_chunking_loses_and_duplicates_nothing():
+    b = _builder()
+    _ground_field(b)
+    for tx, tz in ((1, 1), (6, 6)):
+        b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, register=False,
+                        skip_open_country=False)
+    union = _multiset(pl for c in plan.chunks for pl in c.slab.placements)
+    assert union == _multiset(b.placements)
+
+
+def test_open_country_chunks_are_skipped():
+    """A chunk of grass and ferns is not somewhere anyone plays."""
+    b = _builder()
+    _ground_field(b)
+    b.add(place_centered(FERN, 1.5, 1.5, 0.5, 0), prop=True)
+    b.add(place_wall(WALL, 6, 6, "n", 0.5))       # one built thing, far corner
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    assert [c.label for c in plan.chunks] == ["r01c01"]
+    assert len(plan.skipped) == 3
+    assert plan.assets_skipped == 48 + 1          # three grass quarters + fern
+    assert b.stats.chunks_skipped == 3
+
+
+def test_a_map_that_is_all_open_country_is_still_written():
+    """Skipping every chunk would emit nothing at all, which is worse."""
+    b = _builder()
+    _ground_field(b)
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert len(plan.chunks) == 4
+    assert plan.skipped == []
+
+
+def test_sunken_ground_is_not_open_country():
+    """Ground a tile low is a watercourse, not empty grass."""
+    b = _builder()
+    _ground_field(b)
+    b.add(place_tile(GROUND, 1, 1, -1.0))
+    b.add(place_wall(WALL, 6, 6, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert "r00c00" in {c.label for c in plan.chunks}
+
+
+def test_oversized_chunks_subdivide_until_they_fit():
+    """``max_assets`` stays the hard cap; a dense cell splits quadtree-style."""
+    b = _builder()
+    for tz in range(8):
+        for tx in range(8):
+            b.add(place_tile(GROUND, tx, tz, 0.0))
+            b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=40, chunk_tiles=8, register=False)
+    assert len(plan.chunks) > 1
+    for chunk in plan.chunks:
+        assert chunk.count <= 40
+        assert chunk.quad, "a subdivided piece carries a quadrant tag"
+    union = _multiset(pl for c in plan.chunks for pl in c.slab.placements)
+    assert union == _multiset(b.placements)
+
+
+def test_to_slabs_still_returns_plain_slabs():
+    b = _builder()
+    _ground_field(b)
+    b.add(place_wall(WALL, 6, 6, "n", 0.5))
+    slabs = b.to_slabs(max_assets=1000, chunk_tiles=4)
+    assert all(hasattr(s, "placements") for s in slabs)
+    assert len(slabs) == b.stats.slabs
+
+
 # -- palette integrity --------------------------------------------------------
 
 def test_every_style_resolves_cleanly():
@@ -337,3 +498,35 @@ def test_styles_declare_the_roles_the_builder_requires():
     for name, style in STYLES.items():
         missing = sorted(needed - set(style.roles))
         assert not missing, f"style {name!r} does not declare: {missing}"
+
+
+def test_packing_preserves_every_placement_and_one_origin():
+    """Packing merges chunks for fewer pastes; it must not change the map.
+
+    Detection wants small chunks (it can only skip a region it can see);
+    pasting wants few. Packing reconciles them, so the thing to guard is that
+    it is purely a regrouping: same placements, and still one shared origin,
+    without which multi-chunk pastes do not line up.
+    """
+    b = _builder()
+    _ground_field(b)
+    for x in (1, 6):
+        for z in (1, 6):
+            b.add(place_wall(WALL, x, z, "n", 0.5))
+
+    loose = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    packed = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=True)
+
+    def bag(plan):
+        # Registration markers are synthetic and only exist when there is more
+        # than one chunk to line up, so they are not part of the map.
+        return sorted(
+            (p.asset_id, round(p.x, 2), round(p.y, 2), round(p.z, 2), p.rot)
+            for c in plan.chunks for p in c.slab.placements
+            if (p.x, p.y, p.z) != (0.0, 0.0, 0.0)
+        )
+
+    assert bag(packed) == bag(loose), "packing changed the placements"
+    assert len(packed.chunks) <= len(loose.chunks)
+    corners = {c.slab.bounds()[0] for c in packed.chunks}
+    assert len(corners) == 1, f"chunks must share one origin, got {corners}"

@@ -30,6 +30,8 @@ angle would need a true oriented-bounds calculation.
 
 from __future__ import annotations
 
+import collections
+import math
 import random
 import zlib
 from dataclasses import dataclass, field
@@ -47,6 +49,16 @@ ROT_N, ROT_E, ROT_S, ROT_W = 0, 6, 12, 18
 
 SIDES = ("n", "e", "s", "w")
 _SIDE_ROT = {"n": ROT_N, "e": ROT_E, "s": ROT_S, "w": ROT_W}
+
+#: Chunk edge in tiles. 24 tiles is 120 ft -- roughly a city block, so a chunk
+#: reads as somewhere ("the quarter east of the bridge") and open country
+#: separates into whole skippable chunks. Larger cells mean fewer pastes but
+#: stop isolating empty ground; smaller ones skip more and cost more pastes.
+DEFAULT_CHUNK_TILES = 24
+
+#: Quadrant tags used when a cell is subdivided, indexed by z then x.
+_QUAD_Z = ("n", "s")
+_QUAD_X = ("w", "e")
 
 
 def rotated_footprint(asset: Asset, rot: int) -> tuple[float, float]:
@@ -100,6 +112,8 @@ class BuildStats:
     props: int = 0
     slabs: int = 0
     registration_markers: int = 0
+    chunks_skipped: int = 0
+    assets_skipped: int = 0
 
     @property
     def total(self) -> int:
@@ -114,11 +128,16 @@ class Builder:
         self.rng = random.Random(seed)
         self.placements: list[Placement] = []
         self.stats = BuildStats()
+        #: Asset ids that were ever placed as scenery rather than as map.
+        #: Recorded here because prop-ness is known at ``add`` time and cannot
+        #: be recovered from a :class:`~citysmith.slab.Placement` afterwards.
+        self.prop_ids: set[str] = set()
 
     def add(self, placement: Placement, *, prop: bool = False) -> None:
         self.placements.append(placement)
         if prop:
             self.stats.props += 1
+            self.prop_ids.add(placement.asset_id)
         else:
             self.stats.tiles += 1
 
@@ -144,48 +163,345 @@ class Builder:
     def to_slab(self) -> Slab:
         return _normalized_whole_tiles(Slab(list(self.placements)))
 
-    def to_slabs(self, max_assets: int = 4000, *, register: bool = True) -> list[Slab]:
-        """Split into chunks that each encode within TaleSpire's size limit.
+    def to_slabs(self, max_assets: int = 4000, *, register: bool = True,
+                 chunk_tiles: int = DEFAULT_CHUNK_TILES,
+                 skip_open_country: bool = True) -> list[Slab]:
+        """The pasteable slabs, in row-major order. See :meth:`chunk_plan`."""
+        return self.chunk_plan(
+            max_assets, register=register, chunk_tiles=chunk_tiles,
+            skip_open_country=skip_open_country,
+        ).slabs
 
-        Chunks are cut spatially (by z then x band) so each slab is a
-        contiguous piece of the map.
+    def chunk_plan(self, max_assets: int = 4000, *, register: bool = True,
+                   chunk_tiles: int = DEFAULT_CHUNK_TILES,
+                   skip_open_country: bool = True,
+                   pack: bool = True) -> "ChunkPlan":
+        """Cut the map into a 2D grid of pasteable chunks.
+
+        **The grid.** Chunks are square tile regions ``chunk_tiles`` on a side,
+        laid over the map from its minimum corner; every placement goes to the
+        chunk containing its ``(x, z)``. That makes a chunk a *place* -- the
+        market quarter, the north fields -- which is what lets a GM paste part
+        of a town, or skip a region entirely. The predecessor cut the sorted
+        placement list every ``max_assets`` entries, producing z-bands that ran
+        the width of the map and corresponded to nothing on the ground.
+
+        The lattice is square and uniform because the paste lattice is square
+        and the binding constraint is bytes per slab. An irregular subdivision
+        (golden-ratio bands and the like) would add bookkeeping without
+        reducing the number of pastes.
+
+        **Budget.** ``max_assets`` stays the hard per-chunk constraint. A cell
+        holding more than that is split quadtree-style -- halved on each axis
+        wider than one tile -- until every piece fits, or a piece is down to a
+        single tile. Nothing subdivides at the default chunk size on a town;
+        the recursion is there so a dense quarter, or a map built at larger
+        scale, cannot silently produce a slab TaleSpire refuses to paste.
+
+        **Open country.** A chunk holding nothing but ground at grade and
+        scatter dressing is not somewhere anyone plays, so it is dropped rather
+        than encoded, and counted in :class:`BuildStats`. If *every* chunk is
+        open country they are all kept instead -- the map is all terrain, and
+        skipping everything would emit nothing at all.
 
         **Registration.** TaleSpire anchors a pasted slab by its own bounding
         box, not by the absolute coordinates inside it -- copying a placed slab
-        back out returns it normalised to its own corner. Chunks therefore have
-        different corners (each covers a different z band), and pasting them all
-        at one anchor would stack them on top of each other instead of
+        back out returns it normalised to its own corner. Grid chunks each
+        cover a different tile region and so have different corners; pasting
+        them all at one anchor would stack them on top of each other instead of
         assembling the map.
 
         To make the pieces line up regardless, every chunk gets one extra tile
         at the *whole map's* minimum corner. That gives all chunks an identical
         bounding box origin, so pasting each at the same point lands every tile
-        where it belongs. The markers stack at a single corner cell and can be
-        deleted afterwards; they are harmless if TaleSpire turns out to preserve
-        absolute coordinates instead.
+        where it belongs. Dropping open-country chunks cannot break this: the
+        marker is synthetic and added to whatever survives, so the shared origin
+        does not depend on which regions were kept. The markers stack in a
+        single corner cell and can be deleted afterwards; they are harmless if
+        TaleSpire turns out to preserve absolute coordinates instead.
         """
-        slab = _normalized_whole_tiles(Slab(list(self.placements)))
-        if not slab.placements:
-            return []
+        raw = Slab(list(self.placements))
+        size = max(1, int(chunk_tiles))
+        if not raw.placements:
+            return ChunkPlan([], [], 0, 0, size, (0, 0))
 
-        chunks = _chunk_spatially(slab.placements, max_assets)
-        out: list[Slab] = [Slab(chunk) for chunk in chunks]
+        dx, dy, dz = _whole_tile_shift(raw)
+        slab = raw.translated(dx, dy, dz)
 
-        if register and len(out) > 1:
+        # The grid is anchored on tile placements only. Props overhang their
+        # cell by design (a pine canopy is 2.55 tiles wide), and letting one
+        # decide the origin would shift the whole lattice off the tile grid.
+        tiles = [p for p in slab.placements if p.asset_id not in self.prop_ids]
+        tiles = tiles or slab.placements
+        ox = math.floor(min(p.x for p in tiles))
+        oz = math.floor(min(p.z for p in tiles))
+        ex = math.floor(max(p.x for p in tiles)) + 1
+        ez = math.floor(max(p.z for p in tiles)) + 1
+        cols = max(1, math.ceil((ex - ox) / size))
+        rows = max(1, math.ceil((ez - oz) / size))
+
+        buckets: dict[tuple[int, int], list[Placement]] = {}
+        for p in slab.placements:
+            c = min(cols - 1, max(0, int((p.x - ox) // size)))
+            r = min(rows - 1, max(0, int((p.z - oz) // size)))
+            buckets.setdefault((r, c), []).append(p)
+
+        cells: list[_Cell] = []
+        for (r, c), items in sorted(buckets.items()):
+            cells.extend(_subdivide(_Cell(
+                r, c, "",
+                ox + c * size, oz + r * size,
+                min(ox + (c + 1) * size, ex), min(oz + (r + 1) * size, ez),
+                items,
+            ), max_assets))
+        cells.sort(key=lambda cell: (cell.row, cell.col, cell.quad))
+
+        terrain, grade = self._grade_terrain(slab.placements)
+        made = [
+            SlabChunk(
+                row=cell.row, col=cell.col, quad=cell.quad,
+                x0=cell.x0 - dx, z0=cell.z0 - dz,
+                x1=cell.x1 - dx, z1=cell.z1 - dz,
+                slab=Slab(cell.items),
+                open_country=_is_open_country(
+                    cell.items, terrain, self.prop_ids, grade),
+            )
+            for cell in cells
+        ]
+
+        kept = [ch for ch in made if not ch.open_country]
+        skipped = [ch for ch in made if ch.open_country]
+        if not skip_open_country or not kept:
+            kept, skipped = made, []
+
+        # Detection wants small chunks; pasting wants few. Those pull opposite
+        # ways -- at 8 tiles this map skips 15% of its assets but emits 139
+        # files, at 32 tiles it emits 15 files and skips 2%. So detect fine,
+        # then pack the survivors back up to the per-slab budget: the skipping
+        # is decided at chunk resolution, the paste count at budget resolution.
+        # Packing walks the grid boustrophedon (row-major, alternate rows
+        # reversed) so consecutive chunks in a slab are physically adjacent and
+        # a partial paste still lands as a contiguous piece of town.
+        if pack:
+            kept = _pack_chunks(kept, max_assets, cols)
+
+        if register and len(kept) > 1:
             marker = min(slab.placements, key=lambda p: (p.y, p.z, p.x))
             anchor = Placement(marker.asset_id, 0.0, 0.0, 0.0, 0)
-            for piece in out:
-                (mx, my, mz), _ = piece.bounds()
+            for piece in kept:
+                (mx, my, mz), _ = piece.slab.bounds()
                 if (mx, my, mz) != (0.0, 0.0, 0.0):
-                    piece.add(anchor)
+                    piece.slab.add(anchor)
             self.stats.registration_markers = sum(
-                1 for piece in out if any(
-                    (p.x, p.y, p.z) == (0.0, 0.0, 0.0) for p in piece.placements
+                1 for piece in kept if any(
+                    (p.x, p.y, p.z) == (0.0, 0.0, 0.0)
+                    for p in piece.slab.placements
                 )
             )
 
-        self.stats.slabs = len(out)
-        return out
+        self.stats.slabs = len(kept)
+        self.stats.chunks_skipped = len(skipped)
+        self.stats.assets_skipped = sum(ch.count for ch in skipped)
+        return ChunkPlan(kept, skipped, rows, cols, size, (ox - dx, oz - dz))
+
+    def _grade_terrain(
+        self, placements: list[Placement]
+    ) -> tuple[set[str], float | None]:
+        """Ground-role asset ids, and the height most of that ground sits at.
+
+        Height matters because ground is also laid a tile low under water: a
+        chunk of sunken riverbed is a channel, not open country.
+        """
+        terrain = set()
+        for role in ("ground", "ground_2x2"):
+            asset = self.palette.resolve(role)
+            if asset is not None:
+                terrain.add(asset.id)
+        if not terrain:
+            return terrain, None
+        heights = collections.Counter(
+            p.y for p in placements if p.asset_id in terrain
+        )
+        if not heights:
+            return terrain, None
+        return terrain, heights.most_common(1)[0][0]
+
+
+@dataclass
+class _Cell:
+    """A grid cell mid-subdivision: a tile box plus the placements inside it."""
+
+    row: int
+    col: int
+    quad: str
+    x0: int
+    z0: int
+    x1: int
+    z1: int
+    items: list[Placement]
+
+
+def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list["SlabChunk"]:
+    """Merge adjacent chunks up to ``max_assets`` so fewer slabs are pasted.
+
+    Chunks arrive at detection resolution, which is deliberately fine. Each
+    output slab is still a contiguous run of neighbours, so pasting a subset
+    gives a coherent region rather than scattered fragments.
+    """
+    if not chunks:
+        return chunks
+
+    def key(ch: "SlabChunk") -> tuple[int, int]:
+        row, col = ch.row, ch.col
+        return (row, -col if row % 2 else col)   # serpentine
+
+    ordered = sorted(chunks, key=key)
+    out: list["SlabChunk"] = []
+    run: list["SlabChunk"] = []
+    total = 0
+    for ch in ordered:
+        if run and total + ch.count > max_assets:
+            out.append(_fuse(run))
+            run, total = [], 0
+        run.append(ch)
+        total += ch.count
+    if run:
+        out.append(_fuse(run))
+    return out
+
+
+def _fuse(run: list["SlabChunk"]) -> "SlabChunk":
+    """Combine a run of chunks into one, keeping the covered tile box."""
+    if len(run) == 1:
+        return run[0]
+    placements = [p for ch in run for p in ch.slab.placements]
+    x0 = min(ch.x0 for ch in run); x1 = max(ch.x1 for ch in run)
+    z0 = min(ch.z0 for ch in run); z1 = max(ch.z1 for ch in run)
+    first = run[0]
+    # quad suffixes the label, so "+3" reads as "starts here, spans 4 chunks".
+    return SlabChunk(
+        row=first.row, col=first.col,
+        quad=f"+{len(run) - 1}",
+        x0=x0, z0=z0, x1=x1, z1=z1, slab=Slab(placements), open_country=False,
+    )
+
+
+@dataclass
+class SlabChunk:
+    """One pasteable piece of a map, and the tile region it covers.
+
+    ``x0``/``z0``/``x1``/``z1`` are half-open tile bounds in the *builder's*
+    coordinates -- the same tile numbers the raster and its SVG use -- so a
+    chunk can be matched against the map by eye.
+    """
+
+    row: int
+    col: int
+    quad: str
+    x0: int
+    z0: int
+    x1: int
+    z1: int
+    slab: Slab
+    open_country: bool = False
+
+    @property
+    def label(self) -> str:
+        """Region name, e.g. ``r02c03`` -- or ``r02c03ne`` once subdivided."""
+        return f"r{self.row:02d}c{self.col:02d}{self.quad}"
+
+    @property
+    def count(self) -> int:
+        return len(self.slab.placements)
+
+
+@dataclass
+class ChunkPlan:
+    """The result of cutting a map into grid chunks."""
+
+    chunks: list[SlabChunk]
+    skipped: list[SlabChunk]
+    rows: int
+    cols: int
+    tile_size: int
+    origin: tuple[int, int]
+
+    @property
+    def slabs(self) -> list[Slab]:
+        return [ch.slab for ch in self.chunks]
+
+    @property
+    def assets_emitted(self) -> int:
+        return sum(ch.count for ch in self.chunks)
+
+    @property
+    def assets_skipped(self) -> int:
+        return sum(ch.count for ch in self.skipped)
+
+
+def _is_open_country(
+    items: list[Placement], terrain: set[str], props: set[str],
+    grade: float | None,
+) -> bool:
+    """True when a chunk holds only ground at grade and scatter dressing.
+
+    Ferns and pines count as dressing, not as features: a stand of trees on
+    open grass is still ground nobody stands on. Anything built -- a floor, a
+    wall, a street, a tilled field, water -- disqualifies the chunk at once.
+    """
+    if grade is None:
+        return False
+    for p in items:
+        if p.asset_id in terrain:
+            if p.y != grade:
+                return False
+        elif p.asset_id not in props:
+            return False
+    return True
+
+
+def _subdivide(cell: _Cell, max_assets: int) -> list[_Cell]:
+    """Halve a cell until each piece holds at most ``max_assets`` placements.
+
+    Splitting is quadtree-style: both axes at once where both span more than a
+    tile, one axis where only one does. A piece already down to a single tile
+    is returned as-is even if it is still over budget -- there is nowhere left
+    to cut, and the encoder refuses that slab with a clearer message than an
+    endless subdivision would give.
+    """
+    out: list[_Cell] = []
+    stack = [cell]
+    while stack:
+        cur = stack.pop()
+        span_x, span_z = cur.x1 - cur.x0, cur.z1 - cur.z0
+        if len(cur.items) <= max_assets or (span_x <= 1 and span_z <= 1):
+            out.append(cur)
+            continue
+        xs = ([(cur.x0, cur.x1)] if span_x <= 1 else
+              [(cur.x0, cur.x0 + span_x // 2), (cur.x0 + span_x // 2, cur.x1)])
+        zs = ([(cur.z0, cur.z1)] if span_z <= 1 else
+              [(cur.z0, cur.z0 + span_z // 2), (cur.z0 + span_z // 2, cur.z1)])
+        for zi, (z0, z1) in enumerate(zs):
+            for xi, (x0, x1) in enumerate(xs):
+                tag = ((_QUAD_Z[zi] if len(zs) > 1 else "")
+                       + (_QUAD_X[xi] if len(xs) > 1 else ""))
+                items = [
+                    p for p in cur.items
+                    if (len(xs) == 1 or (p.x < x1 if xi == 0 else p.x >= x0))
+                    and (len(zs) == 1 or (p.z < z1 if zi == 0 else p.z >= z0))
+                ]
+                if items:
+                    stack.append(_Cell(
+                        cur.row, cur.col, cur.quad + tag, x0, z0, x1, z1, items))
+    return out
+
+
+def _whole_tile_shift(slab: Slab) -> tuple[int, int, int]:
+    """The whole-tile translation that brings ``slab`` to the origin."""
+    if not slab.placements:
+        return (0, 0, 0)
+    (mx, my, mz), _ = slab.bounds()
+    return (-math.floor(mx), -math.floor(my), -math.floor(mz))
 
 
 def _normalized_whole_tiles(slab: Slab) -> Slab:
@@ -204,27 +520,7 @@ def _normalized_whole_tiles(slab: Slab) -> Slab:
     """
     if not slab.placements:
         return slab
-    (mx, my, mz), _ = slab.bounds()
-    import math
-    return slab.translated(-math.floor(mx), -math.floor(my), -math.floor(mz))
-
-
-def _chunk_spatially(placements: list[Placement], max_assets: int) -> list[list[Placement]]:
-    """Group placements into spatial bands of at most ``max_assets`` each."""
-    if len(placements) <= max_assets:
-        return [placements]
-
-    ordered = sorted(placements, key=lambda p: (p.z, p.x))
-    chunks: list[list[Placement]] = []
-    current: list[Placement] = []
-    for p in ordered:
-        current.append(p)
-        if len(current) >= max_assets:
-            chunks.append(current)
-            current = []
-    if current:
-        chunks.append(current)
-    return chunks
+    return slab.translated(*_whole_tile_shift(slab))
 
 
 # -- city board ---------------------------------------------------------------

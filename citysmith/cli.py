@@ -21,7 +21,7 @@ import sys
 
 from . import floorplan as floorplan_mod
 from . import render, sites
-from .build import build_city_board, build_interior
+from .build import DEFAULT_CHUNK_TILES, build_city_board, build_interior
 from .catalog import Catalog, CatalogError, load_or_build
 from .city import CityParams, City, SIZES
 from .city import generate as generate_city
@@ -46,15 +46,77 @@ def _palette(args, catalog: Catalog, style: str, seed: int) -> Palette:
     return palette
 
 
-def _write_slabs(slabs, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path]:
+def _write_chunks(chunks, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path]:
+    """Write one file per chunk, named for the region the chunk covers.
+
+    ``forest-r02c03.slab.txt`` says which piece of the map is in the file;
+    the old ``forest-07.slab.txt`` only said which piece came seventh.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[pathlib.Path] = []
-    for i, slab in enumerate(slabs, 1):
-        name = f"{stem}.slab.txt" if len(slabs) == 1 else f"{stem}-{i:02d}.slab.txt"
+    for chunk in chunks:
+        name = (f"{stem}.slab.txt" if len(chunks) == 1
+                else f"{stem}-{chunk.label}.slab.txt")
         path = out_dir / name
-        path.write_text(encode(slab), encoding="utf-8")
+        path.write_text(encode(chunk.slab), encoding="utf-8")
         written.append(path)
     return written
+
+
+def _chunk_table(plan, stem: str) -> str:
+    """A map and a table of which chunk covers which tiles.
+
+    Printed so the reader can paste a quarter of a town instead of all of it:
+    match a region on ``city-raster.svg`` to a row/column here, then paste only
+    those files.
+    """
+    from .layout import TILE_FEET
+
+    if not plan.chunks and not plan.skipped:
+        return ""
+    ft = int(plan.tile_size * TILE_FEET)
+    lines = [
+        f"Chunk grid: {plan.rows} row(s) x {plan.cols} col(s) of "
+        f"{plan.tile_size}x{plan.tile_size} tiles ({ft}x{ft} ft)",
+        "",
+    ]
+
+    emitted_cells = {(c.row, c.col) for c in plan.chunks}
+    lines.append("      " + " ".join(f"c{c:02d}" for c in range(plan.cols)))
+    for r in range(plan.rows):
+        marks = [
+            " # " if (r, c) in emitted_cells else " . "
+            for c in range(plan.cols)
+        ]
+        lines.append(f" r{r:02d}  " + " ".join(marks))
+    lines.append("        # = written    . = open country, skipped")
+    lines.append("")
+
+    single = len(plan.chunks) == 1
+    for chunk in plan.chunks:
+        name = (f"{stem}.slab.txt" if single
+                else f"{stem}-{chunk.label}.slab.txt")
+        lines.append(
+            f"  {chunk.label:>10}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
+            f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets  {name}"
+        )
+    for chunk in plan.skipped:
+        lines.append(
+            f"  {chunk.label:>10}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
+            f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets  "
+            f"(open country -- not written)"
+        )
+    return "\n".join(lines)
+
+
+#: How to paste a chunked map. Every chunk carries a registration marker at the
+#: whole map's corner, so they share one bounding box and one anchor point.
+PASTE_HELP = (
+    "Every chunk shares one origin (a registration marker at the map's corner),\n"
+    "so paste each file at the SAME anchor point, in any order. Do not move the\n"
+    "camera between pastes. You can paste a subset -- each chunk lands in its own\n"
+    "region regardless of which others you paste."
+)
 
 
 # -- commands -----------------------------------------------------------------
@@ -156,9 +218,9 @@ def cmd_design(args) -> int:
     builder = build_interior(
         fp, palette, seed=args.seed, roof=args.roof, prop_density=args.prop_density
     )
-    slabs = builder.to_slabs(max_assets=args.max_assets)
+    plan = builder.chunk_plan(max_assets=args.max_assets)
     try:
-        written = _write_slabs(slabs, pathlib.Path(args.out_dir), f"{fp.building_id}")
+        written = _write_chunks(plan.chunks, pathlib.Path(args.out_dir), f"{fp.building_id}")
     except SlabError as exc:
         raise SystemExit(f"Could not encode slab: {exc}") from exc
 
@@ -181,21 +243,23 @@ def cmd_board(args) -> int:
         building_height=args.building_height,
         seed=args.seed or city.seed,
     )
-    slabs = builder.to_slabs(max_assets=args.max_assets)
+    plan = builder.chunk_plan(
+        max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
+        skip_open_country=not args.keep_open_country,
+    )
     try:
-        written = _write_slabs(slabs, pathlib.Path(args.out_dir), "city-board")
+        written = _write_chunks(plan.chunks, pathlib.Path(args.out_dir), "city-board")
     except SlabError as exc:
         raise SystemExit(
             f"Could not encode slab: {exc}\nTry a smaller --max-assets."
         ) from exc
 
-    print(f"{city.name} board: {builder.stats.total} assets in {len(written)} slab(s)")
-    for p in written:
-        print(f"  wrote {p}")
-    print(
-        "\nPaste the slabs in order. They share one origin, so paste each at the "
-        "same anchor point and they will line up."
-    )
+    print(f"{city.name} board: {plan.assets_emitted} assets in {len(written)} chunk(s)")
+    if plan.skipped:
+        print(f"  skipped {len(plan.skipped)} open-country chunk(s), "
+              f"{plan.assets_skipped} assets")
+    print("\n" + _chunk_table(plan, "city-board"))
+    print("\n" + PASTE_HELP)
     return 0
 
 
@@ -302,16 +366,20 @@ def cmd_build(args) -> int:
     builder = build_from_tilemap(
         tm, palette, storeys=args.storeys, roofs=not args.no_roofs, seed=args.seed
     )
-    slabs = builder.to_slabs(max_assets=args.max_assets)
+    plan = builder.chunk_plan(
+        max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
+        skip_open_country=not args.keep_open_country,
+    )
     try:
-        written = _write_slabs(slabs, out_dir, args.stem)
+        written = _write_chunks(plan.chunks, out_dir, args.stem)
     except SlabError as exc:
         raise SystemExit(
-            f"Could not encode slab: {exc}\nTry a smaller --max-assets."
+            f"Could not encode slab: {exc}\nTry a smaller --max-assets "
+            "or --chunk-tiles."
         ) from exc
 
     biggest = max((len(p.read_text(encoding="utf-8")) * 3 // 4 for p in written), default=0)
-    report = verify(tm, asset_count=builder.stats.total,
+    report = verify(tm, asset_count=plan.assets_emitted,
                     slab_count=len(written), max_slab_bytes=biggest)
 
     # The report above reads the tile grid -- the plan. These read the geometry
@@ -320,16 +388,16 @@ def cmd_build(args) -> int:
     for problem in check_placements(builder, tm):
         report.add("fail", "placements", problem)
 
-    print(f"\n{builder.stats.total:,} assets in {len(written)} slab(s)")
+    print(f"\n{plan.assets_emitted:,} assets in {len(written)} chunk(s)"
+          + (f"; {len(plan.skipped)} open-country chunk(s) skipped "
+             f"({plan.assets_skipped:,} assets)" if plan.skipped else ""))
     print("\n" + report.text())
 
     svg = render.write(tilemap_svg(tm, scale=args.scale), out_dir / "city-raster.svg")
-    print(f"\n  wrote {svg}")
-    for p in written[:3]:
-        print(f"  wrote {p}")
-    if len(written) > 3:
-        print(f"  ... and {len(written)-3} more slab files")
-    print("\nPaste the slabs in order at the same anchor point.")
+    print(f"\n  wrote {svg}  (tile numbers here match the chunk table below)")
+    print(f"  wrote {len(written)} slab file(s) in {out_dir}")
+    print("\n" + _chunk_table(plan, args.stem))
+    print("\n" + PASTE_HELP)
     return 2 if report.failed else 0
 
 
@@ -385,7 +453,7 @@ def cmd_brief(args) -> int:
     catalog = _catalog(args)
     palette = _palette(args, catalog, brief.params.style, brief.seed)
     builder = build_interior(fp, palette, seed=brief.seed)
-    written = _write_slabs(builder.to_slabs(), out_dir, chosen.id)
+    written = _write_chunks(builder.chunk_plan().chunks, out_dir, chosen.id)
     print(f"\nDesigned: {fp.summary()}")
     for p in written:
         print(f"  wrote {p}")
@@ -429,7 +497,7 @@ def cmd_pipeline(args) -> int:
     catalog = _catalog(args)
     palette = _palette(args, catalog, args.style, args.seed)
     builder = build_interior(fp, palette, seed=args.seed)
-    written = _write_slabs(builder.to_slabs(), out_dir, chosen.id)
+    written = _write_chunks(builder.chunk_plan().chunks, out_dir, chosen.id)
     print(f"  {builder.stats.tiles} tiles + {builder.stats.props} props")
     for p in written:
         print(f"  wrote {p}")
@@ -503,6 +571,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-streets", action="store_true")
     c.add_argument("--building-height", type=int, default=2)
     c.add_argument("--max-assets", type=int, default=4000)
+    c.add_argument("--chunk-tiles", type=int, default=DEFAULT_CHUNK_TILES,
+                   help="chunk edge in tiles; smaller chunks skip more empty "
+                        f"country and cost more pastes (default {DEFAULT_CHUNK_TILES})")
+    c.add_argument("--keep-open-country", action="store_true",
+                   help="also write chunks that hold only grass and scenery")
     c.set_defaults(func=cmd_board)
 
     c = sub.add_parser("calibrate", help="emit a slab to verify placement in-game")
@@ -511,8 +584,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("import", help="import an MFCG GeoJSON export")
     c.add_argument("geojson", help="path to a Medieval Fantasy City Generator JSON export")
-    c.add_argument("--house-ft", type=float, default=20.0,
-                   help="real median house frontage in feet; sets the scale (default 20)")
+    c.add_argument("--house-ft", type=float, default=35.0,
+                   help="scale anchor: real width in feet of a median building "
+                        "footprint. Sets tiles-per-MFCG-unit, so it scales the "
+                        "whole town. Default 35 is chosen for play, not strict "
+                        "history: below ~30 most buildings are too small to "
+                        "stand a party in (at 20 only 31%% clear a 3x3 interior; "
+                        "at 35, 94%% do). Above 35 buys no further playability.")
     c.add_argument("--feet-per-unit", type=float, default=None,
                    help="override: feet per MFCG world unit")
     c.add_argument("--margin-ft", type=float, default=60.0,
@@ -535,6 +613,11 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-bridges", action="store_true",
                    help="do not auto-connect districts split by water")
     c.add_argument("--max-assets", type=int, default=9000)
+    c.add_argument("--chunk-tiles", type=int, default=DEFAULT_CHUNK_TILES,
+                   help="chunk edge in tiles; smaller chunks skip more empty "
+                        f"country and cost more pastes (default {DEFAULT_CHUNK_TILES})")
+    c.add_argument("--keep-open-country", action="store_true",
+                   help="also write chunks that hold only grass and scenery")
     c.add_argument("--scale", type=int, default=3, help="raster SVG pixels per tile")
     c.add_argument("--crop", default=None, metavar="X,Z,W,D",
                    help="build only this tile region, for a staged in-game test")

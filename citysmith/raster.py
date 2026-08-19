@@ -37,9 +37,45 @@ OPEN = frozenset({GROUND, STREET, PLAZA, PIER})
 
 SIDES = (("n", 0, -1), ("s", 0, 1), ("w", -1, 0), ("e", 1, 0))
 
-#: A creature occupies one tile, so a street must be two wide to be walked
-#: abreast. Streets narrower than this are widened when rasterised.
-MIN_STREET_TILES = 2.0
+# -- street widths -----------------------------------------------------------
+#
+# Every width below is derived from the one fixed fact the pipeline is pinned
+# to: a tile is 5 ft and a creature occupies exactly one tile. What a way has to
+# be wide enough for is therefore a question of what physically has to fit past
+# what, not a question of taste.
+
+#: Two people abreast (10 ft). The floor for anything a creature walks on --
+#: below this the party strings out single file down the one road through town.
+LANE_TILES = 2.0
+
+#: A horse cart or carriage is two tiles wide (10 ft), so a cart with someone
+#: squeezing past it needs three (15 ft). Below this a wagon parked to unload
+#: closes the street.
+CART_TILES = 3.0
+
+#: Two carts passing, neither stopping: 2 + 2 tiles (20 ft). This is what a
+#: market street or a gate road has to be, because that is where the carts are.
+MAIN_STREET_TILES = 4.0
+
+#: Kept as the name for the two-abreast floor; it is what the old single
+#: constant meant and `docs/asset-conventions.md` still cites it.
+MIN_STREET_TILES = LANE_TILES
+
+#: Traffic classes a road can be put in, busiest first.
+MAIN_ROAD = "main"
+CART_ROAD = "cart"
+LANE_ROAD = "lane"
+
+#: Class -> the width that class of way has to hold, in tiles.
+STREET_STANDARD = {
+    MAIN_ROAD: MAIN_STREET_TILES,
+    CART_ROAD: CART_TILES,
+    LANE_ROAD: LANE_TILES,
+}
+
+#: Used to settle a cell two roads both claim: the busier road wins, because
+#: the junction has to carry the traffic of the street that runs through it.
+_CLASS_RANK = {"": 0, LANE_ROAD: 1, CART_ROAD: 2, MAIN_ROAD: 3}
 
 
 @dataclass
@@ -52,6 +88,12 @@ class TileMap:
     surface: list[list[str]] = field(default_factory=list)
     building: list[list[str]] = field(default_factory=list)
     wall: list[list[bool]] = field(default_factory=list)
+    #: Traffic class of the road that paved each cell -- "main", "cart", "lane",
+    #: or "" where nothing was. Only meaningful where ``surface`` is ``STREET``;
+    #: a building painted over a road leaves its class behind. Verification
+    #: reads it to hold each stretch to the width its own traffic needs rather
+    #: than to one flat number.
+    street_class: list[list[str]] = field(default_factory=list)
     gates: set[tuple[int, int]] = field(default_factory=set)
     #: building id -> list of (x, z, side) perimeter cells that are doorways.
     doors: dict[str, list[tuple[int, int, str]]] = field(default_factory=dict)
@@ -71,6 +113,7 @@ class TileMap:
             surface=[[GROUND] * width for _ in range(depth)],
             building=[[""] * width for _ in range(depth)],
             wall=[[False] * width for _ in range(depth)],
+            street_class=[[""] * width for _ in range(depth)],
         )
 
     def inside(self, x: int, z: int) -> bool:
@@ -103,6 +146,7 @@ class TileMap:
                 out.surface[z][x] = self.surface[z0 + z][x0 + x]
                 out.building[z][x] = self.building[z0 + z][x0 + x]
                 out.wall[z][x] = self.wall[z0 + z][x0 + x]
+                out.street_class[z][x] = self.street_class[z0 + z][x0 + x]
         out.gates = {
             (x - x0, z - z0) for x, z in self.gates
             if x0 <= x < x0 + width and z0 <= z < z0 + depth
@@ -225,6 +269,129 @@ def _stroke_line(
     return sorted(cells)
 
 
+# -- road classification ------------------------------------------------------
+
+#: A road counts as reaching a gate if it passes within this many tiles of one.
+#: The gate point sits on the wall centreline and a road polyline usually stops
+#: just short of the arch, so an exact touch is the wrong test.
+GATE_REACH_TILES = 4.0
+
+#: Length, as a share of the longest road on the board, at or above which a road
+#: is a principal street; and the share below which it is a back lane. Measuring
+#: against the longest road rather than an absolute tile count keeps the rule
+#: scale-free: a hamlet's high street and a city's are both the longest thing
+#: on their own board.
+MAIN_LENGTH_SHARE = 0.5
+LANE_LENGTH_SHARE = 0.2
+
+#: Other roads feeding into this one that make it a collector, not a spur.
+COLLECTOR_DEGREE = 2
+
+#: How close two roads must come to count as meeting.
+JUNCTION_TILES = 2.0
+
+
+def _point_segment_distance(p: Point, a: Point, b: Point) -> float:
+    ax, ay = a
+    bx, by = b
+    dx, dy = bx - ax, by - ay
+    span = dx * dx + dy * dy
+    if span < 1e-12:
+        return math.hypot(p[0] - ax, p[1] - ay)
+    t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / span))
+    return math.hypot(p[0] - (ax + t * dx), p[1] - (ay + t * dy))
+
+
+def _polyline_distance(p: Point, points: list[Point]) -> float:
+    return min(
+        (_point_segment_distance(p, points[i], points[i + 1])
+         for i in range(len(points) - 1)),
+        default=float("inf"),
+    )
+
+
+def _onboard_length(points: list[Point], width: float, depth: float) -> float:
+    """Length of a polyline that actually lands on the board, in tiles.
+
+    MFCG's roads run far past the mapped area -- Forest Church's highways end a
+    hundred tiles off the edge, and only the part that gets rasterised says
+    anything about the road's role on this map. Sampled at roughly one point per
+    tile, which is finer than any threshold that reads the result.
+    """
+    total = 0.0
+    for i in range(len(points) - 1):
+        (ax, ay), (bx, by) = points[i], points[i + 1]
+        seg = math.hypot(bx - ax, by - ay)
+        steps = max(1, int(seg))
+        for k in range(steps):
+            t = (k + 0.5) / steps
+            x, y = ax + t * (bx - ax), ay + t * (by - ay)
+            if 0.0 <= x <= width and 0.0 <= y <= depth:
+                total += seg / steps
+    return total
+
+
+def classify_roads(layout: Layout) -> list[str]:
+    """Put every road in a traffic class -- one entry per ``layout.roads``.
+
+    MFCG draws its whole road network at a single width (Forest Church exports
+    every street at 8 ft, 1.7 tiles) and its ``kind`` only separates roads from
+    rivers and piers, so the class cannot be read off the export. It has to be
+    inferred from the road's role in the network -- and the only roles worth
+    distinguishing are the ones that change what can drive down the street:
+
+    ``main``
+        Reaches a gate, or runs at least :data:`MAIN_LENGTH_SHARE` of the
+        longest road on the board. A gate is where carts queue to get in and the
+        high street is where they stop to unload while others go past, so both
+        have to take two carts side by side.
+    ``cart``
+        At least :data:`LANE_LENGTH_SHARE` of that length, or a junction that
+        :data:`COLLECTOR_DEGREE` other roads feed into. A collector: one cart at
+        a time, with people getting past it.
+    ``lane``
+        Anything shorter and unconnected -- a back way between two blocks, walked
+        rather than driven, so two abreast is all it owes anyone.
+
+    Length is measured on the board (:func:`_onboard_length`), not end to end: a
+    highway that only clips the corner of the map is, on this map, a track, and
+    paving it like a market street would be a lie about where the traffic is.
+
+    Rivers and planks are terrain rather than thoroughfares and get no class --
+    same reason they are excluded from widening.
+    """
+    classes = [""] * len(layout.roads)
+    lengths = {
+        i: _onboard_length(r.points, layout.width, layout.depth)
+        for i, r in enumerate(layout.roads)
+        if r.kind not in ("river", "plank") and len(r.points) >= 2
+    }
+    if not lengths:
+        return classes
+    longest = max(lengths.values()) or 1.0
+
+    for i, length in lengths.items():
+        points = layout.roads[i].points
+        at_gate = any(
+            _polyline_distance(g, points) <= GATE_REACH_TILES for g in layout.gates
+        )
+        degree = sum(
+            1 for j in lengths
+            if j != i and any(
+                _polyline_distance(p, layout.roads[j].points) <= JUNCTION_TILES
+                for p in points
+            )
+        )
+        share = length / longest
+        if at_gate or share >= MAIN_LENGTH_SHARE:
+            classes[i] = MAIN_ROAD
+        elif share >= LANE_LENGTH_SHARE or degree >= COLLECTOR_DEGREE:
+            classes[i] = CART_ROAD
+        else:
+            classes[i] = LANE_ROAD
+    return classes
+
+
 # -- rasterisation ------------------------------------------------------------
 
 def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
@@ -256,15 +423,22 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
     # into disconnected halves. Streets therefore paint last and may sit on
     # water, which is precisely what a bridge is.
     order = {"river": 0, "plank": 1, "road": 2}
-    for road in sorted(layout.roads, key=lambda r: order.get(r.kind, 2)):
-        # A street narrower than two tiles cannot be walked abreast, so the
-        # party strings out single file down the one road through town. MFCG
-        # picks its road width for a drawing, not for a grid -- Forest Church
-        # exports 8 ft -- so widen streets to the playable minimum. Rivers and
-        # planks keep their true width: those are terrain, not thoroughfares.
+    road_class = classify_roads(layout)
+    ranked = sorted(range(len(layout.roads)),
+                    key=lambda i: order.get(layout.roads[i].kind, 2))
+    for i in ranked:
+        road = layout.roads[i]
+        # MFCG picks one road width for a drawing, not for a grid -- Forest
+        # Church exports every street at 8 ft, 1.7 tiles -- so the width has to
+        # be set here from what has to use the street. A creature is one tile,
+        # a cart is two: a lane must take two people abreast, a cart street a
+        # cart with someone squeezing past, and a main street two carts passing.
+        # Rivers and planks keep their true width; they are terrain, and a
+        # footbridge is not a thoroughfare.
+        cls = road_class[i]
         stroke = road.width
-        if road.kind not in ("river", "plank"):
-            stroke = max(stroke, MIN_STREET_TILES)
+        if cls:
+            stroke = max(stroke, STREET_STANDARD[cls])
         cells = _stroke_line(shift(road.points), stroke, width, depth)
         if road.kind == "river":
             paint(cells, WATER)
@@ -272,6 +446,10 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
             paint(cells, PIER)
         else:
             paint(cells, STREET, over=frozenset({GROUND, FIELD, WATER}))
+            for x, z in cells:
+                if (tm.inside(x, z) and tm.surface[z][x] == STREET
+                        and _CLASS_RANK[cls] > _CLASS_RANK[tm.street_class[z][x]]):
+                    tm.street_class[z][x] = cls
 
     for area in layout.areas_of("plaza"):
         paint(_fill_polygon(shift(area.ring), width, depth), PLAZA)
@@ -280,6 +458,14 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
 
     # Buildings last: where a footprint and a street disagree after rounding,
     # the building wins, so structures stay whole rather than gaining holes.
+    #
+    # With one exception. A through route is widened for carts *before* this
+    # runs, so a footprint lapping over it re-narrows the street it was just
+    # widened for -- and the per-class width check cannot see that, because the
+    # tile is still classed a main street, it just has a house either side.
+    # Through-route cells therefore hold against buildings; the footprint loses
+    # the overlap instead. Lanes keep the old behaviour: they are not for carts,
+    # and a building is worth more than a wider alley.
     for b in layout.buildings:
         cells = _fill_polygon(shift(b.ring), width, depth)
         for x, z in cells:
@@ -287,6 +473,8 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
                 continue
             if tm.building[z][x]:
                 continue  # first building to claim a cell keeps it
+            if tm.street_class[z][x] in ("main", "cart"):
+                continue  # a cart route stays open
             tm.building[z][x] = b.id
             tm.surface[z][x] = FLOOR
         tm.floors[b.id] = max(1, b.floors)
@@ -337,7 +525,13 @@ def _bridge_water_gaps(
     the party is supposed to cross. Every remaining large district is therefore
     joined to the main one by the shortest crossing over water.
     """
-    width = max(2, int(round(max((r.width for r in layout.roads if r.kind == "road"), default=2.0))))
+    # A bridge is the only way across the water, so a cart stopped on it stops
+    # the town. It is built to the main-street standard for that reason, rather
+    # than to whatever width MFCG happened to draw its roads at.
+    span_width = max(
+        MAIN_STREET_TILES,
+        max((r.width for r in layout.roads if r.kind == "road"), default=2.0),
+    )
     built: list[tuple[int, int, int, int]] = []
 
     for _ in range(8):  # bounded: a town needs a handful of bridges, not dozens
@@ -378,9 +572,10 @@ def _bridge_water_gaps(
 
         _, (ax, az), (bx, bz) = best
         for x, z in _stroke_line([(ax + 0.5, az + 0.5), (bx + 0.5, bz + 0.5)],
-                                 float(width), tm.width, tm.depth):
+                                 span_width, tm.width, tm.depth):
             if tm.surface[z][x] == WATER and not tm.building[z][x]:
                 tm.surface[z][x] = STREET
+                tm.street_class[z][x] = MAIN_ROAD
         built.append((ax, az, bx, bz))
 
         if set(comps[0]) == main and not built:
@@ -504,10 +699,13 @@ def _rasterize_walls(tm: TileMap, layout: Layout, shift, width: int, depth: int)
         for x, z in _stroke_line(shift(ring), thickness, width, depth):
             tm.wall[z][x] = True
 
-    # Carve gates. A gate must be wide enough to march through, so it is opened
-    # to the width of the roads that meet it rather than a single cell.
+    # Carve gates. A gate is where the through-route crosses the wall, so it is
+    # opened to the main-street standard rather than to a single cell or to
+    # whatever width MFCG drew: an arch narrower than the road through it
+    # pinches the one way into town back down, and a cart that cannot fit
+    # through the gate cannot reach the market it was driven here for.
     road_width = max(
-        [r.width for r in layout.roads if r.kind == "road"] or [2.0]
+        [r.width for r in layout.roads if r.kind == "road"] + [MAIN_STREET_TILES]
     )
     radius = max(1, int(math.ceil(road_width / 2.0)) + 1)
     for gx, gy in layout.gates:
@@ -524,6 +722,7 @@ def _rasterize_walls(tm: TileMap, layout: Layout, shift, width: int, depth: int)
                     tm.gates.add((x, z))
                     if tm.surface[z][x] not in (WATER,):
                         tm.surface[z][x] = STREET
+                        tm.street_class[z][x] = MAIN_ROAD
 
 
 def _find_perimeters(tm: TileMap, layout: Layout | None) -> None:

@@ -11,6 +11,7 @@ legibility rather than engine constraints:
 
 * can a creature walk from a gate to every door?
 * is the street network one connected town, or several islands?
+* is each street wide enough for what has to drive down it?
 * are streets wide enough for creatures to pass abreast?
 * does every building have a way in?
 * does the result fit TaleSpire's board and slab limits?
@@ -22,13 +23,20 @@ from dataclasses import dataclass, field
 
 from .layout import TILE_FEET
 from .raster import (
+    CART_ROAD,
+    CART_TILES,
     FLOOR,
     GROUND,
+    LANE_ROAD,
+    LANE_TILES,
+    MAIN_ROAD,
+    MAIN_STREET_TILES,
     OPEN,
     PIER,
     PLAZA,
     SIDES,
     STREET,
+    STREET_STANDARD,
     WATER,
     TileMap,
     components,
@@ -40,8 +48,19 @@ from .raster import (
 BOARD_MAX_TILES = 1_000_000
 BOARD_MAX_SPAN = 2000
 
-#: A creature occupies one tile; two must pass abreast on a real street.
-MIN_STREET_TILES = 2
+#: A creature occupies one tile; two must pass abreast on any walkable way.
+#: The per-class standards a *road* is held to live in :mod:`citysmith.raster`
+#: alongside the rasteriser that lays them down; this is the floor below which
+#: nothing is playable at all, whatever it was meant to be.
+MIN_STREET_TILES = LANE_TILES
+
+#: Class -> how it reads in a report.
+_CLASS_LABEL = {MAIN_ROAD: "main street", CART_ROAD: "cart street", LANE_ROAD: "lane"}
+
+#: Classes that carry vehicles. A cart is two tiles wide, so one of these
+#: pinched under :data:`~citysmith.raster.CART_TILES` cannot let a cart past a
+#: pedestrian -- the route is shut for the traffic it exists to carry.
+_THROUGH_ROUTES = (MAIN_ROAD, CART_ROAD)
 
 LEVELS = {"pass": 0, "warn": 1, "fail": 2}
 
@@ -152,23 +171,74 @@ def verify(tm: TileMap, *, asset_count: int | None = None, slab_count: int | Non
     )
 
     # -- street width ---------------------------------------------------------
+    # Two separate questions, because a street can fail at two different jobs.
+    # The floor first: a creature occupies one tile, so anywhere under two the
+    # party walks single file. Then the standard the stretch was actually laid
+    # to -- a cart is two tiles wide, so a through-route under three tiles
+    # cannot let a cart past a pedestrian and under four cannot let two carts
+    # pass at all. Reporting one flat number against every surface hides both:
+    # an alley at two tiles is correct, a gate road at two tiles is a blockage.
     narrow = 0
     sampled = 0
+    # class -> [tiles, tiles meeting that class's standard, tiles under a cart]
+    by_class: dict[str, list[int]] = {}
     for z in range(tm.depth):
         for x in range(tm.width):
-            if tm.surface[z][x] not in (STREET, PLAZA):
+            surface = tm.surface[z][x]
+            if surface not in (STREET, PLAZA):
                 continue
             sampled += 1
-            if open_width_at(tm, x, z) < MIN_STREET_TILES:
+            span = open_width_at(tm, x, z)
+            if span < LANE_TILES:
                 narrow += 1
+            # A plaza is an open square, not a road, so it is held to the floor.
+            cls = tm.street_class[z][x] if surface == STREET else ""
+            cls = cls or LANE_ROAD
+            row = by_class.setdefault(cls, [0, 0, 0])
+            row[0] += 1
+            if span >= STREET_STANDARD[cls]:
+                row[1] += 1
+            if span < CART_TILES:
+                row[2] += 1
+
     if sampled:
         share = 100 * narrow / sampled
         report.stats["narrow_street_tiles"] = narrow
         report.add(
             "pass" if share < 5 else "warn", "street width",
             f"{narrow} of {sampled} street tiles ({share:.1f}%) are under "
-            f"{MIN_STREET_TILES} tiles ({MIN_STREET_TILES*TILE_FEET:.0f} ft) wide -- "
-            "creatures cannot pass abreast there",
+            f"{LANE_TILES:.0f} tiles ({LANE_TILES*TILE_FEET:.0f} ft) wide -- "
+            "a creature fills one tile, so two cannot pass abreast there",
+        )
+
+        parts = []
+        below_standard = through = pinched = 0
+        for cls in (MAIN_ROAD, CART_ROAD, LANE_ROAD):
+            row = by_class.get(cls)
+            if not row:
+                continue
+            tiles, meeting, under_cart = row
+            standard = STREET_STANDARD[cls]
+            parts.append(
+                f"{_CLASS_LABEL[cls]} {meeting}/{tiles} tiles hold "
+                f"{standard:.0f} ({standard*TILE_FEET:.0f} ft)"
+            )
+            below_standard += tiles - meeting
+            if cls in _THROUGH_ROUTES:
+                through += tiles
+                pinched += under_cart
+        report.stats["street_tiles_by_class"] = {c: v[0] for c, v in by_class.items()}
+        report.stats["pinched_vehicle_tiles"] = pinched
+
+        pinch = 100 * pinched / max(1, through)
+        short = 100 * below_standard / sampled
+        level = "fail" if pinch >= 25 else "warn" if pinch >= 5 or short >= 20 else "pass"
+        report.add(
+            level, "vehicle width",
+            ", ".join(parts)
+            + f"; {pinched} of {through} through-route tiles ({pinch:.1f}%) are "
+              f"under {CART_TILES:.0f} tiles ({CART_TILES*TILE_FEET:.0f} ft), "
+              "where a 10 ft cart cannot get past a pedestrian",
         )
 
     # -- surfaces -------------------------------------------------------------
@@ -206,6 +276,20 @@ def verify(tm: TileMap, *, asset_count: int | None = None, slab_count: int | Non
             "pass" if (max_slab_bytes or 0) <= 30720 else "fail", "slab export", detail
         )
 
+
+    pinches = through_route_pinches(tm)
+    through = sum(1 for z in range(tm.depth) for x in range(tm.width)
+                  if getattr(tm, "street_class", None)
+                  and tm.street_class[z][x] in ("main", "cart"))
+    if through:
+        share = 100 * len(pinches) / through
+        report.add(
+            "pass" if not pinches else ("warn" if share < 5 else "fail"),
+            "cart clearance",
+            f"{len(pinches)} of {through} through-route tiles ({share:.1f}%) have an "
+            f"open cross-section under 3 tiles (15 ft) -- a building overlapping a "
+            f"widened street re-narrows it, and a 10 ft cart cannot pass there",
+        )
 
     return report
 
@@ -303,6 +387,39 @@ def tilemap_svg(tm: TileMap, *, scale: int = 3, overlay: bool = True) -> str:
         )
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def through_route_pinches(tm, minimum: float = 3.0) -> list[tuple[int, int, int]]:
+    """Through-route tiles whose open cross-section is under ``minimum``.
+
+    Streets are widened before buildings are painted, and buildings win on
+    overlap -- so a footprint that laps over a widened street re-narrows it.
+    Checking each tile against its class standard cannot see this: the tile is
+    still *classed* main street, it just has a house on both sides of it. What
+    matters to a cart is the open cross-section, measured across the direction
+    of travel, so that is what this returns.
+    """
+    out: list[tuple[int, int, int]] = []
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if not getattr(tm, "street_class", None) or tm.street_class[z][x] not in ("main", "cart"):
+                continue
+            runs = []
+            for horiz in (True, False):
+                n = 1
+                for step in (1, -1):
+                    i = 1
+                    while True:
+                        nx, nz = (x + step * i, z) if horiz else (x, z + step * i)
+                        if not tm.inside(nx, nz) or tm.surface[nz][nx] not in OPEN:
+                            break
+                        n += 1; i += 1
+                runs.append(n)
+            # Travel runs along the longer axis; the cross-section is the other.
+            cross = min(runs)
+            if cross < minimum:
+                out.append((x, z, cross))
+    return out
 
 
 def check_placements(builder, tm) -> list[str]:
