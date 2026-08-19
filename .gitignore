@@ -1,0 +1,17 @@
+# Built from the user's own TaleSpire install -- not portable, regenerate locally.
+catalog.json
+
+out/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+
+# Community slabs downloaded for study (tools/harvest_slabs.py regenerates them).
+# These are other builders' work from Tales Tavern -- we learn construction
+# technique from them, we do not redistribute their geometry.
+library/

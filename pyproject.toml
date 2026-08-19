@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "citysmith"
+version = "0.1.0"
+description = "Generate a city, find a location worth playing in, and build it as a TaleSpire map."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+# The generator is fully usable offline. Claude only translates natural
+# language into generator parameters and writes GM-facing prose.
+ai = ["anthropic>=0.40"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+citysmith = "citysmith.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["citysmith*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
