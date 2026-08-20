@@ -135,7 +135,7 @@ actually matters, all confirmed in-game:
   right-click with an empty hand opens the asset library over the board, so
   clear once, deliberately, rather than pre-emptively before each camera move.
   The community keybind lists do not cover any of this and are stale besides
-  (they give WASD for the camera, which does nothing here); the bottom hint bar
+  (they list WASD for the camera without saying it has to be held); the hint bar
   would, but it is clipped unless the window is sized to fit the desktop.
 - Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
   not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,

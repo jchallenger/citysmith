@@ -12,6 +12,9 @@ does not rediscover them each time.
   .\tools\ts.ps1 drop
   .\tools\ts.ps1 key    -Keys "^c"
   .\tools\ts.ps1 orbit  -X 800 -Y 500 -DX 260 -DY 0
+  .\tools\ts.ps1 pan    -X 800 -Y 300 -DX 0 -DY 500      # short, precise
+  .\tools\ts.ps1 key    -Keys w -Hold 3.0                # long haul; WASD ramps
+  .\tools\ts.ps1 clear                                   # empty the hand
   .\tools\ts.ps1 zoom   -X 800 -Y 500 -Ticks -4
   .\tools\ts.ps1 select -X 400 -Y 300 -X2 1200 -Y2 700
   .\tools\ts.ps1 copyout
