@@ -29,13 +29,19 @@ DISTRICTS = [
      [("shipped", "surfaces align at the top, not the bottom"),
       ("shipped", "roof height follows each building's storey count")]),
 
-    ("The Riverbank", "b-riverbank", "Shingle shore along the sunken channel",
-     "Water sits half a tile below the bank, so shoving someone in is a real five-foot decision "
-     "rather than a cosmetic one, and the shingle course gives a party somewhere to stand that is "
-     "visibly not the river. Stumps and fallen trunks along the bank are cover a scout can use "
-     "without leaving the waterline.",
-     [("shipped", "shingle shore, 748 tiles"),
-      ("shipped", "water half a tile down: a bank, not a canal")]),
+    ("The Riverbank", "b-riverbank", "Shallows at the bank, a channel down the middle",
+     "This is what read as accidental terracing, and the reading was fair &mdash; it was a trench. "
+     "The height field turned out to be flat everywhere except the border, the channel and the "
+     "wall, so nothing was stepped by mistake. A three-channel probe found the real problem: "
+     "TaleSpire&#39;s water tile is <em>translucent and tints with what is under it</em>, and every "
+     "cell of the river had a flush bed &mdash; the palest, flattest case of the three. The bed now "
+     "follows distance from the bank, so the edges stay shallow and fordable and the middle goes "
+     "dark. The surface is still one flat layer: depth costs nothing, because the water does the "
+     "work. Where a street runs along the bank there is a harbour rail now, instead of cobbles "
+     "ending at a half-tile cliff.",
+     [("shipped", "bed graded by distance from bank: 448 shallow, 660 deep"),
+      ("shipped", "quay rail where paving meets water"),
+      ("shipped", "open water uses the 2x2 tile: 115 blocks, 460 cells")]),
 
     ("The Roofscape", "c-roofscape", "Dense quarter against open pinewood",
      "The join between built and unbuilt, which is where a generated town usually gives itself "
@@ -189,7 +195,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 15</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 16</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -197,7 +203,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,973</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,309</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -213,6 +219,16 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 16 &middot; Aug 19</span><div><b>A river with depth, shallows and a
+    quay.</b> Two bands that looked like accidental layers turned out to be the river &mdash; the
+    height field is flat everywhere else &mdash; but it was reading as a trench, and a probe found
+    why: TaleSpire&#39;s water tile is translucent and tints with the bed under it, and every cell
+    of the river had a flush bed, the palest case. The bed now grades by distance from the bank,
+    which costs nothing because the surface stays one layer. Open water moved to the 2x2 tile.
+    Streets on the bank got a harbour rail instead of a cliff edge &mdash; and placing it exposed
+    a general bug: <code>place_wall</code> assumed every edge mesh runs along x, so all 26 rails
+    landed a quarter tile off-grid. The build&#39;s own off-grid check caught it before the
+    board did.</div></li>
   <li><span class="when">rev 15 &middot; Aug 19</span><div><b>The map edge tapers, and chunk
     skipping was taught about it.</b> These could not be done separately: open-country detection
     asked whether ground sat at grade, so lowering the border would have reclassified every
