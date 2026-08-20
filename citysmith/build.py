@@ -1178,6 +1178,100 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
             b.ground_baseline[(x, z)] = here - b.palette.require(role).size_y
 
 
+#: A civic building earns a tower if it is at least this many tiles and this
+#: much longer than it is wide. A long narrow plan is a nave, and a nave with
+#: a tower at one end is the one silhouette nobody mistakes for a barn. The
+#: Forest Church's temple is 6x19; nothing else on the map qualifies, which is
+#: the point -- a landmark stops being one if every building has a tower.
+TOWER_MIN_TILES = 60
+TOWER_MIN_ASPECT = 2.5
+TOWER_EXTRA_STOREYS = 3
+
+
+def pick_towers(tm, ceiling: int) -> dict[tuple[int, int], str]:
+    """Cells that carry a tower, keyed to the building they belong to.
+
+    The tower is a square block at the *narrow* end of the plan, sized to the
+    building's width, so it sits over the end of the nave rather than beside
+    it. Roofs skip these cells: the tower carries its own.
+    """
+    towers: dict[tuple[int, int], str] = {}
+    for bid, cells in footprints(tm).items():
+        if bid.split("-")[0] not in CIVIC_KINDS or len(cells) < TOWER_MIN_TILES:
+            continue
+        xs = [c[0] for c in cells]
+        zs = [c[1] for c in cells]
+        w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
+        long_axis_z = d >= w
+        span, across = (d, w) if long_axis_z else (w, d)
+        if span < across * TOWER_MIN_ASPECT:
+            continue
+
+        side = min(across, span // 3)
+        if side < 2:
+            continue
+        # Whichever end has more of its footprint intact takes the tower.
+        if long_axis_z:
+            near = {c for c in cells if c[1] < min(zs) + side}
+            far = {c for c in cells if c[1] > max(zs) - side}
+        else:
+            near = {c for c in cells if c[0] < min(xs) + side}
+            far = {c for c in cells if c[0] > max(xs) - side}
+        block = near if len(near) >= len(far) else far
+        for cell in block:
+            towers[cell] = bid
+    return towers
+
+
+def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
+                top: float, storey_h: float, ceiling: int) -> None:
+    """Raise the tower blocks and roof each one separately.
+
+    The building's own walls already reach its eaves; a tower carries on from
+    there. Its perimeter is computed against the *tower* block rather than the
+    footprint, so the wall that separates tower from nave is built too --
+    without it the tower would be an open-sided box sat on the roof.
+    """
+    if not towers:
+        return
+    cap = b.palette.resolve("city_wall_cap")
+    floor_tile = b.palette.resolve("floor_upper") or b.palette.require("floor")
+
+    by_building: dict[str, set[tuple[int, int]]] = {}
+    for cell, bid in towers.items():
+        by_building.setdefault(bid, set()).add(cell)
+
+    for bid, cells in sorted(by_building.items()):
+        base_floors = storeys_of(tm, bid, ceiling)
+        for level in range(base_floors, base_floors + TOWER_EXTRA_STOREYS):
+            y = top + level * storey_h
+            for (x, z) in sorted(cells):
+                b.add(place_tile(floor_tile, x, z, y))
+                for side, dx, dz in SIDE_OFFSETS:
+                    if (x + dx, z + dz) not in cells:
+                        b.add(place_wall(face, x, z, side, y))
+
+        crown = top + (base_floors + TOWER_EXTRA_STOREYS) * storey_h
+        rings = _roof_rings(cells)
+        side_piece = b.palette.resolve("roof_side")
+        corner = b.palette.resolve("roof_corner")
+        flat = b.palette.resolve("roof")
+        rise = side_piece.size_y if side_piece is not None else 1.0
+        for (x, z) in sorted(cells):
+            r = rings[(x, z)]
+            fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
+                         if rings.get((x + dx, z + dz), -1) < r)
+            piece, rot = _roof_piece(fall, side_piece, corner, flat)
+            if piece is not None:
+                b.add(place_tile(piece, x, z, crown + r * rise, rot))
+        # Battlements round the parapet make it a bell tower rather than a
+        # cottage that happens to be tall.
+        if cap is not None:
+            for (x, z) in sorted(cells):
+                if any((x + dx, z + dz) not in cells for _, dx, dz in SIDE_OFFSETS):
+                    b.add(place_tile(cap, x, z, crown))
+
+
 def _lay_quays(b: Builder, tm, grade: float,
                taper: dict[tuple[int, int], float | None]) -> None:
     """Rail the edge where paved ground meets water.
@@ -1208,7 +1302,8 @@ def _lay_quays(b: Builder, tm, grade: float,
                     b.add(place_wall(rail, x, z, side, grade - drop))
 
 
-def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) -> None:
+def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
+               skip: set[tuple[int, int]] | None = None) -> None:
     """Roof each block as concentric rings, the way hand-builders do.
 
     The convention here is not inferred from screenshots -- it is read out of
@@ -1226,6 +1321,8 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
     one with a flat cap piece; the Village kit has none, which is why our
     ridges showed an open trough.
     """
+    skip = skip or set()
+
     def _floors_at(bid: str) -> int:
         return storeys_of(tm, bid, max_floors)
 
@@ -1236,7 +1333,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
     for z0 in range(tm.depth):
         for x0 in range(tm.width):
             bid = tm.building[z0][x0]
-            if not bid or (x0, z0) in seen:
+            if not bid or (x0, z0) in seen or (x0, z0) in skip:
                 continue
             fl = _floors_at(bid)
             comp: set[tuple[int, int]] = set()
@@ -1246,7 +1343,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
                 if (x, z) in seen or not (0 <= x < tm.width and 0 <= z < tm.depth):
                     continue
                 nb = tm.building[z][x]
-                if not nb or _floors_at(nb) != fl:
+                if not nb or _floors_at(nb) != fl or (x, z) in skip:
                     continue
                 seen.add((x, z)); comp.add((x, z))
                 stack += [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)]
@@ -1660,8 +1757,10 @@ def build_from_tilemap(
                 for x, z in sorted(cells_xy):
                     b.add(place_tile(upper, x, z, y))
 
+    towers = pick_towers(tm, storeys)
     if roof_asset is not None:
-        _lay_roofs(b, tm, top, storey_h, storeys)
+        _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
+    _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
 
     _lay_town_wall(b, tm, town_wall, top, wall_height)
 
@@ -1760,6 +1859,47 @@ def _plant_conifer(scatter: Scatter, palette: Palette, cx: float, cz: float,
     return scatter.place(pieces)
 
 
+#: Building kinds that trade with the public, and so hang a sign. A smithy or
+#: an inn that looks exactly like the 28 cottages either side of it gives a
+#: party nothing to navigate by, and "which door is the tavern" is the single
+#: most common question asked of a town map.
+SIGNED_KINDS = frozenset({"tavern", "shop", "smithy", "apothecary", "stable",
+                          "warehouse", "guildhall"})
+
+
+def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
+                taper: dict[tuple[int, int], float | None]) -> None:
+    """Hang a trade sign beside the primary door of each public building.
+
+    The sign goes in the cell the door opens *onto*, pushed against the
+    facade, at head height. It is dealt from the building's id so a rebuild
+    hangs the same sign on the same inn, and it goes through the collision
+    scatter like any other prop -- a sign inside a barrel is still a dropped
+    sign.
+    """
+    signs = [b.palette.resolve("shop_sign", v) for v in range(6)]
+    signs = [s for s in signs if s is not None]
+    if not signs:
+        return
+
+    for bid, doors in sorted(tm.doors.items()):
+        if bid.split("-")[0] not in SIGNED_KINDS or not doors:
+            continue
+        x, z, side = doors[0]
+        dx, dz = next((d, e) for sd, d, e in SIDE_OFFSETS if sd == side)
+        ox, oz = x + dx, z + dz
+        if not (0 <= ox < tm.width and 0 <= oz < tm.depth):
+            continue
+        drop = taper.get((ox, oz), 0.0)
+        if drop is None:
+            continue
+        sign = signs[zlib.crc32(bid.encode()) % len(signs)]
+        # Just off the facade, and to one side so it does not block the door.
+        cx = ox + 0.5 - dx * 0.3 + (0.3 if dx == 0 else 0.0)
+        cz = oz + 0.5 - dz * 0.3 + (0.3 if dz == 0 else 0.0)
+        scatter.one(sign, cx, cz, grade - drop + 1.4, _SIDE_ROT[side])
+
+
 def _dress_districts(b: Builder, tm, grade: float,
                      taper: dict[tuple[int, int], float | None]) -> None:
     """Scatter district-appropriate props so each quarter reads as itself.
@@ -1791,6 +1931,7 @@ def _dress_districts(b: Builder, tm, grade: float,
 
     rng = random.Random("dress:stable")  # deterministic across rebuilds
     scatter = Scatter(b)
+    _hang_signs(b, tm, scatter, grade, taper)
 
     # Parks come from the layout as GROUND repainted by area polygons; the
     # raster keeps no park mask, so rediscover them cheaply: ground cells not

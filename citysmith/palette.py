@@ -295,6 +295,20 @@ MEDIEVAL = Style(
         # going to become gravel -- so the bank was simply a cliff the cobbles
         # stopped at. A low harbour rail turns that into a quay edge. Piers
         # deliberately do not get one: a pier exists to reach the water.
+        # Hung beside the door of a trade building. A street of 28 identical
+        # cottages tells a party nothing; a sign says which door is the inn.
+        # One query listing several names, not one query per name: ``resolve``
+        # takes the *first* query that matches anything and then picks within
+        # it, so a query per name makes every variant resolve to the same
+        # asset. All six of this role's signs came out identical that way.
+        #
+        # Every "Market Sign" in the catalog is Cyberpunk pack -- the ``_MED``
+        # filter is what stops a medieval village hanging neon over its inns.
+        "shop_sign": [
+            _prop(name=("Sign (Generic) 01", "Sign (Generic) 02",
+                        "Sign (Village) 01", "Sign (Village) 02",
+                        "Sign (Village) 03", "Spike sign"), **_MED),
+        ],
         "quay_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),

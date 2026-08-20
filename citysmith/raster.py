@@ -776,6 +776,13 @@ def _facade_runs(
 #: and a missed tactical option for whatever lives inside.
 SECOND_DOOR_AREA = 15
 
+#: Homes need more floor than a shop does before a second door earns its
+#: place. A back door on a cottage is ordinary; two doors on a *small* one is
+#: the tell that a generator sized them by a single number. 25 of 28 houses
+#: had two, at a median 30-tile footprint.
+SECOND_DOOR_AREA_HOME = 32
+_HOME_KINDS = frozenset({"house", "shed", "stable"})
+
 _OPPOSITE = {"n": "s", "s": "n", "w": "e", "e": "w"}
 
 
@@ -839,7 +846,10 @@ def _place_doors(tm: TileMap, layout: Layout | None) -> None:
         # The opposite facade is preferred over an adjacent one so the two
         # entrances sit at either end of the building rather than round a
         # corner from each other -- but publicness still outranks that.
-        if area.get(bid, 0) >= SECOND_DOOR_AREA:
+        kind = bid.split("-")[0]
+        needed = (SECOND_DOOR_AREA_HOME if kind in _HOME_KINDS
+                  else SECOND_DOOR_AREA)
+        if area.get(bid, 0) >= needed:
             others = []
             for (reached, rank, offset), cell in candidates:
                 if reached or cell[2] == primary[2]:
