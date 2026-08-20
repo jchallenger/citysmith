@@ -69,13 +69,16 @@ DISTRICTS = [
       ("shipped", "flanking towers, diagonal jambs included"),
       ("next", "no gate leaves or arch dressing yet")]),
 
-    ("The Back Lanes", "e-back-lanes", "Between houses in the dense quarter",
-     "Grass alleys between lots read as lived-in shortcuts &mdash; a rogue's line during a chase. "
-     "Barrels and a cart now actually appear against the walls: street clutter is only eligible on "
-     "cells touching a building, which is 39 cells out of 1,234 once main streets widened to four "
-     "tiles, so the old 2.5% rate gave the entire town one barrel.",
-     [("shipped", "street clutter appears at a rate that suits 39 eligible cells"),
-      ("next", "lanes are grass; a churned dirt strip would sell them harder")]),
+    ("The Back Lanes", "e-back-lanes", "Signed doors and barrels against the walls",
+     "Eighteen trade buildings hang a sign now &mdash; inns, smithies, shops, stables &mdash; "
+     "because a street of 28 identical cottages tells a party nothing, and &ldquo;which door is "
+     "the tavern&rdquo; is the question a town map exists to answer. Houses also stopped having "
+     "two front doors: a back door on a cottage is ordinary, two on a small one is a generator "
+     "sizing them by a single number. Homes need 32 tiles for a second entrance now rather than "
+     "15, which took houses from 3-with-one-door to 23.",
+     [("shipped", "18 signed trade buildings"),
+      ("shipped", "door count scaled to footprint and kind"),
+      ("next", "every footprint is still a perfect rectangle")]),
 
     ("The Pinewood", "g-pinewood", "Trees with trunks, spaced so they all arrive",
      "Every conifer used to be a bare canopy cone sitting on the grass. &ldquo;Stackable Pine "
@@ -86,19 +89,16 @@ DISTRICTS = [
      [("shipped", "pines stacked from their kit: 557 joints, none misaligned"),
       ("shipped", "0 overlapping props, down from 1,000 of 2,137")]),
 
-    ("The Map Edge", "z-map-edge", "Ground that falls away instead of stopping",
-     "The outer rings now step down &mdash; modal ground climbs 1.0 to 3.0 tiles over seven cells "
-     "inland &mdash; and the outermost row is mostly bitten away, so the boundary is not a ruler "
-     "line. Honest caveat: at TaleSpire&#39;s near-top-down camera a half-tile step is subtle, so "
-     "this reads as a gentle shelf rather than a dramatic falloff. The interesting part is what it "
-     "cost. Lowering the border would have stopped that ground counting as &ldquo;at grade&rdquo;, "
-     "which is how open-country chunks are recognised &mdash; the taper would have silently "
-     "disabled the skipping that drops a fifth of the map. Ground is tested against its own "
-     "cell&#39;s baseline now, so a lowered border is still background while a sunken channel is "
-     "still a feature. Ten chunks skipped before, ten after.",
-     [("shipped", "outer rings step down; ragged outer row"),
-      ("shipped", "skipping survives the taper: 10 chunks before and after"),
-      ("next", "falloff is subtle at the game's camera angle")]),
+    ("The Map Edge", "z-map-edge", "Terraces stepping down out of the map",
+     "The falloff, finally caught at an angle that shows it: the ground steps down in irregular "
+     "blocks with a ragged outer boundary, so the map ends as country running out rather than as "
+     "a slab someone cut a town from. What it cost is the interesting part &mdash; lowering the "
+     "border would have stopped that ground counting as &ldquo;at grade&rdquo;, which is how "
+     "open-country chunks are recognised, so the taper would have silently disabled the skipping "
+     "that drops a fifth of the map. Ground is tested against its own cell&#39;s baseline now. "
+     "Ten chunks skipped before, ten after.",
+     [("shipped", "terraced, ragged falloff on every border"),
+      ("shipped", "skipping survives it: 10 chunks before and after")]),
 ]
 
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
@@ -195,7 +195,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 16</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 17</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -203,7 +203,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,309</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,525</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -219,6 +219,16 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 17 &middot; Aug 20</span><div><b>A church that looks like one.</b>
+    A survey of the design rather than the geometry: 51 of 51 footprints are perfect rectangles,
+    twelve building kinds share two treatments between them, and the map named Forest Church had
+    a temple that was a box with cottage thatch on it. Its plan is 6&times;19 &mdash; a nave &mdash;
+    so a long, narrow, large civic building now takes a battlemented tower at the narrow end,
+    three storeys above its own eaves and carrying its own roof. It is the tallest thing on the
+    map, which is what a landmark is for. Eighteen trade buildings hang signs, and houses stopped
+    having two front doors. Two changes were <em>rejected</em> by probe: the tiled city roof kit
+    does not share the Thatched rotation convention (a side-by-side test came out scattered and
+    floating), and every &ldquo;Market Sign&rdquo; in the catalog is Cyberpunk pack.</div></li>
   <li><span class="when">rev 16 &middot; Aug 19</span><div><b>A river with depth, shallows and a
     quay.</b> Two bands that looked like accidental layers turned out to be the river &mdash; the
     height field is flat everywhere else &mdash; but it was reading as a trench, and a probe found
