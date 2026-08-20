@@ -30,6 +30,7 @@ angle would need a true oriented-bounds calculation.
 
 from __future__ import annotations
 
+import base64
 import collections
 import math
 import random
@@ -510,6 +511,12 @@ class _Cell:
     items: list[Placement]
 
 
+#: Bytes held back when packing, for the registration marker each chunk gets
+#: afterwards. One placement is 8 bytes on the wire; this is generous because
+#: the cost of being wrong is a build that will not export at all.
+_REGISTRATION_MARGIN = 64
+
+
 def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list["SlabChunk"]:
     """Merge adjacent chunks up to the slab limit so fewer slabs are pasted.
 
@@ -532,10 +539,20 @@ def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list[
         return (row, -col if row % 2 else col)   # serpentine
 
     def fits(run: list["SlabChunk"]) -> bool:
+        # Decode to count the bytes rather than scaling the base64 length by
+        # 3/4: padding makes that estimate optimistic, and it was optimistic
+        # by exactly three bytes on a chunk that then failed to encode. The
+        # whole point of measuring instead of counting assets is defeated by
+        # measuring approximately.
         try:
-            return len(encode(_fuse(run).slab).encode()) * 3 // 4 <= MAX_COMPRESSED_BYTES
+            size = len(base64.b64decode(encode(_fuse(run).slab)))
         except SlabError:
             return False
+        # Registration markers are added to every chunk *after* packing, so
+        # the run measured here is one placement short of the slab that will
+        # actually be written. Leaving no room for it put a chunk three bytes
+        # over the limit and failed the export outright.
+        return size <= MAX_COMPRESSED_BYTES - _REGISTRATION_MARGIN
 
     ordered = sorted(chunks, key=key)
     out: list["SlabChunk"] = []
@@ -2299,6 +2316,19 @@ def _dress_districts(b: Builder, tm, grade: float,
 
     rng = random.Random("dress:stable")  # deterministic across rebuilds
     scatter = Scatter(b)
+    #: Where a tree stands, so a *felled* stump is never dropped beside one.
+    #: A cut stump within a canopy's reach reads as that tree's trunk, badly
+    #: aligned -- which is what "trees that do not match their trunks" turned
+    #: out to be. The conifer stack itself is concentric at every rotation and
+    #: from every angle; it was the loose stumps all along, and a check for
+    #: stumps strictly *under* a canopy missed them because beside is enough.
+    planted: list[tuple[float, float, float]] = []
+    felled: list[tuple[float, float]] = []
+
+    def _clear_of_stumps(cx: float, cz: float, r: float) -> bool:
+        return not any((cx - sx) ** 2 + (cz - sz) ** 2 < (r + 1.0) ** 2
+                       for sx, sz in felled)
+
     _hang_signs(b, tm, scatter, grade, taper)
     near_town = building_distance(tm)
     market = [b.palette.resolve("market_goods", v) for v in range(4)]
@@ -2375,16 +2405,28 @@ def _dress_districts(b: Builder, tm, grade: float,
                             else ("tree_broadleaf", "tree_conifer",
                                   "tree_dead")[rng.randrange(3)])
                     if role == "tree_conifer":
-                        # Thick stands grow tall; an open glade holds scrub.
-                        _plant_conifer(scatter, b.palette, cx, cz, here, rot,
-                                       tall=rng.random() < 0.2 + 0.5 * thickness)
+                        crown = b.palette.resolve("tree_conifer_crown")
+                        r = max(crown.size_x, crown.size_z) / 2 if crown else 1.0
+                        if (_clear_of_stumps(cx, cz, r)
+                                and _plant_conifer(scatter, b.palette, cx, cz,
+                                                   here, rot, tall=False)):
+                            planted.append((cx, cz, r))
                     else:
                         tree = b.palette.resolve(role)
                         if tree is not None:
-                            scatter.one(tree, cx, cz, here, rot)
+                            r = max(tree.size_x, tree.size_z) / 2
+                            if (_clear_of_stumps(cx, cz, r)
+                                    and scatter.one(tree, cx, cz, here, rot)):
+                                planted.append((cx, cz, r))
                 elif roll < p_stump and pine_stump is not None:
-                    # The stump stands alone as an occasional cut tree.
-                    scatter.one(pine_stump, x + 0.5, z + 0.5, here, rng.randrange(24))
+                    # A cut tree, and it has to read as one: clear of any
+                    # standing tree, or it looks like that tree's trunk.
+                    sx, sz = x + 0.5, z + 0.5
+                    if (not any((sx - tx) ** 2 + (sz - tz) ** 2 < (r + 1.0) ** 2
+                                for tx, tz, r in planted)
+                            and scatter.one(pine_stump, sx, sz, here,
+                                            rng.randrange(24))):
+                        felled.append((sx, sz))
                 elif fern_small is not None and roll < p_fern:
                     # Undergrowth belongs under the canopy, not spread evenly
                     # over open pasture.
