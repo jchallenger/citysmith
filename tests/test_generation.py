@@ -1163,3 +1163,61 @@ def test_water_is_filled_to_the_bed_so_depth_shows():
     laid.clear()
     _fill_water(Spy(), water, 0, 0, surface_y=3.0, bed_y=1.5)
     assert [p.y for p in laid] == [1.5, 2.0, 2.5, 3.0]
+
+
+def test_the_rampart_holds_its_height_when_the_block_changes():
+    """The wall's height is a decision; the course count is a consequence.
+
+    It used to be given as "three courses", and a course is however tall the
+    block happens to be -- so swapping a 2.0 block for a 2.5 one would have
+    raised the whole circuit by a quarter with nobody asking for it.
+    """
+    from citysmith.build import TOWN_WALL_TILES
+
+    for course in (1.0, 2.0, 2.5):
+        courses = max(1, round(TOWN_WALL_TILES / course))
+        assert abs(courses * course - TOWN_WALL_TILES) <= course / 2 + 1e-9
+
+
+def test_the_rampart_block_is_not_a_thin_piece():
+    """A full-cell collider does not mean a full-cell mesh.
+
+    `md_wall_1x1_diag_01` measures a full cell and is a blade cutting it corner
+    to corner, so the circuit came out as a comb with daylight between every
+    pair of cells. Nothing in the catalog data says so -- only the probe does --
+    so the guard is on the name, which is where the kit does say so.
+    """
+    from citysmith.palette import STYLES
+
+    banned = ("diag", "_1x2", "1x2_")
+    for name, style in STYLES.items():
+        for query in style.roles.get("city_wall_core", []):
+            pinned = query[1].get("name", "")
+            names = (pinned,) if isinstance(pinned, str) else tuple(pinned)
+            for n in names:
+                assert not any(b in n.lower() for b in banned), (
+                    f"style {name!r} builds its rampart mass from {n!r}, "
+                    "which the kit names as a partial piece"
+                )
+
+
+def test_a_parapet_stands_on_the_lip_not_in_place_of_the_walk():
+    """A curtain piece goes on the cell edge; a block fills the cell.
+
+    The rampart got this backwards twice. The mass was built from a thin
+    diagonal piece, which striped the whole circuit with daylight; the parapet
+    was a full-cell timber hoarding, which sat where the wall-walk should be
+    and hung over the step below it.
+    """
+    from citysmith.build import is_curtain_piece
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    core = palette.require("city_wall_core")
+    cap = palette.require("city_wall_cap")
+    walk = palette.require("city_wall_walk")
+
+    assert not is_curtain_piece(core), "the rampart mass must fill its cell"
+    assert is_curtain_piece(cap), "the parapet must stand on the cell edge"
+    assert not is_curtain_piece(walk), "the wall-walk must pave its cell"

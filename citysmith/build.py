@@ -258,6 +258,18 @@ def place_tile(asset: Asset, tx: int, tz: int, y: float = 0.0, rot: int = 0) -> 
     return place_centered(asset, tx + asset.size_x / 2, tz + asset.size_z / 2, y, rot)
 
 
+def is_curtain_piece(asset: Asset) -> bool:
+    """True when an asset is thinner than a cell and so belongs on its edge.
+
+    The distinction runs through the whole kit. A block fills its cell and is
+    placed with :func:`place_tile`; a curtain piece -- a wall panel, a fence, a
+    parapet -- is authored to stand *on* a cell boundary and is placed with
+    :func:`place_wall`. Getting it backwards is how a rampart came out striped
+    with daylight, and how a parapet came out cantilevered over the drop.
+    """
+    return min(asset.size_x, asset.size_z) < 0.99
+
+
 def place_wall(asset: Asset, tx: int, tz: int, side: str, y: float = 0.0) -> Placement:
     """Place a wall along one edge of grid cell ``(tx, tz)``.
 
@@ -1621,7 +1633,17 @@ def _corners_affordable(cells: set[tuple[int, int]]) -> bool:
     return (len(cells) - corners) >= MIN_USABLE_INTERIOR
 
 
-def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None:
+#: How tall the rampart stands, in tiles. Five feet to a tile, so this is a
+#: thirty-foot wall -- what the circuit has been all along, but it used to be
+#: expressed as "three courses" and a course is however tall the block happens
+#: to be. Swapping a 2.0 block for a 2.5 one would then have raised the whole
+#: circuit by a quarter without anyone asking for it. The height is the
+#: decision; the course count is derived from whatever block the palette gives.
+TOWN_WALL_TILES = 6.0
+
+
+def _lay_town_wall(b: Builder, tm, facing, top: float,
+                   wall_tiles: float = TOWN_WALL_TILES) -> None:
     """Build the town wall as a faced rampart, carried over its gates.
 
     **The mass.** The raster gives the wall as a band of cells several thick --
@@ -1657,6 +1679,7 @@ def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None
     cap_asset = b.palette.resolve("city_wall_cap")
     walk = b.palette.resolve("city_wall_walk") or b.palette.resolve("street")
     course = core.size_y
+    wall_height = max(1, round(wall_tiles / course)) if course > 0 else 1
 
     clear = math.ceil(GATE_HEADROOM_TILES / course) if course > 0 else wall_height
     lintel_from = clear if clear < wall_height else None
@@ -1680,9 +1703,19 @@ def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None
             b.add(place_tile(core, x, z, y))
 
         crown = top + courses * course
-        faces_out = any((x + dx, z + dz) in outside for _, dx, dz in SIDE_OFFSETS)
-        if faces_out and cap_asset is not None:
-            b.add(place_tile(cap_asset, x, z, crown))
+        looks_out = [s for s, dx, dz in SIDE_OFFSETS
+                     if (x + dx, z + dz) in outside]
+        if looks_out and cap_asset is not None:
+            if is_curtain_piece(cap_asset) and walk is not None:
+                # A parapet stands on the lip, not in place of the walk: pave
+                # the cell first and stand the battlement on its outer edge.
+                # A cell at a step of the stair looks out on two sides, and
+                # both get one -- that is what closes the corner.
+                b.add(place_tile(walk, x, z, crown))
+                for side in looks_out:
+                    b.add(place_wall(cap_asset, x, z, side, crown + walk.size_y))
+            else:
+                b.add(place_tile(cap_asset, x, z, crown))
         elif walk is not None:
             b.add(place_tile(walk, x, z, crown))
 
@@ -1925,13 +1958,13 @@ def build_from_tilemap(
     *,
     storeys: int = 2,
     roofs: bool = True,
-    wall_height: int = 3,
+    wall_tiles: float = TOWN_WALL_TILES,
     seed: int = 0,
 ) -> Builder:
     """Build a TaleSpire city board from a rasterised :class:`~citysmith.raster.TileMap`.
 
     Surfaces map to palette roles, building footprints get a perimeter shell
-    with a doorway, and the town wall is stacked to ``wall_height``. Water sits
+    with a doorway, and the town wall is stacked to ``wall_tiles``. Water sits
     below grade so it reads as a channel a creature can be pulled into
     rather than a hole in the board.
     """
@@ -2112,7 +2145,7 @@ def build_from_tilemap(
         _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
     _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
 
-    _lay_town_wall(b, tm, town_wall, top, wall_height)
+    _lay_town_wall(b, tm, town_wall, top, wall_tiles)
 
     _dress_districts(b, tm, grade=floor.size_y, taper=taper)
 

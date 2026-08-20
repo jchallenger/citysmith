@@ -390,23 +390,50 @@ MEDIEVAL = Style(
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),
         ],
-        # Probed as six 3x3x2 masses side by side, which is what a rampart
-        # actually is. "castle wall corner 1x1 base" is a *corner* mesh: its
-        # relief is authored for two faces, so tiled across a whole mass it
-        # reads as stacked crates. Cave Wall and the ruins pillar leave deep
-        # gaps between columns. This one is flat, finely coursed and seams
-        # into itself -- the same family that was wrong for houses, because
-        # there it was a 0.5-deep curtain piece with dungeon relief and here
-        # it is a full-cell block.
+        # The rampart's mass, one block per cell.
+        #
+        # **A full-cell collider does not mean a full-cell mesh.** The previous
+        # pick, `md_wall_1x1_diag_01`, measures 1.0 x 2.0 x 1.0 and is a thin
+        # blade cutting the cell corner to corner -- the "diag" in its name is
+        # the whole story. It won a probe of six candidates laid as flat 3x3x2
+        # masses and read from the front, where a rank of blades hides its own
+        # gaps. On a circuit, seen from anywhere else, it is a comb: a vertical
+        # slot of daylight between every pair of cells, the length of the wall.
+        # `Tall 1x1x2` fails the same way for the same reason.
+        #
+        # `tools/wall_probe.py` builds each candidate as a straight run *and*
+        # as the stair-stepped diagonal a raster circuit actually is, and it is
+        # read from overhead as well as from the side. Of the six:
+        # `md_pref_wall_1x1_01` tiles as separate posts with gaps between them;
+        # `castle wall corner 1x1 base` is a corner mesh whose two-faced relief
+        # reads as stacked crates; `md_stairblock_01` is solid but coarse.
+        # This one is solid, finely coursed, closes on the stair as cleanly as
+        # on the straight, and shares its tone with the ruins floor that paves
+        # the wall-walk on top of it.
         "city_wall_core": [
-            _tile(name="md_wall_1x1_diag_01", **_MED),
-            _tile(name="Sewer Wall - Small", **_MED),
-            _tile(name="castle wall corner 1x1 base", **_MED),
+            _tile(name="Castle Ruins Wallbase 02", **_MED, **_UNIT),
+            _tile(name="md_stairblock_01", **_MED, **_UNIT),
+            _tile(name="Sewer Wall - Small", **_MED, **_UNIT),
         ],
         # Battlements, on the outer ring only, so the middle of the rampart
-        # stays walkable as a wall-walk. Full-cell, unlike the half piece this
-        # replaces -- which was also a 0.5-deep curtain fragment.
-        "city_wall_cap": [_tile(name="castle merlon 1x1", **_MED)],
+        # stays walkable as a wall-walk.
+        #
+        # The previous pin, `castle merlon 1x1`, was chosen off its group tag
+        # ("merlon") and never looked at. It is a *hoarding* -- the boarded
+        # timber gallery a garrison hangs off a wall in a siege -- and the
+        # whole `castle merlon` family is the same timber. Laid one per cell it
+        # crowned the circuit with a row of separate wooden crates, each
+        # cantilevered over the corner of the step below it.
+        #
+        # A parapet is a thin thing standing on the *lip* of the wall with room
+        # to walk behind it, which is why this is a 0.5-deep curtain piece and
+        # `_lay_town_wall` puts it on the outward edge rather than filling the
+        # cell. Same kit as the rampart block and the wall-walk paving, so the
+        # three read as one structure. See `tools/parapet_probe.py`.
+        "city_wall_cap": [
+            _tile(name="Castle Ruins Crenellation - Small", **_MED),
+            _tile(name="Castle Ruins Crenellation - Large", **_MED),
+        ],
         # The wall-walk behind the parapet, so the top of the rampart is a
         # surface a party can be fought along rather than the bare top face of
         # the blocks that make up its mass.

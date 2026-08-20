@@ -115,8 +115,15 @@ actually matters, all confirmed in-game:
   `MapVirtualKey(vk, 0)`. `tools/ts.ps1` is the one implementation of all this.
 - **The camera pans on a left drag**, not on WASD and not on the arrow keys;
   the wheel only zooms, and zoom-out is capped well short of a 187-tile map.
-  To review a town centre, `--crop` a window of it onto its own board rather
-  than trying to drive the camera there.
+  The drag has to be *slow*: 60 steps of 40 ms tracks, 24 steps of 16 ms
+  outruns the camera and registers as nothing, which reads exactly like "pan
+  does not work". `--crop` a window onto its own board is still the quick way
+  to review one quarter.
+- **Empty the hand after every paste.** A committed slab stays in hand as a
+  repeat stamp, so the next click anywhere stamps another copy of the map.
+  `ts.ps1 paste` right-clicks unless `-Keep` is passed. Do *not* right-click
+  pre-emptively with an empty hand -- that opens the asset library over the
+  board.
 - Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
   not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
@@ -154,6 +161,26 @@ shape instead of reading it. The rules that fall out:
   desert stone) barely tint and the river reads as a dry wash; a grey stony bed
   goes deep teal by two tiles down. Depth was already in the geometry and
   invisible until the water column was filled and the bed stopped being bright.
+
+- **A full-cell collider does not mean a full-cell mesh.** `md_wall_1x1_diag_01`
+  measures exactly 1.0 x 2.0 x 1.0 and is a blade cutting the cell corner to
+  corner. Built as the rampart mass it striped the entire circuit with vertical
+  daylight -- the same failure as the curtain-wall piece above, from an asset
+  whose measurements say it cannot happen. Nothing in the catalog data
+  distinguishes them; the *kit* does, in the name: `diag`, `half`, `filler`,
+  `1x2`. `city_wall_core` is guarded against those, and
+  `build.is_curtain_piece` is the shared test for "thinner than a cell, so it
+  goes on the edge".
+- **A group tag names a family, not a form.** `city_wall_cap` was pinned to
+  `castle merlon 1x1` because its group tag is "merlon". It is a *hoarding* --
+  boarded timber, not stone -- and so is every other piece in that group. The
+  circuit was crowned with wooden crates for eleven revisions.
+- **A probe read from one angle is a probe that lies.** The diagonal block won
+  a six-candidate probe laid as flat 3x3x2 masses and photographed from the
+  front, which is the one view where a rank of blades hides its own gaps. Probe
+  the shape the generator actually builds -- for a wall, the stair-stepped
+  diagonal a raster circuit is made of -- and read it from overhead as well as
+  from the side. `tools/wall_probe.py` and `tools/parapet_probe.py` do both.
 
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**

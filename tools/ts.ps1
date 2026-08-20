@@ -22,7 +22,8 @@ param(
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
-  [double]$Hold = 0.25
+  [double]$Hold = 0.25,
+  [switch]$Keep
 )
 
 $sig = @'
@@ -106,6 +107,13 @@ switch ($Cmd) {
     [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 150
     Send-Chord "ctrl+v"; Start-Sleep -Milliseconds 1500
     Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP)
+    # A committed paste stays in hand as a repeat stamp. Leaving it there is
+    # how a stray copy of the map ends up under the next click, so unless the
+    # caller asks to keep stamping, the hand is emptied here.
+    if (-not $Keep) {
+      Start-Sleep -Milliseconds 400
+      Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP)
+    }
     "pasted $Slab at $X,$Y"
   }
   'click'   { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "clicked $X,$Y" }
@@ -116,12 +124,13 @@ switch ($Cmd) {
     Focus-TS
     [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120
     [TSIn]::mouse_event([TSIn]::MDOWN,0,0,0,[IntPtr]::Zero)
-    $steps = 24
+    Start-Sleep -Milliseconds 250
+    $steps = 48
     for ($i=1; $i -le $steps; $i++) {
       [TSIn]::Move($X + [int]($DX*$i/$steps), $Y + [int]($DY*$i/$steps))
-      Start-Sleep -Milliseconds 16
+      Start-Sleep -Milliseconds 35
     }
-    Start-Sleep -Milliseconds 120
+    Start-Sleep -Milliseconds 300
     [TSIn]::mouse_event([TSIn]::MUP,0,0,0,[IntPtr]::Zero)
     Start-Sleep -Milliseconds 400
     "orbited $DX,$DY"
@@ -129,17 +138,25 @@ switch ($Cmd) {
   'pan'     {
     # TaleSpire pans on a left drag over the board. Keys do not move the camera
     # and the wheel only zooms, so this is the only way across a 187-tile map.
+    #
+    # It has to be done *slowly*. A 24-step drag at 16 ms outruns the camera's
+    # follow and the view snaps back; at 60 steps of 40 ms it tracks the cursor
+    # the whole way. Same family of mistake as a zero-duration click.
     Focus-TS
-    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120
+    # No pre-emptive right-click here: with an empty hand right-click opens the
+    # asset library over the board, which is worse than the stray stamp it was
+    # meant to prevent. `paste` empties its own hand instead.
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 250
     [TSIn]::mouse_event([TSIn]::LDOWN,0,0,0,[IntPtr]::Zero)
-    $steps = 24
+    Start-Sleep -Milliseconds 250          # let the grab register before moving
+    $steps = 60
     for ($i=1; $i -le $steps; $i++) {
       [TSIn]::Move($X + [int]($DX*$i/$steps), $Y + [int]($DY*$i/$steps))
-      Start-Sleep -Milliseconds 16
+      Start-Sleep -Milliseconds 40
     }
-    Start-Sleep -Milliseconds 120
+    Start-Sleep -Milliseconds 300          # let it settle before letting go
     [TSIn]::mouse_event([TSIn]::LUP,0,0,0,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 600
     "panned $DX,$DY"
   }
   'zoom'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120; [TSIn]::mouse_event(0x800, 0, 0, ($Ticks*120), [IntPtr]::Zero); Start-Sleep -Milliseconds 400; "zoomed $Ticks" }
