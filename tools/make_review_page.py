@@ -72,6 +72,15 @@ DISTRICTS += [
      "which is the plane a creature stands on.",
      [("shipped", "surfaces align at the top, not the bottom"),
       ("shipped", "varied rooflines by storey count")]),
+    ("The Gatehouse", "12-gatehouse", "Towers flanking the road in",
+     "Two revs ago this was an 18-cell breach with nothing in it &mdash; a 35 ft hole in the "
+     "circuit, open to the sky, where the main street crossed. It became a tunnel with the "
+     "rampart carried over on a lintel, and now the wall either side rises two courses into "
+     "towers, so the approach along the road reads as a defended entrance from a long way off. "
+     "The passage still keeps its cart headroom.",
+     [("shipped", "wall carried over the road on a lintel"),
+      ("shipped", "flanking towers, diagonal jambs included"),
+      ("next", "no gate leaves, arch dressing or murder holes")]),
 ]
 
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
@@ -168,7 +177,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 12</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 13</div>
   <h1>Forest Church</h1>
   <p class="deck">A 117 &times; 113-tile TaleSpire village generated from a Watabou export &mdash;
   reviewed district by district at avatar eye level, the way a party will actually see it.
@@ -176,7 +185,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 179</b> (933 &times; 896 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,923</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,957</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -191,6 +200,14 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 13 &middot; Aug 19</span><div><b>A gatehouse, and docs that match
+    the build.</b> The gate was structurally correct but undressed: the curtain ran over it at
+    ordinary height, so nothing said a gate was there. The wall flanking each opening now rises
+    two courses into towers &mdash; the ring is Chebyshev rather than orthogonal, because the
+    circuit stair-steps and an orthogonal-only ring left holes in the towers. Every user-facing
+    doc was then audited against the code instead of against memory: the skill file was still
+    advertising a scale default two revs stale, and the README still showed chunk filenames from
+    a different scale.</div></li>
   <li><span class="when">rev 12 &middot; Aug 19</span><div><b>A rampart that is actually solid.</b>
     The medieval castle kit is <em>curtain wall</em> &mdash; its pieces are 0.5 deep, authored to
     stand on a cell boundary. Laid one per cell across a wall four cells thick, they were four
