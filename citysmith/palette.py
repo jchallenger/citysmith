@@ -215,6 +215,28 @@ MEDIEVAL = Style(
         "water": [
             _tile(name="tempWater1x1", **_MED),
         ],
+        #: What the river runs over. TaleSpire's water is translucent, so the
+        #: bed is not hidden -- it is the thing you actually look at, and the
+        #: only thing that gives the water a colour. Laying it in the ``ground``
+        #: role put a lawn under the river and the board read as two sheets of
+        #: turf with a blue film between them, which is what "a second layer of
+        #: land" turned out to mean.
+        #:
+        #: Which bed reads as *water* is a rendering question, so
+        #: ``tools/water_probe.py`` asked the game: six candidate beds under
+        #: one to four tiles of water, side by side. Bright beds -- sand,
+        #: desert stone -- barely tint at all and the river reads as a dry
+        #: wash. A grey stony bed goes deep teal by two tiles down and holds
+        #: the shallows pale, so the depth of the channel is legible from
+        #: above. That is the whole reason the bed steps down away from the
+        #: bank, and it was invisible until the bed stopped being bright.
+        "riverbed": [
+            _tile(name="Cave Floor - Rock 2", **_MED, **_UNIT),
+            _tile(name="gravel_1x1_01", **_MED),
+        ],
+        "riverbed_2x2": [
+            _tile(name="Cave Floor - Rock 01", size=(2.0, 2.0), **_MED),
+        ],
         #: 1x1 stand-in for the 2x2 ``field`` block, for leftover cells the
         #: block pass cannot cover. Gravel reads as worked dirt at this scale;
         #: plain grass is the fallback of last resort.
@@ -525,6 +547,17 @@ CYBERPUNK = Style(
         "field_1x1": [
             _tile(name="industrial_floor_1x1_01", **_SCIFI),
             _tile(name="concrete floor 1x1", **_SCIFI),
+        ],
+        #: A canal here is a concrete channel, not a river. Same reasoning as
+        #: the medieval bed: the water is translucent, so whatever is under it
+        #: is on show, and the ground role would put the pavement of the block
+        #: beside it at the bottom of the canal.
+        "riverbed": [
+            _tile(name="industrial_floor_1x1_01", **_SCIFI),
+            _tile(name="concrete floor 1x1", **_SCIFI),
+        ],
+        "riverbed_2x2": [
+            _tile(name=("industrial_floor_2x2_01", "industrial_floor_2x2_02"), **_SCIFI),
         ],
         #: No water tile ships in the sci-fi pack, so this is a deliberate
         #: cross-pack pin rather than an accidental one. An explicit borrow

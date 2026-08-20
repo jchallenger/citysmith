@@ -1,5 +1,9 @@
 # Capture the TaleSpire client area to out/flyby/<name>.jpg
-param([Parameter(Mandatory=$true)][string]$Name)
+# Region defaults to the TaleSpire client area. Pass one to capture a smaller
+# rectangle instead: the pixels are native, so a crop is a real zoom rather
+# than an upscale, which is how fine detail gets read off a screenshot.
+param([Parameter(Mandatory=$true)][string]$Name,
+      [int]$X = 156, [int]$Y = 129, [int]$W = 1598, [int]$H = 834)
 $code = @'
 using System;using System.Drawing;using System.Drawing.Imaging;
 public class Grab {
@@ -20,5 +24,5 @@ Add-Type -TypeDefinition $code -ReferencedAssemblies System.Drawing -ErrorAction
 $dir = Join-Path $PSScriptRoot "..\out\flyby"
 New-Item -ItemType Directory -Force $dir | Out-Null
 $path = Join-Path $dir "$Name.jpg"
-[Grab]::Shot($path, 156, 129, 1598, 834)
+[Grab]::Shot($path, $X, $Y, $W, $H)
 "$Name -> $((Get-Item $path).Length) bytes"

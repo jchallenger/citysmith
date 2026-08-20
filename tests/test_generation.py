@@ -312,10 +312,27 @@ GROUND = Asset(id="d" * 8 + "-1111-2222-3333-444444444444", name="grass", kind="
                pack="p", group_tag="floor", tags=(), folder="", size_x=1.0, size_y=0.5, size_z=1.0)
 FERN = Asset(id="e" * 8 + "-1111-2222-3333-444444444444", name="fern", kind="prop",
              pack="p", group_tag="prop", tags=(), folder="", size_x=0.4, size_y=0.4, size_z=0.4)
+#: A pine-sized canopy: wider than its cell, and authored around its origin
+#: rather than off one corner, so it overhangs whatever cell it stands in.
+CANOPY = Asset(id="f" * 8 + "-1111-2222-3333-444444444444", name="canopy", kind="prop",
+               pack="p", group_tag="prop", tags=(), folder="",
+               size_x=2.55, size_y=2.4, size_z=2.55, off_x=0.0, off_y=1.2, off_z=0.0)
+
+
+class StubCatalog:
+    """The assets the chunker tests place, so shapes can be looked up by id.
+
+    The chunker normalises by the box its geometry occupies, not by the stored
+    coordinates, and that needs each placement's footprint.
+    """
+
+    assets = [FLOOR, WALL, GROUND, FERN, CANOPY]
 
 
 class StubPalette:
     """Just enough palette for the chunker: it only asks for ground roles."""
+
+    catalog = StubCatalog()
 
     def resolve(self, role, variant=0):
         return GROUND if role == "ground" else None
@@ -1054,3 +1071,95 @@ def test_a_notched_plan_is_roofed_as_rectangular_wings():
     # Largest first, so the main mass keeps the dominant ridge.
     assert len(wings[0]) >= len(wings[1])
     assert largest_rectangle(set()) == set()
+
+
+def test_a_prop_overhanging_the_low_corner_does_not_shift_its_chunk():
+    """Both readings of a chunk's origin have to agree, not just one.
+
+    TaleSpire anchors a pasted slab on its bounding box, and a slab has two
+    candidate corners: the lowest stored coordinate, and the lowest point its
+    geometry reaches. They part company as soon as a prop is involved, because
+    a prop stores its collider *centre*. On the board this was one chunk of
+    four whose pines hung a tile past the map's low corner -- and it was the
+    one chunk the old marker rule skipped, because its stored minimum was
+    already zero on every axis even though no placement sat at the origin.
+    """
+    from citysmith.build import place_centered, volume_bounds
+    from citysmith.verify import chunk_anchors
+
+    b = _builder()
+    _ground_field(b)
+    # A canopy over the very first cell, reaching back past the map's corner.
+    b.add(place_centered(CANOPY, 0.5, 0.5, 2.0, 0), prop=True)
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert len(plan.chunks) > 1
+
+    stored = {tuple(round(v, 3) for v in ch.slab.bounds()[0]) for ch in plan.chunks}
+    volume = {tuple(round(v, 3) for v in volume_bounds(ch.slab, b.byid)[0])
+              for ch in plan.chunks}
+    assert stored == {(0.0, 0.0, 0.0)}, f"stored corners disagree: {stored}"
+    assert volume == {(0.0, 0.0, 0.0)}, f"volume corners disagree: {volume}"
+    assert chunk_anchors(plan, b.byid) == []
+
+
+def test_the_anchor_check_catches_a_chunk_that_would_land_offset():
+    """The check has to fail on a plan that is actually misaligned."""
+    from citysmith.build import place_centered
+    from citysmith.verify import chunk_anchors
+
+    b = _builder()
+    _ground_field(b)
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    # Undo one chunk's registration: an overhang with nothing pinning the
+    # corner is exactly the shape of the defect.
+    victim = plan.chunks[-1]
+    victim.slab.placements = [p for p in victim.slab.placements
+                              if (p.x, p.y, p.z) != (0.0, 0.0, 0.0)]
+    victim.slab.add(place_centered(CANOPY, 0.5, 0.5, 2.0, 0))
+
+    assert chunk_anchors(plan, b.byid), "a misaligned chunk was reported as fine"
+
+
+def test_a_river_does_not_run_over_grass():
+    """The bed is the thing you look at, because the water is translucent.
+
+    Laying it in the ``ground`` role put a lawn under the river, so the board
+    showed two sheets of grass with a blue film between them -- which is what
+    "a second layer of land" meant. The bed gets its own role, and the
+    waterline sits a full tile below the bank rather than half of one.
+    """
+    from citysmith.build import WATER_SURFACE_DROP
+    from citysmith.palette import STYLES
+
+    for name, style in STYLES.items():
+        assert "riverbed" in style.roles, f"style {name!r} has no riverbed"
+    assert WATER_SURFACE_DROP >= 1.5
+
+
+def test_water_is_filled_to_the_bed_so_depth_shows():
+    """One translucent sheet is the same colour over a ford as over a channel.
+
+    The bed already stepped down away from the bank, so the depth was in the
+    geometry -- it just could not be seen, because the water was a single tile
+    floating at the surface. Filling the column is what turns that geometry
+    into something a party can read off the board.
+    """
+    from citysmith.build import _fill_water
+
+    laid = []
+
+    class Spy:
+        def add(self, p, prop=False):
+            laid.append(p)
+
+    water = Asset(id="c" * 8 + "-1111-2222-3333-444444444444", name="water",
+                  kind="tile", pack="p", group_tag="floor", tags=(), folder="",
+                  size_x=1.0, size_y=0.5, size_z=1.0)
+
+    _fill_water(Spy(), water, 0, 0, surface_y=3.0, bed_y=3.0)
+    assert len(laid) == 1, "a ford is one tile of water"
+
+    laid.clear()
+    _fill_water(Spy(), water, 0, 0, surface_y=3.0, bed_y=1.5)
+    assert [p.y for p in laid] == [1.5, 2.0, 2.5, 3.0]

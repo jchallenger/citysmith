@@ -661,3 +661,41 @@ def enclosed_voids(plan) -> list[str]:
         "the board, which pastes as a rectangular hole in the ground"
     ]
 
+def chunk_anchors(plan, byid) -> list[str]:
+    """Chunks that would not paste at a shared origin.
+
+    Every chunk carries a registration marker at the map's minimum corner so
+    that pasting them all at one cursor cell assembles the map. That only works
+    if the corner TaleSpire anchors on is the same for all of them -- and a
+    slab has two candidate corners, the lowest stored coordinate and the lowest
+    point its geometry reaches. They differ whenever a prop overhangs, because
+    a prop stores its collider centre rather than a corner. This checks both,
+    on the chunks that will actually be written.
+    """
+    from .build import volume_bounds
+
+    if len(plan.chunks) < 2:
+        return []
+
+    stored: dict[tuple[float, float, float], list[str]] = {}
+    volume: dict[tuple[float, float, float], list[str]] = {}
+    for ch in plan.chunks:
+        (sx, sy, sz), _ = ch.slab.bounds()
+        (vx, vy, vz), _ = volume_bounds(ch.slab, byid)
+        stored.setdefault((round(sx, 3), round(sy, 3), round(sz, 3)), []).append(ch.label)
+        volume.setdefault((round(vx, 3), round(vy, 3), round(vz, 3)), []).append(ch.label)
+
+    out = []
+    for what, corners in (("stored coordinate", stored), ("occupied volume", volume)):
+        if len(corners) == 1:
+            continue
+        odd = sorted(corners.items(), key=lambda kv: len(kv[1]))
+        where = "; ".join(
+            f"{', '.join(labels[:3])} at {corner}" for corner, labels in odd[:3]
+        )
+        out.append(
+            f"chunks disagree on their {what} origin ({len(corners)} different "
+            f"corners: {where}) -- pasted at one cursor cell they would land "
+            "offset from each other"
+        )
+    return out

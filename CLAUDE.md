@@ -102,7 +102,21 @@ actually matters, all confirmed in-game:
 - Because paste is cursor-anchored, multi-chunk boards only line up if every
   chunk shares a bounding-box origin. `Builder.to_slabs()` adds a registration
   marker at (0,0,0) to each chunk for exactly this reason; commit all chunks
-  over the same grid cell without moving the camera.
+  over the same grid cell without moving the camera. **A slab has two origins**
+  -- lowest stored coordinate and lowest point of its geometry -- and they part
+  company as soon as a prop is near the corner, because a prop stores its
+  collider centre. Both have to land on (0,0,0); `verify.chunk_anchors` fails
+  the build if they do not.
+- **Synthetic input needs a hold *and* a scan code.** The hold is the part
+  CLAUDE.md already recorded; the scan code is the other half. TaleSpire reads
+  raw input, where the scan code identifies the key, so `keybd_event` with
+  `scan = 0` arrives as no key at all -- Ctrl+V silently did nothing while the
+  clipboard, the foreground window and the mouse all checked out. Fill it from
+  `MapVirtualKey(vk, 0)`. `tools/ts.ps1` is the one implementation of all this.
+- **The camera pans on a left drag**, not on WASD and not on the arrow keys;
+  the wheel only zooms, and zoom-out is capped well short of a 187-tile map.
+  To review a town centre, `--crop` a window of it onto its own board rather
+  than trying to drive the camera there.
 - Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
   not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
@@ -130,6 +144,17 @@ shape instead of reading it. The rules that fall out:
   is a stair-stepped diagonal those teeth pointed every which way; the wall
   read as a comb. The cells behind the parapet are paved as a wall-walk.
 
+- **A translucent tile shows whatever is under it, so the thing under it is
+  the material you actually see.** The river bed was laid in the `ground` role,
+  which is grass, and TaleSpire's water is translucent: the board read as two
+  sheets of turf with a blue film between them. That is what three sessions of
+  "I see a second layer of land" meant. The bed has its own role now. Which bed
+  reads as *water* is a rendering question and `tools/water_probe.py` puts the
+  candidates side by side under one to four tiles of water -- bright beds (sand,
+  desert stone) barely tint and the river reads as a dry wash; a grey stony bed
+  goes deep teal by two tiles down. Depth was already in the geometry and
+  invisible until the water column was filled and the bed stopped being bright.
+
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**
 
@@ -146,6 +171,11 @@ fine while the board was visibly broken:
    of 0.5-deep fins passes perfectly.
 4. Chunk skipping was judged per chunk, so two chunks enclosed by finished
    town were dropped and pasted as a rectangular hole in the ground.
+5. Chunk registration was judged on `Slab.bounds()`, which is componentwise:
+   the one chunk covering the map's corner had *some* placement at x=0, *some*
+   at y=0 and *some* at z=0, so its minimum read as the origin and it was the
+   only chunk that never got a marker -- while its pines overhung that corner
+   by a tile.
 
 `verify.check_placements` and `verify.enclosed_voids` measure emitted boxes and
 the written chunk plan respectively. **New checks go there, not into the

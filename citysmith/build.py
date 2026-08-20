@@ -322,6 +322,14 @@ class Builder:
         #: against a single grade. Water beds are deliberately absent: a sunken
         #: channel is a feature and must keep disqualifying its chunk.
         self.ground_baseline: dict[tuple[int, int], float] = {}
+        self._byid: dict[str, Asset] | None = None
+
+    @property
+    def byid(self) -> dict[str, Asset]:
+        """Catalog assets by id, for anything that needs a placement's shape."""
+        if self._byid is None:
+            self._byid = {a.id: a for a in self.palette.catalog.assets}
+        return self._byid
 
     def add(self, placement: Placement, *, prop: bool = False) -> None:
         self.placements.append(placement)
@@ -365,7 +373,7 @@ class Builder:
         return True
 
     def to_slab(self) -> Slab:
-        return _normalized_whole_tiles(Slab(list(self.placements)))
+        return _normalized_whole_tiles(Slab(list(self.placements)), self.byid)
 
     def to_slabs(self, max_assets: int = 4000, *, register: bool = True,
                  chunk_tiles: int = DEFAULT_CHUNK_TILES,
@@ -423,13 +431,25 @@ class Builder:
         does not depend on which regions were kept. The markers stack in a
         single corner cell and can be deleted afterwards; they are harmless if
         TaleSpire turns out to preserve absolute coordinates instead.
+
+        **The marker has to be right under both readings of "origin".** A slab
+        has two candidate corners -- the lowest stored coordinate, and the
+        lowest point its geometry reaches -- and they are not the same corner,
+        because a prop stores its collider centre. On the last board they
+        disagreed for exactly one chunk of four, whose pines overhung the map's
+        low corner by a tile: it was the only chunk with no marker (its stored
+        minimum was already zero on all three axes, though no single placement
+        sat there) and the only chunk whose volume started somewhere else. So
+        the map is normalised by *volume* and every chunk gets a marker
+        unconditionally -- a plain ground tile, which is authored with its
+        collider on its origin and therefore pins both corners at once.
         """
         raw = Slab(list(self.placements))
         size = max(1, int(chunk_tiles))
         if not raw.placements:
             return ChunkPlan([], [], 0, 0, size, (0, 0))
 
-        dx, dy, dz = _whole_tile_shift(raw)
+        dx, dy, dz = _whole_tile_shift(raw, self.byid)
         slab = raw.translated(dx, dy, dz)
 
         # The grid is anchored on tile placements only. Props overhang their
@@ -494,18 +514,15 @@ class Builder:
             kept = _pack_chunks(kept, max_assets, cols)
 
         if register and len(kept) > 1:
-            marker = min(slab.placements, key=lambda p: (p.y, p.z, p.x))
-            anchor = Placement(marker.asset_id, 0.0, 0.0, 0.0, 0)
-            for piece in kept:
-                (mx, my, mz), _ = piece.slab.bounds()
-                if (mx, my, mz) != (0.0, 0.0, 0.0):
-                    piece.slab.add(anchor)
-            self.stats.registration_markers = sum(
-                1 for piece in kept if any(
-                    (p.x, p.y, p.z) == (0.0, 0.0, 0.0)
-                    for p in piece.slab.placements
-                )
+            marker = self.palette.resolve("ground") or self.palette.resolve("floor")
+            anchor = Placement(
+                marker.id if marker is not None
+                else min(slab.placements, key=lambda p: (p.y, p.z, p.x)).asset_id,
+                0.0, 0.0, 0.0, 0,
             )
+            for piece in kept:
+                piece.slab.add(anchor)
+            self.stats.registration_markers = len(kept)
 
         self.stats.slabs = len(kept)
         self.stats.chunks_skipped = len(skipped)
@@ -807,15 +824,60 @@ def _subdivide(cell: _Cell, max_assets: int) -> list[_Cell]:
     return out
 
 
-def _whole_tile_shift(slab: Slab) -> tuple[int, int, int]:
-    """The whole-tile translation that brings ``slab`` to the origin."""
+def volume_bounds(
+    slab: Slab, byid: dict[str, Asset]
+) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+    """The box the slab's geometry actually occupies.
+
+    ``Slab.bounds()`` is the box over *stored coordinates*, and a stored
+    coordinate is an origin, not a corner: a tile is authored with its collider
+    on the origin but a prop is authored around it, so a pine beside the map's
+    low corner occupies a tile and a bit further out than any number in the
+    file. Anything reasoning about where a slab starts -- normalisation, and
+    the registration marker every chunk carries -- has to use this instead.
+    """
+    lo = [float("inf")] * 3
+    hi = [float("-inf")] * 3
+    for p in slab.placements:
+        asset = byid.get(p.asset_id)
+        if asset is None:
+            continue
+        sx, sz = rotated_footprint(asset, p.rot)
+        ox, oz = collider_offset(asset, p.rot)
+        box = (
+            (p.x + ox - sx / 2, p.x + ox + sx / 2),
+            (p.y + asset.off_y - asset.size_y / 2,
+             p.y + asset.off_y + asset.size_y / 2),
+            (p.z + oz - sz / 2, p.z + oz + sz / 2),
+        )
+        for i, (a, b) in enumerate(box):
+            lo[i] = min(lo[i], a)
+            hi[i] = max(hi[i], b)
+    if lo[0] == float("inf"):
+        return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+    return tuple(lo), tuple(hi)   # type: ignore[return-value]
+
+
+def _whole_tile_shift(slab: Slab,
+                      byid: dict[str, Asset] | None = None) -> tuple[int, int, int]:
+    """The whole-tile translation that brings ``slab`` to the origin.
+
+    Whole tiles, because translating by the exact minimum would drag every tile
+    on the board off the grid by some prop's fractional overhang. With a
+    catalog to hand the minimum is the one geometry reaches; without one it
+    falls back to stored coordinates.
+    """
     if not slab.placements:
         return (0, 0, 0)
-    (mx, my, mz), _ = slab.bounds()
+    if byid:
+        (mx, my, mz), _ = volume_bounds(slab, byid)
+    else:
+        (mx, my, mz), _ = slab.bounds()
     return (-math.floor(mx), -math.floor(my), -math.floor(mz))
 
 
-def _normalized_whole_tiles(slab: Slab) -> Slab:
+def _normalized_whole_tiles(slab: Slab,
+                            byid: dict[str, Asset] | None = None) -> Slab:
     """Shift a slab toward the origin by whole tiles only.
 
     ``Slab.normalized()`` translates by the exact min corner -- and the min
@@ -831,7 +893,7 @@ def _normalized_whole_tiles(slab: Slab) -> Slab:
     """
     if not slab.placements:
         return slab
-    return slab.translated(*_whole_tile_shift(slab))
+    return slab.translated(*_whole_tile_shift(slab, byid))
 
 
 # -- city board ---------------------------------------------------------------
@@ -1138,9 +1200,42 @@ def water_depth(tm) -> dict[tuple[int, int], int]:
     return depth
 
 
+#: How far the water's underside sits below the bank top. The bank tile is 0.5
+#: thick and the water tile is 0.5 thick, so the old 1.0 put the waterline
+#: level with the *underside* of the turf beside it -- half a tile of bank
+#: showing, which on the board read as a wet lawn rather than a river. A full
+#: tile of bank above the waterline is what makes it read as a channel.
+WATER_SURFACE_DROP = 1.5
+
+
 def _bed_drop(depth: dict[tuple[int, int], int], cell: tuple[int, int]) -> float:
     """How far below the water's underside this cell's bed sits."""
     return min((depth.get(cell, 1) - 1) * WATER_DEEPEN_STEP, WATER_MAX_DEEPEN)
+
+
+def _fill_water(b: "Builder", asset: Asset, x: int, z: int,
+                surface_y: float, bed_y: float) -> None:
+    """Water from the bed up to the waterline, one tile per step.
+
+    TaleSpire's water tile is translucent and half a tile thick, so a single
+    sheet is exactly the same colour over a ford as over the deepest part of
+    the channel -- depth was in the geometry but invisible. Filling the column
+    puts it on show: the shallows stay pale and the middle goes dark, which is
+    the one cue that tells a party where the river can be waded.
+    """
+    y = bed_y
+    while y <= surface_y + 1e-6:
+        b.add(place_tile(asset, x, z, y))
+        y += asset.size_y
+
+
+def _bed_role(b: "Builder", preferred: str, fallback: str) -> str:
+    """The riverbed role if the style has one, else whatever the ground is.
+
+    A style is not obliged to ship a bed material, and a river with a grass
+    bottom is still better than a build that raises on a missing role.
+    """
+    return preferred if b.palette.resolve(preferred) is not None else fallback
 
 
 def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
@@ -1190,14 +1285,21 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
             # tiles perfectly, so a 2x2 quad of it saves three water tiles and
             # three bed tiles. It only qualifies where the whole quad is the
             # same depth, since one 2x2 bed cannot step.
+            # The 2x2 shortcut needs a 2x2 *bed* as well as 2x2 water. Without
+            # one the quad would be floored in the ground block while the cells
+            # around it got the 1x1 bed, so the river would run over two
+            # different materials. Falling through costs tiles, not looks.
             if (s == R.WATER and water_block is not None
+                    and b.palette.resolve(_bed_role(b, "riverbed_2x2", "ground_2x2")) is not None
                     and all(surface_at(qx, qz) == R.WATER for qx, qz in quad)):
                 drops = {taper.get(q, 0.0) for q in quad}
                 beds = {_bed_drop(wdepth, q) for q in quad}
                 if len(drops) == 1 and None not in drops and len(beds) == 1:
                     here = grade - drops.pop()
-                    b.surface("ground_2x2", x, z, here - 1.0 - beds.pop())
-                    b.add(place_tile(water_block, x, z, here - 1.0))
+                    bed = here - WATER_SURFACE_DROP - beds.pop()
+                    b.surface(_bed_role(b, "riverbed_2x2", "ground_2x2"), x, z, bed)
+                    _fill_water(b, water_block, x, z,
+                                here - WATER_SURFACE_DROP, bed)
                     covered.update(quad)
                 continue
 
@@ -1238,8 +1340,8 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
                 continue                    # ragged fringe: nothing laid here
             here = grade - drop
             if s == R.WATER:
-                # Water sits a tile low so it reads as a channel a creature can
-                # be pulled into, not a hole punched through the board.
+                # Water sits below grade so it reads as a channel a creature
+                # can be pulled into, not a hole punched through the board.
                 # The bed and its water fall with the land, so a river does
                 # not end up perched above a tapered bank. No baseline is
                 # recorded: a channel is a feature, not background ground.
@@ -1248,9 +1350,11 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
                 # surface stays one flat layer. The water tile is translucent,
                 # so that alone gives shallows at the edges and a dark channel
                 # down the middle without a single extra tile.
-                b.surface(ground_role, x, z, here - 1.0 - _bed_drop(wdepth, (x, z)))
+                bed = here - WATER_SURFACE_DROP - _bed_drop(wdepth, (x, z))
+                b.surface(_bed_role(b, "riverbed", ground_role), x, z, bed)
                 if water_tile is not None:
-                    b.add(place_tile(water_tile, x, z, here - 1.0))
+                    _fill_water(b, water_tile, x, z,
+                                here - WATER_SURFACE_DROP, bed)
                 continue
             role = surface_roles.get(s, ground_role)
             if (x, z) in bank and b.palette.resolve("field_1x1") is not None:
@@ -1828,7 +1932,7 @@ def build_from_tilemap(
 
     Surfaces map to palette roles, building footprints get a perimeter shell
     with a doorway, and the town wall is stacked to ``wall_height``. Water sits
-    one tile below grade so it reads as a channel a creature can be pulled into
+    below grade so it reads as a channel a creature can be pulled into
     rather than a hole in the board.
     """
     from . import raster as R
