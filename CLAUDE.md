@@ -120,12 +120,17 @@ actually matters, all confirmed in-game:
   `scan = 0` arrives as no key at all -- Ctrl+V silently did nothing while the
   clipboard, the foreground window and the mouse all checked out. Fill it from
   `MapVirtualKey(vk, 0)`. `tools/ts.ps1` is the one implementation of all this.
-- **The camera pans on a left drag**, not on WASD and not on the arrow keys;
-  the wheel only zooms, and zoom-out is capped well short of a 187-tile map.
-  The drag has to be *slow*: 60 steps of 40 ms tracks, 24 steps of 16 ms
-  outruns the camera and registers as nothing, which reads exactly like "pan
-  does not work". `--crop` a window onto its own board is still the quick way
-  to review one quarter.
+- **Two ways to move the camera, and both are about duration.**
+  A **left drag** pans, and it has to be *slow*: 60 steps of 40 ms tracks,
+  24 steps of 16 ms outruns the camera and registers as nothing, which reads
+  exactly like "pan does not work". Use it for short, precise moves.
+  **WASD** flies, and it ramps -- velocity eases up to a maximum, so the key
+  has to be *held*. A 0.4 s press crawls a few tiles, 3 s crosses the map.
+  Tapping it looks like a dead binding, which is what made me write "WASD does
+  nothing here" in this file; it does, it just needs the momentum.
+  `ts.ps1 key -Keys w -Hold 3.0`. Arrow keys are untested. The wheel only
+  zooms, and zoom-out is capped well short of a 187-tile map, so `--crop` a
+  window onto its own board is still the quick way to review one quarter.
 - **Empty the hand after every paste** -- see the right-click tap above. A
   right-click with an empty hand opens the asset library over the board, so
   clear once, deliberately, rather than pre-emptively before each camera move.
