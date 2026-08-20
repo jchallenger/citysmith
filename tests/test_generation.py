@@ -835,3 +835,72 @@ def test_place_wall_leaves_x_authored_meshes_alone():
     n = place_wall(WALL, 2, 3, "n", y=0.5)
     assert n.rot == ROT_N
     assert (n.x, n.z) == (2.0, 3.0)
+
+
+# -- town layout --------------------------------------------------------------
+
+def test_lane_counts_as_public_open_space():
+    """A lane is somewhere people walk, so a door may open onto it.
+
+    Leaving LANE out of OPEN silently invalidated the doorway of every
+    building whose only frontage had just been paved as a lane. Access fell
+    from 100% to 96% and nothing pointed at the lanes as the cause -- the
+    notching feature landing in the same rev took the blame for two rounds.
+    """
+    from citysmith import raster as R
+
+    assert R.LANE in R.OPEN
+    assert R.LANE in R.WALKABLE
+
+
+def test_notch_is_refused_when_the_yard_is_sealed():
+    """A notch hemmed in by neighbours is a courtyard, not a yard."""
+    from citysmith.raster import _notch_opens_outward, TileMap
+
+    tm = TileMap.blank(10, 10)
+    patch = [(4, 4), (5, 4), (4, 5), (5, 5)]
+    assert not _notch_opens_outward(tm, patch, reachable=set())
+    assert _notch_opens_outward(tm, patch, reachable={(6, 4)})
+
+
+def test_notching_produces_l_shapes_but_keeps_every_door():
+    """The whole point: vary the plan without cutting anyone off the street."""
+    import collections
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+    import pathlib
+
+    src = pathlib.Path("out/layout.json")
+    if not src.exists():
+        pytest.skip("needs the imported Forest Church layout")
+
+    tm = rasterize(Layout.load(src), bridges=True)
+    fp = collections.defaultdict(list)
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.building[z][x]:
+                fp[tm.building[z][x]].append((x, z))
+
+    non_rect = 0
+    for cells in fp.values():
+        xs = [c[0] for c in cells]
+        zs = [c[1] for c in cells]
+        if len(cells) != (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1):
+            non_rect += 1
+    assert non_rect > 0, "every footprint is still a perfect rectangle"
+    assert all(tm.doors.get(bid) for bid in fp), "a notch took a building's only door"
+
+
+def test_the_town_has_a_market_square():
+    from citysmith import raster as R
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+    import pathlib
+
+    src = pathlib.Path("out/layout.json")
+    if not src.exists():
+        pytest.skip("needs the imported Forest Church layout")
+    tm = rasterize(Layout.load(src), bridges=True)
+    plaza = sum(1 for z in range(tm.depth) for x in range(tm.width)
+                if tm.surface[z][x] == R.PLAZA)
+    assert plaza > 0, "MFCG gave no square, so one has to be carved"

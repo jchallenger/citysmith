@@ -14,6 +14,7 @@ streets round up, and a building keeps at least its perimeter.
 from __future__ import annotations
 
 import math
+import zlib
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -27,13 +28,17 @@ WATER = "water"
 STREET = "street"
 PLAZA = "plaza"
 PIER = "pier"
+LANE = "lane"
 FLOOR = "floor"
 
 #: Surfaces a creature can stand and walk on.
-WALKABLE = frozenset({GROUND, FIELD, STREET, PLAZA, PIER, FLOOR})
+WALKABLE = frozenset({GROUND, FIELD, STREET, PLAZA, PIER, LANE, FLOOR})
 
 #: Surfaces that count as public open space for door placement and routing.
-OPEN = frozenset({GROUND, STREET, PLAZA, PIER})
+#: A lane belongs here: it is a way people walk, and leaving it out silently
+#: invalidated the doorway of every building whose only frontage got paved as
+#: one -- access fell to 96% with no hint that the lanes had caused it.
+OPEN = frozenset({GROUND, STREET, PLAZA, PIER, LANE})
 
 SIDES = (("n", 0, -1), ("s", 0, 1), ("w", -1, 0), ("e", 1, 0))
 
@@ -480,10 +485,13 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
         tm.floors[b.id] = max(1, b.floors)
 
     _regularise_buildings(tm)
+    _notch_buildings(tm)
     _absorb_fragments(tm)
     _rasterize_walls(tm, layout, shift, width, depth)
     if bridges:
         tm.bridges = _bridge_water_gaps(tm, layout)
+    _carve_plaza(tm)
+    _trace_lanes(tm)
     _find_perimeters(tm, layout)
     _place_doors(tm, layout)
     return tm
@@ -581,6 +589,224 @@ def _bridge_water_gaps(
         if set(comps[0]) == main and not built:
             break
     return built
+
+
+#: A building has to be at least this big before a corner can be cut out of
+#: it, and must keep at least this much afterwards.
+NOTCH_MIN_AREA = 36
+NOTCH_KEEP_AREA = 24
+
+
+def _notch_opens_outward(tm: "TileMap", patch: list[tuple[int, int]],
+                         reachable: set[tuple[int, int]]) -> bool:
+    """Whether a proposed notch would be a yard rather than a sealed pocket.
+
+    A yard has to touch ground that is *reachable from the gates*, not merely
+    ground that is open. Testing only for openness still cut buildings off:
+    the notch found its way into another sealed courtyard and access came out
+    at 98% instead of 100%. Reachability is measured before any notch is cut,
+    which is conservative in the right direction -- a notch can only ever add
+    open space, never remove it.
+    """
+    inside = set(patch)
+    for x, z in patch:
+        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, nz = x + dx, z + dz
+            if (nx, nz) in inside or not tm.inside(nx, nz):
+                continue
+            if (nx, nz) in reachable:
+                return True
+    return False
+
+
+def _still_enterable(tm: "TileMap", kept: list[tuple[int, int]],
+                     reachable: set[tuple[int, int]],
+                     yard: set[tuple[int, int]]) -> bool:
+    """Whether what is left of a footprint still touches somewhere public.
+
+    The yard the notch opens counts, since it is only cut when it joins
+    reachable ground -- so a building whose street frontage is taken by the
+    notch can still be entered from its own yard.
+    """
+    for x, z in kept:
+        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            n = (x + dx, z + dz)
+            if n in reachable or n in yard:
+                return True
+    return False
+
+
+def _notch_buildings(tm: "TileMap") -> None:
+    """Cut a corner out of some footprints so the town is not all boxes.
+
+    :func:`_regularise_buildings` reduces every MFCG blob to its largest
+    inscribed rectangle, which is what makes wall runs straight and roofs
+    seat -- and left 51 of 51 buildings a perfect rectangle. The fix is not to
+    put the blobs back. An L is still assembled *from* rectangles: two of
+    them. Wall runs stay straight, and roof ring depth has come from a search
+    inward from the real boundary since the L-shaped-terrace bug, so an L
+    roofs correctly where a blob never could.
+
+    The notch is a clean rectangle at one corner, about a third of the plan
+    each way, chosen by a stable hash so a rebuild cuts the same corner.
+    Buildings too small to spare it keep their rectangle.
+    """
+    # reachable_from returns a bool *grid*, not a set of cells. Testing
+    # ``(x, z) in grid`` is always False -- it compares a tuple against the
+    # rows -- which silently rejected every notch and left all 51 footprints
+    # rectangular while the code looked like it was cutting them.
+    seen = reachable_from(tm, sorted(tm.gates) or _fallback_starts(tm))
+    reachable = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+                 if seen[z][x]}
+
+    cells_of: dict[str, list[tuple[int, int]]] = {}
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            bid = tm.building[z][x]
+            if bid:
+                cells_of.setdefault(bid, []).append((x, z))
+
+    for bid, cells in sorted(cells_of.items()):
+        if len(cells) < NOTCH_MIN_AREA:
+            continue
+        xs = [c[0] for c in cells]
+        zs = [c[1] for c in cells]
+        x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
+        w, d = x1 - x0 + 1, z1 - z0 + 1
+        nw, nd = max(2, w // 3), max(2, d // 3)
+        if len(cells) - nw * nd < NOTCH_KEEP_AREA:
+            continue
+        if w - nw < 2 or d - nd < 2:
+            continue
+
+        # Try all four corners, and only cut one whose yard actually opens
+        # outward. A notch boxed in by the neighbours is not a yard, it is a
+        # sealed courtyard: the first version of this cut three buildings off
+        # the street network and took access from 100% to 94%, which the
+        # build's own access check caught.
+        pick = zlib.crc32(f"notch:{bid}".encode())
+        corners = [(x0, z0), (x1 - nw + 1, z0),
+                   (x0, z1 - nd + 1), (x1 - nw + 1, z1 - nd + 1)]
+        for i in range(4):
+            cx0, cz0 = corners[(pick + i) % 4]
+            patch = [(x, z) for z in range(cz0, cz0 + nd)
+                     for x in range(cx0, cx0 + nw)]
+            if not _notch_opens_outward(tm, patch, reachable):
+                continue
+            cut = [(x, z) for x, z in patch if tm.building[z][x] == bid]
+            kept = [c for c in cells if c not in set(cut)]
+            # Cut it, then check the building can still be entered. Guarding
+            # the *yard* is not enough: a notch can take away the very facade
+            # the door was going to sit on, which cost a building its doorway
+            # entirely. Anything that cannot be entered afterwards is put back.
+            if not _still_enterable(tm, kept, reachable, set(cut)):
+                continue
+            for x, z in cut:
+                tm.building[z][x] = ""
+                if tm.surface[z][x] == FLOOR:
+                    tm.surface[z][x] = GROUND
+            break
+
+
+#: Side of the square, and how far from the town's built centre it may sit.
+PLAZA_SIDE = 7
+
+
+def _carve_plaza(tm: "TileMap") -> None:
+    """Open a market square on the busiest piece of the street network.
+
+    MFCG's squares came through this export empty, so the town had no plaza at
+    all -- no public room, nowhere for the well and the market clutter the
+    dressing pass already knows how to lay, and nowhere for a party to be
+    accosted. The square is placed where the most street already meets, which
+    puts it on the junction the town's own road layout says is the centre.
+    """
+    best: tuple[int, tuple[int, int]] | None = None
+    for z in range(tm.depth - PLAZA_SIDE):
+        for x in range(tm.width - PLAZA_SIDE):
+            block = [(x + i, z + j) for i in range(PLAZA_SIDE)
+                     for j in range(PLAZA_SIDE)]
+            if any(tm.building[bz][bx] or tm.wall[bz][bx]
+                   or tm.surface[bz][bx] in (WATER, VOID, PIER)
+                   for bx, bz in block):
+                continue
+            paved = sum(1 for bx, bz in block if tm.surface[bz][bx] == STREET)
+            if paved == 0:
+                continue
+            if best is None or paved > best[0]:
+                best = (paved, (x, z))
+
+    if best is None:
+        return
+    _, (x0, z0) = best
+    for j in range(PLAZA_SIDE):
+        for i in range(PLAZA_SIDE):
+            tm.surface[z0 + j][x0 + i] = PLAZA
+
+
+#: A lane is at most this wide. Wider than that and it is a street that the
+#: road layout simply did not name.
+LANE_MAX_WIDTH = 2
+
+#: How far a lane is walked outward from the gap that seeded it, looking for
+#: a road. Buildings stand back from the carriageway, so without this a lane
+#: never reaches anything.
+LANE_REACH = 4
+
+
+def _trace_lanes(tm: "TileMap") -> None:
+    """Pave the gaps between buildings that people obviously walk down.
+
+    The back lanes were bare grass, which reads as a gap the generator left
+    rather than as a route anyone uses. A lane starts as ground pinched
+    between buildings on opposite sides -- the shortcut a rogue takes during
+    a chase -- and is then walked outward to the nearest road.
+
+    That second step is the one that matters. Buildings here stand back from
+    the carriageway, so of 121 pinched cells on this map **none** touched a
+    street: requiring a lane to begin at a road found nothing at all. A lane
+    is a corridor that *reaches* a road, not one that starts at it.
+    """
+    seeds: set[tuple[int, int]] = set()
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] != GROUND or tm.building[z][x] or tm.wall[z][x]:
+                continue
+            for dx, dz in ((1, 0), (0, 1)):
+                near = far = False
+                for step in range(1, LANE_MAX_WIDTH + 1):
+                    ax, az = x + dx * step, z + dz * step
+                    bx, bz = x - dx * step, z - dz * step
+                    if tm.inside(ax, az) and tm.building[az][ax]:
+                        near = True
+                    if tm.inside(bx, bz) and tm.building[bz][bx]:
+                        far = True
+                if near and far:
+                    seeds.add((x, z))
+                    break
+
+    lanes = set(seeds)
+    frontier = deque((c, 0) for c in seeds)
+    while frontier:
+        (x, z), dist = frontier.popleft()
+        if dist >= LANE_REACH:
+            continue
+        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, nz = x + dx, z + dz
+            if not tm.inside(nx, nz) or (nx, nz) in lanes:
+                continue
+            if tm.building[nz][nx] or tm.wall[nz][nx]:
+                continue
+            here = tm.surface[nz][nx]
+            if here in (STREET, PLAZA):
+                continue          # arrived at the road; the lane ends here
+            if here != GROUND:
+                continue
+            lanes.add((nx, nz))
+            frontier.append(((nx, nz), dist + 1))
+
+    for x, z in lanes:
+        tm.surface[z][x] = LANE
 
 
 def _regularise_buildings(tm: "TileMap") -> None:
@@ -805,7 +1031,7 @@ def _place_doors(tm: TileMap, layout: Layout | None) -> None:
     primary door stays first in ``tm.doors[bid]``; verification reads it there.
     """
     reach = reachable_from(tm, sorted(tm.gates) or _fallback_starts(tm))
-    priority = {STREET: 0, PLAZA: 1, PIER: 2, GROUND: 3}
+    priority = {STREET: 0, PLAZA: 1, LANE: 2, PIER: 3, GROUND: 4}
 
     area: dict[str, int] = {}
     for z in range(tm.depth):

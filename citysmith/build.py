@@ -1635,6 +1635,9 @@ def build_from_tilemap(
         R.FIELD: "field_1x1",
         R.STREET: "street",
         R.PLAZA: "street",
+        # A lane is trodden earth, not laid cobble -- that is the whole point
+        # of distinguishing it from the street it opens off.
+        R.LANE: "lane",
         R.PIER: "street",
         R.FLOOR: "floor",
     }

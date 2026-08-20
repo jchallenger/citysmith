@@ -309,6 +309,13 @@ MEDIEVAL = Style(
                         "Sign (Village) 01", "Sign (Village) 02",
                         "Sign (Village) 03", "Spike sign"), **_MED),
         ],
+        # Back lanes between houses: worn ground, not paving. Gravel doubles
+        # as the shingle shore, but the two never meet -- one is between
+        # buildings, the other is against water.
+        "lane": [
+            _tile(name="gravel_1x1_01", **_MED),
+            _tile(name="Dirt 1x1", **_MED),
+        ],
         "quay_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),
