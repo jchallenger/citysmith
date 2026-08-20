@@ -46,17 +46,16 @@ DISTRICTS = [
       ("shipped", "quay rail where paving meets water"),
       ("shipped", "open water uses the 2x2 tile: 115 blocks, 460 cells")]),
 
-    ("The Roofscape", "c-roofscape", "Yards cut out of the plans",
-     "20 of 51 buildings have a yard cut from one corner now, so the town is not 51 boxes. The "
-     "regulariser reduces every imported blob to its largest inscribed rectangle &mdash; which is "
-     "what makes wall runs straight and roofs seat &mdash; and the fix was not to put the blobs "
-     "back. An L is still built <em>from</em> rectangles, and roof depth has come from a search "
-     "inward from the real boundary since the L-terrace bug, so an L roofs correctly where a blob "
-     "never could. A notch that would seal a courtyard, or take the facade a door needed, is put "
-     "back.",
-     [("shipped", "20 of 51 footprints are L-plans with a yard"),
-      ("shipped", "notches reverted where they would cost a doorway"),
-      ("next", "no porches, wings or lean-tos yet")]),
+    ("The Roofscape", "c-roofscape", "Where a notched plan still defeats the kit",
+     "Shown because it is the one thing still wrong. Rectangular plans roof as clean hips; the "
+     "notched ones come out with ridge lines that meet at angles resolving into nothing. Probed in "
+     "isolation &mdash; a 6&times;6, an L and a U side by side, photographed from directly "
+     "overhead &mdash; the square is correct and both notched shapes are not. It is not a corner-"
+     "piece problem: with axis-aligned notches the reflex corner falls on a <em>vertex between</em> "
+     "cells, so no single cell can carry an inner piece. An L-shaped building has two ridges "
+     "meeting at a valley, and roofing one as a single hip is the mistake.",
+     [("shipped", "rectangular plans roof cleanly"),
+      ("flaw", "notched plans need two ridges and a valley, not one hip")]),
 
     ("The Rampart", "d-rampart", "Coursed masonry, and 928 assets lighter",
      "A buried-geometry check found 928 wall facings sitting <em>entirely inside</em> the block "
@@ -91,14 +90,18 @@ DISTRICTS = [
       ("shipped", "one timber kit per house facade"),
       ("shipped", "clustered goods and signed doors")]),
 
-    ("The Pinewood", "g-pinewood", "Trees with trunks, spaced so they all arrive",
-     "Every conifer used to be a bare canopy cone sitting on the grass. &ldquo;Stackable Pine "
-     "Top&rdquo; is the top of a three-piece kit and it was being planted on its own, while cut "
-     "stumps were scattered separately nearby &mdash; read together, leaves that did not line up "
-     "with any trunk. Worse, 47% of all scenery sat inside another prop&#39;s collider, and "
-     "TaleSpire drops those on paste without saying so.",
-     [("shipped", "pines stacked from their kit: 557 joints, none misaligned"),
-      ("shipped", "0 overlapping props, down from 1,000 of 2,137")]),
+    ("The Pinewood", "g-pinewood", "Trunks centred under their canopies",
+     "Every prop on this map was sitting half its own size off, because the catalog read "
+     "<code>m_Extent</code> from the collider and threw <code>m_Center</code> away. A tile is "
+     "authored with its collider&#39;s min corner on the origin; a prop is authored with the "
+     "collider <em>centred</em> on it. The stored coordinate is the origin either way, so "
+     "&ldquo;subtract half the footprint&rdquo; is exactly right for one and exactly wrong for the "
+     "other. On a fern that is 0.2 tiles and invisible; on a 2.55-wide pine canopy it is 1.275, "
+     "while the trunk beneath moved only 0.55 &mdash; leaving three quarters of a tile between "
+     "them, and a trunk anchored to the corner of its own crown.",
+     [("shipped", "collider offset honoured: trunk centred at every rotation"),
+      ("shipped", "one placed_bounds(), so checks and placement agree"),
+      ("shipped", "felled stumps keep clear of standing trees")]),
 
     ("The Map Edge", "z-map-edge", "One ragged step, not a flight of terraces",
      "The falloff used to step down per ring, up to four terraces deep &mdash; and a 4-8 tile wide "
@@ -206,7 +209,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 24</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 28</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -214,7 +217,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>25,193</b> in <b>4</b> chunks</span>
+    <span>assets <b>25,177</b> in <b>4</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -230,6 +233,15 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 28 &middot; Aug 20</span><div><b>Props store their centre; tiles store
+    their corner.</b> A trunk anchored to the corner of its own canopy turned out not to be the
+    tree at all &mdash; it was every prop on the map. TaleSpire&#39;s collider bounds carry a
+    centre <em>and</em> an extent, and the importer only ever read the extent. Tiles are authored
+    with the collider&#39;s min corner on the origin, props with it centred, and the stored
+    coordinate is the origin either way. Four earlier probes chased rotation, trunk choice and
+    stump clearance, because all of those are visible and this was one layer down in the importer.
+    The clue was there the whole time: the numbers said both pieces centred on the same point while
+    the board plainly showed otherwise, and I read past that disagreement twice.</div></li>
   <li><span class="when">rev 24 &middot; Aug 20</span><div><b>One step at the border, and pines that
     meet their trunks.</b> The &ldquo;second layer of land&rdquo; was the edge taper: stepping down
     per ring gave terraces up to four deep, and a wide flat terrace half a tile down reads as a
