@@ -473,7 +473,7 @@ def tile_interpenetration(builder) -> list[str]:
     upper floor slab drove a quarter of a cubic tile through the masonry
     around its whole perimeter.
     """
-    from .build import rotated_footprint
+    from .build import placed_bounds
 
     catalog = builder.palette.catalog
     boxes: list[tuple[float, ...]] = []
@@ -483,8 +483,8 @@ def tile_interpenetration(builder) -> list[str]:
             continue
         if asset.size_y < 0.4:
             continue          # ground plane and thin trim: laid flush by design
-        sx, sz = rotated_footprint(asset, p.rot)
-        boxes.append((p.x, p.z, p.y, p.x + sx, p.z + sz, p.y + asset.size_y))
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        boxes.append((x0, z0, p.y, x1, z1, p.y + asset.size_y))
 
     at: dict[tuple[int, int], list[int]] = {}
     for i, bx in enumerate(boxes):
@@ -519,7 +519,7 @@ def _prop_collisions(builder) -> list[str]:
     the scatter took collisions into account, 1,000 of 2,137 props on the
     Forest Church map were inside another one.
     """
-    from .build import rotated_footprint
+    from .build import placed_bounds
 
     catalog = builder.palette.catalog
     boxes: list[tuple[float, ...]] = []
@@ -527,8 +527,8 @@ def _prop_collisions(builder) -> list[str]:
         asset = catalog.by_id(p.asset_id)
         if asset is None or asset.kind != "prop":
             continue
-        sx, sz = rotated_footprint(asset, p.rot)
-        boxes.append((p.x, p.z, p.y, p.x + sx, p.z + sz, p.y + asset.size_y))
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        boxes.append((x0, z0, p.y, x1, z1, p.y + asset.size_y))
 
     at: dict[tuple[int, int], list[int]] = {}
     for i, bx in enumerate(boxes):
@@ -564,7 +564,7 @@ class _Occupancy:
     """
 
     def __init__(self, builder, y: float):
-        from .build import rotated_footprint
+        from .build import placed_bounds
 
         self._cells: dict[tuple[int, int], list[tuple[float, float, float, float]]] = {}
         catalog = builder.palette.catalog
@@ -574,8 +574,7 @@ class _Occupancy:
                 continue           # scenery is not structure
             if not (p.y - 1e-6 <= y <= p.y + asset.size_y + 1e-6):
                 continue
-            sx, sz = rotated_footprint(asset, p.rot)
-            box = (p.x, p.z, p.x + sx, p.z + sz)
+            box = placed_bounds(asset, p)
             for cx in range(int(box[0]) - 1, int(box[2]) + 2):
                 for cz in range(int(box[1]) - 1, int(box[3]) + 2):
                     self._cells.setdefault((cx, cz), []).append(box)

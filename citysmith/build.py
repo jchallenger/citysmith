@@ -205,14 +205,52 @@ def rotated_footprint(asset: Asset, rot: int) -> tuple[float, float]:
     return (asset.size_x, asset.size_z)
 
 
-def place_centered(asset: Asset, cx: float, cz: float, y: float, rot: int) -> Placement:
-    """Place ``asset`` so its *rotated* footprint is centred on ``(cx, cz)``.
+def collider_offset(asset: Asset, rot: int) -> tuple[float, float]:
+    """Where the collider centre sits relative to the stored coordinate."""
+    ox, oz = asset.off_x, asset.off_z
+    if ((rot // _QUARTER) % 4) % 2:
+        ox, oz = oz, ox
+    return ox, oz
 
-    The stored coordinate is the min corner of the rotated box -- see the
-    module docstring for the in-game measurements this reproduces.
+
+def placed_bounds(asset: Asset, placement: Placement) -> tuple[float, float, float, float]:
+    """The world-space ``(x0, z0, x1, z1)`` a placement actually occupies.
+
+    The one place that knows how to turn a stored coordinate back into a box.
+    A stored coordinate is the asset's *origin*: for a tile that sits on the
+    collider's min corner, for a prop it sits at the collider's centre. Code
+    that assumes the former for everything reports a tenth of the scenery as
+    overlapping when none of it is.
     """
-    sx, sz = rotated_footprint(asset, rot)
-    return Placement(asset.id, cx - sx / 2, y, cz - sz / 2, rot)
+    sx, sz = rotated_footprint(asset, placement.rot)
+    ox, oz = collider_offset(asset, placement.rot)
+    return (placement.x + ox - sx / 2, placement.z + oz - sz / 2,
+            placement.x + ox + sx / 2, placement.z + oz + sz / 2)
+
+
+def place_centered(asset: Asset, cx: float, cz: float, y: float, rot: int) -> Placement:
+    """Place ``asset`` so its collider is centred on ``(cx, cz)``.
+
+    **The stored coordinate is the asset's origin, not its min corner.** For a
+    tile those are the same thing -- the kit authors a tile with its collider's
+    min corner on the origin, so ``m_Center`` equals ``m_Extent`` and
+    subtracting half the footprint lands it correctly. That is the case the
+    in-game measurements in the module docstring pinned down.
+
+    A **prop** is authored the other way: its collider is centred on the
+    origin, so ``m_Center`` is about zero. Subtracting half the footprint from
+    one of those shifts it by half its own size. On a fern that is 0.2 tiles
+    and invisible. On a 2.55-wide pine canopy it is 1.275 tiles, while the
+    1.1-wide trunk beneath it moves only 0.55 -- so the two separate by three
+    quarters of a tile and the trunk ends up anchored to the corner of its own
+    crown, which is exactly how it looked on the board.
+
+    Both cases are the same rule once the collider offset is honoured: step
+    back from the desired centre by wherever the collider sits relative to the
+    origin.
+    """
+    ox, oz = collider_offset(asset, rot)
+    return Placement(asset.id, cx - ox, y, cz - oz, rot)
 
 
 def place_tile(asset: Asset, tx: int, tz: int, y: float = 0.0, rot: int = 0) -> Placement:
@@ -1929,6 +1967,8 @@ class Scatter:
     @staticmethod
     def box(asset: Asset, cx: float, cz: float, y: float, rot: int
             ) -> tuple[float, ...]:
+        # (cx, cz) is where the collider centre will end up, so the box is
+        # simply centred there -- see place_centered.
         sx, sz = rotated_footprint(asset, rot)
         return (cx - sx / 2, cz - sz / 2, y,
                 cx + sx / 2, cz + sz / 2, y + asset.size_y)

@@ -56,6 +56,31 @@ class Asset:
     size_x: float = 1.0
     size_y: float = 1.0
     size_z: float = 1.0
+    #: Where the collider sits relative to the asset's own origin, in tile
+    #: units -- Unity's ``m_Center``. **This is not decoration.** A tile is
+    #: authored with its collider's *min corner* on the origin, so its centre
+    #: equals its extent; a prop is authored with the collider *centred* on
+    #: the origin, so its centre is ~0. Placement stores the origin either
+    #: way, which means the offset from origin to collider centre differs by
+    #: half a footprint between the two. Dropping this field is what shifted
+    #: every prop by half its own size -- invisible on a fern, and a tile and
+    #: a quarter on a pine canopy, which is why a trunk ended up anchored to
+    #: the corner of its own crown.
+    off_x: float | None = None
+    off_y: float | None = None
+    off_z: float | None = None
+
+    def __post_init__(self) -> None:
+        # An asset built by hand -- a test fixture, a probe -- gets the tile
+        # convention, which is what every placement helper assumed before the
+        # offset existed. Only the catalog reader knows better, because only
+        # it has read ``m_Center``.
+        if self.off_x is None:
+            object.__setattr__(self, "off_x", self.size_x / 2)
+        if self.off_y is None:
+            object.__setattr__(self, "off_y", self.size_y / 2)
+        if self.off_z is None:
+            object.__setattr__(self, "off_z", self.size_z / 2)
     deprecated: bool = False
 
     @property
@@ -144,6 +169,17 @@ def find_talespire_install(explicit: str | os.PathLike[str] | None = None) -> pa
     )
 
 
+def _centre(bounds: dict | None, axis: str, fallback: float) -> float:
+    """Collider centre offset from the asset origin, in tile units."""
+    if not bounds:
+        return fallback
+    centre = bounds.get("m_Center") or {}
+    value = centre.get(axis)
+    if value is None:
+        return fallback
+    return round(float(value), 3)
+
+
 def _extent(bounds: dict | None, axis: str) -> float:
     if not bounds:
         return 1.0
@@ -169,6 +205,9 @@ def _asset_from_entry(entry: dict, kind: str, pack: str) -> Asset:
         size_x=_extent(bounds, "x"),
         size_y=_extent(bounds, "y"),
         size_z=_extent(bounds, "z"),
+        off_x=_centre(bounds, "x", _extent(bounds, "x") / 2),
+        off_y=_centre(bounds, "y", _extent(bounds, "y") / 2),
+        off_z=_centre(bounds, "z", _extent(bounds, "z") / 2),
         deprecated=bool(entry.get("IsDeprecated")),
     )
 

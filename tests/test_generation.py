@@ -978,3 +978,48 @@ def test_woodland_grows_in_stands_not_salt_and_pepper():
     # and the canopy varies rather than sitting flat
     vals = [canopy_at(x, z) for z in range(0, 120, 7) for x in range(0, 120, 7)]
     assert max(vals) - min(vals) > 0.6, "canopy field is too flat to make glades"
+
+
+# -- collider offsets ---------------------------------------------------------
+
+def test_a_tile_stores_its_min_corner_and_a_prop_stores_its_centre():
+    """The two authoring conventions, which look identical until they don't.
+
+    A tile is authored with its collider's min corner on the origin, so
+    m_Center equals m_Extent. A prop is authored with the collider centred on
+    the origin, so m_Center is about zero. The stored coordinate is the origin
+    either way -- which means subtracting half a footprint is right for one
+    and wrong for the other. Doing it for both shifted every prop by half its
+    own size: 0.2 tiles on a fern, 1.275 on a pine canopy, and since the trunk
+    beneath moved only 0.55 the two came apart and the trunk ended up anchored
+    to the corner of its own crown.
+    """
+    from citysmith.build import place_centered, placed_bounds
+
+    tile = Asset(id="7" * 8 + "-1111-2222-3333-444444444444", name="slab",
+                 kind="tile", pack="p", group_tag="floor", tags=(), folder="",
+                 size_x=1.0, size_y=0.5, size_z=1.0,
+                 off_x=0.5, off_y=0.25, off_z=0.5)          # min corner on origin
+    prop = Asset(id="8" * 8 + "-1111-2222-3333-444444444444", name="canopy",
+                 kind="prop", pack="p", group_tag="prop", tags=(), folder="",
+                 size_x=2.5, size_y=2.4, size_z=2.5,
+                 off_x=0.0, off_y=1.2, off_z=0.0)           # centred on origin
+
+    t = place_centered(tile, 5.5, 5.5, 0.0, 0)
+    assert (t.x, t.z) == (5.0, 5.0), "a tile stores its min corner"
+    p = place_centered(prop, 5.5, 5.5, 0.0, 0)
+    assert (p.x, p.z) == (5.5, 5.5), "a prop stores its centre"
+
+    # Both must reconstruct to a box centred on where they were asked to go.
+    for asset, placement in ((tile, t), (prop, p)):
+        x0, z0, x1, z1 = placed_bounds(asset, placement)
+        assert abs((x0 + x1) / 2 - 5.5) < 1e-9
+        assert abs((z0 + z1) / 2 - 5.5) < 1e-9
+
+
+def test_asset_without_explicit_offsets_uses_the_tile_convention():
+    """Hand-built assets keep the behaviour every helper assumed before."""
+    a = Asset(id="9" * 8 + "-1111-2222-3333-444444444444", name="x", kind="tile",
+              pack="p", group_tag="", tags=(), folder="",
+              size_x=1.0, size_y=2.0, size_z=0.5)
+    assert (a.off_x, a.off_y, a.off_z) == (0.5, 1.0, 0.25)
