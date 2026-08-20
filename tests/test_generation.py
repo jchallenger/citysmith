@@ -737,3 +737,70 @@ def test_conifer_is_a_whole_tree_with_its_crown_on_its_trunk():
     trunk, crown = s.b.placements
     assert trunk.y == 0.5
     assert crown.y == 0.5 + TRUNK.size_y, "the crown sits on the trunk, not the ground"
+
+
+# -- map edge taper -----------------------------------------------------------
+
+def test_tapered_ground_is_still_open_country():
+    """The coupling this feature exists to get right.
+
+    Lowering the border is what stops the map reading as a cropped slab. But
+    open-country detection used to ask "is this ground at grade?", so tapered
+    ground would have counted as a *feature* and the border chunks -- exactly
+    the ones worth dropping -- would never be skipped again. Ground is tested
+    against its own cell's baseline instead.
+    """
+    b = _builder()
+    for tz in range(8):
+        for tx in range(8):
+            y = -0.5 if tx < 4 else 0.0        # the left half falls away
+            b.add(place_tile(GROUND, tx, tz, y))
+            b.ground_baseline[(tx, tz)] = y
+    b.add(place_wall(WALL, 6, 6, "n", 0.5))    # one built thing, far corner
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert [c.label for c in plan.chunks] == ["r01c01"]
+    assert len(plan.skipped) == 3, "tapered border chunks must still be skippable"
+
+
+def test_ground_off_its_baseline_still_disqualifies_a_chunk():
+    """A sunken riverbed is a feature; a tapered edge is not.
+
+    Both sit below grade, so height alone cannot tell them apart. What can:
+    the taper records a baseline for the cell, and a channel does not.
+    """
+    b = _builder()
+    _ground_field(b)
+    for tz in range(8):
+        for tx in range(8):
+            b.ground_baseline[(tx, tz)] = 0.0
+    b.add(place_tile(GROUND, 1, 1, -1.0))      # a channel, with no baseline
+    b.add(place_wall(WALL, 6, 6, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert "r00c00" in [c.label for c in plan.chunks]
+
+
+def test_edge_taper_never_leaves_the_outermost_block_at_grade():
+    """Ragged *reach*, not a ragged decision about whether to drop at all.
+
+    Letting the per-block nudge decide that left a third of the border sitting
+    at full grade against the void -- the sheer edge the taper removes.
+    """
+    from citysmith.build import edge_taper
+
+    class FlatMap:
+        width = depth = 40
+        building = [[None] * 40 for _ in range(40)]
+        wall = [[False] * 40 for _ in range(40)]
+        surface = [["ground"] * 40 for _ in range(40)]
+
+    taper = edge_taper(FlatMap())
+    border = [(x, z) for x in range(40) for z in range(40)
+              if min(x, z, 39 - x, 39 - z) < 2]
+    for cell in border:
+        assert cell in taper, f"{cell} on the border was left at grade"
+
+    # and the fall is monotonic: nothing further in drops more than the edge
+    edge = [v for (x, z), v in taper.items() if min(x, z, 39 - x, 39 - z) == 0]
+    assert all(v is None or v >= 1.0 for v in edge)

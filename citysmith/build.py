@@ -74,6 +74,85 @@ SIDE_OFFSETS = (("n", 0, -1), ("e", 1, 0), ("s", 0, 1), ("w", -1, 0))
 NEIGHBOURS = tuple((dx, dz) for _, dx, dz in SIDE_OFFSETS)
 
 
+#: The falloff is measured in **2x2 blocks**, not tiles, because the terrain
+#: optimiser lays open ground as 2x2 tiles wherever four cells agree. A height
+#: field that varies per cell breaks every one of those quads: defining it per
+#: cell cost a thousand extra tiles along the border and bought nothing, since
+#: a quad-sized step is not visible from eye level anyway.
+#:
+#: Two block-rings of half a tile is a 5 ft fall over 20 ft, and the ragged
+#: fringe beyond it is bitten out in 2-tile pieces -- which reads as a coast
+#: rather than as the pixel noise a per-cell nudge produced.
+EDGE_TAPER_BLOCKS = 2
+EDGE_TAPER_STEP = 0.5
+
+
+def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
+               step: float = EDGE_TAPER_STEP) -> dict[tuple[int, int], float | None]:
+    """How far below grade each border cell sits; ``None`` means leave it out.
+
+    The map used to stop on a ruler-straight line with a sheer drop to bare
+    board, so from outside it read as a cropped rectangle. Two things fix that
+    together: the outer rings step *down*, and the outermost ring is **ragged**
+    -- a stable per-cell nudge moves each cell in or out of the falloff, and
+    the cells that fall past the end are not laid at all. A straight edge one
+    tile lower is still a straight edge.
+
+    Cells carrying a building or a wall, or next to one, are left at grade: a
+    foundation half a tile down its own footprint is worse than a hard edge.
+    Only plain ground and field may be dropped entirely -- a street that ends
+    in a hole is a bug, however ragged the meadow beside it looks.
+    """
+    from . import raster as R
+
+    protected: set[tuple[int, int]] = set()
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.building[z][x] or tm.wall[z][x]:
+                for dz in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        protected.add((x + dx, z + dz))
+
+    # Everything below is decided per 2x2 block and then written to that
+    # block's four cells, so a quad always agrees with itself and the 2x2
+    # terrain pass keeps working inside the falloff.
+    blocks_x = (tm.width + 1) // 2
+    blocks_z = (tm.depth + 1) // 2
+
+    out: dict[tuple[int, int], float | None] = {}
+    for bz in range(blocks_z):
+        for bx in range(blocks_x):
+            depth_in = min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz)
+            noise = zlib.crc32(f"edge:{bx}:{bz}".encode())
+
+            # The nudge varies how far *in* the falloff reaches, never whether
+            # the outermost block is lowered. Letting it do the latter left a
+            # third of the border sitting at full grade against the void --
+            # which is the sheer edge this exists to remove. Ground drops
+            # monotonically outward; only the reach is ragged.
+            reach = rings + noise % 3
+            if depth_in >= reach:
+                continue
+            drop = (reach - depth_in) * step
+            if depth_in == 0 and (noise >> 8) % 4 == 0:
+                drop = None                   # a bite out of the outer fringe
+
+            for dz in (0, 1):
+                for dx in (0, 1):
+                    x, z = bx * 2 + dx, bz * 2 + dz
+                    if not (0 <= x < tm.width and 0 <= z < tm.depth):
+                        continue
+                    if (x, z) in protected:
+                        continue
+                    if drop is None and tm.surface[z][x] not in (R.GROUND, R.FIELD):
+                        # A street that ends in a hole is a bug however ragged
+                        # the meadow beside it looks; keep it, just lowered.
+                        out[(x, z)] = rings * step
+                    else:
+                        out[(x, z)] = drop
+    return out
+
+
 def footprints(tm) -> dict[str, set[tuple[int, int]]]:
     """The cells belonging to each building, keyed by building id.
 
@@ -174,6 +253,12 @@ class Builder:
         #: Recorded here because prop-ness is known at ``add`` time and cannot
         #: be recovered from a :class:`~citysmith.slab.Placement` afterwards.
         self.prop_ids: set[str] = set()
+        #: Cell -> the y at which *background* ground was laid there. The edge
+        #: taper means "unremarkable ground" is no longer one height across the
+        #: map, so open-country detection compares against this rather than
+        #: against a single grade. Water beds are deliberately absent: a sunken
+        #: channel is a feature and must keep disqualifying its chunk.
+        self.ground_baseline: dict[tuple[int, int], float] = {}
 
     def add(self, placement: Placement, *, prop: bool = False) -> None:
         self.placements.append(placement)
@@ -313,6 +398,11 @@ class Builder:
         cells.sort(key=lambda cell: (cell.row, cell.col, cell.quad))
 
         terrain, grade = self._grade_terrain(slab.placements)
+        # Placements were translated to whole tiles above; the baseline was
+        # recorded in the untranslated frame, so move it to match.
+        idx, idz = int(round(dx)), int(round(dz))
+        baseline = {(kx + idx, kz + idz): v + dy
+                    for (kx, kz), v in self.ground_baseline.items()}
         made = [
             SlabChunk(
                 row=cell.row, col=cell.col, quad=cell.quad,
@@ -320,7 +410,7 @@ class Builder:
                 x1=cell.x1 - dx, z1=cell.z1 - dz,
                 slab=Slab(cell.items),
                 open_country=_is_open_country(
-                    cell.items, terrain, self.prop_ids, grade),
+                    cell.items, terrain, self.prop_ids, grade, baseline),
             )
             for cell in cells
         ]
@@ -553,19 +643,35 @@ def _trim_open_country(
 
 def _is_open_country(
     items: list[Placement], terrain: set[str], props: set[str],
-    grade: float | None,
+    grade: float | None, baseline: dict[tuple[int, int], float] | None = None,
 ) -> bool:
-    """True when a chunk holds only ground at grade and scatter dressing.
+    """True when a chunk holds only background ground and scatter dressing.
 
     Ferns and pines count as dressing, not as features: a stand of trees on
     open grass is still ground nobody stands on. Anything built -- a floor, a
     wall, a street, a tilled field, water -- disqualifies the chunk at once.
+
+    **Height is checked against the cell's own baseline, not a single grade.**
+    The map edge tapers, so "unremarkable ground" is no longer one height
+    everywhere; testing against a global grade would mark every tapered border
+    cell as a feature and stop the border chunks -- precisely the ones worth
+    dropping -- from ever being skipped. A cell with no baseline recorded is
+    not background: that is how a sunken riverbed still disqualifies its chunk.
     """
     if grade is None:
         return False
     for p in items:
         if p.asset_id in terrain:
-            if p.y != grade:
+            want = grade
+            if baseline:
+                # Empty means the slab was not laid by _lay_terrain -- a probe,
+                # an interior, a test fixture -- so there is no height field to
+                # consult and the single grade is the best answer available.
+                key = (int(math.floor(p.x)), int(math.floor(p.z)))
+                if key not in baseline:
+                    return False        # ground off the baseline is a feature
+                want = baseline[key]
+            if abs(p.y - want) > 1e-6:
                 return False
         elif p.asset_id not in props:
             return False
@@ -888,7 +994,8 @@ _PROP_CATEGORY_BY_KIND: dict[str, str] = {
 _BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field"}
 
 
-def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float) -> None:
+def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
+                 taper: dict[tuple[int, int], float | None]) -> None:
     """Lay the ground plane, preferring 2x2 tiles over 1x1 where it can.
 
     Open country is most of a map by area and almost all of it by tile count:
@@ -935,7 +1042,17 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float) ->
                 continue
             if any(q in bank for q in quad):
                 continue   # shingle is laid one tile at a time
-            b.surface(role, x, z, grade)
+            # A 2x2 lies flat, so it can only serve a quad that sits at one
+            # height. Inside the falloff most quads do -- the rings are wide --
+            # and refusing all of them cost a thousand extra tiles along the
+            # border, which is byte budget spent on ground nobody walks on.
+            drops = {taper.get(q, 0.0) for q in quad}
+            if len(drops) != 1 or None in drops:
+                continue
+            here = grade - drops.pop()
+            b.surface(role, x, z, here)
+            for q in quad:
+                b.ground_baseline[q] = here - b.palette.require(role).size_y
             covered.update(quad)
 
     # Pass 2: everything the blocks did not take.
@@ -948,18 +1065,26 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float) ->
             s = row[x]
             if s == R.VOID:
                 continue
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue                    # ragged fringe: nothing laid here
+            here = grade - drop
             if s == R.WATER:
                 # Water sits a tile low so it reads as a channel a creature can
                 # be pulled into, not a hole punched through the board.
-                b.surface(ground_role, x, z, grade - 1.0)
+                # The bed and its water fall with the land, so a river does
+                # not end up perched above a tapered bank. No baseline is
+                # recorded: a channel is a feature, not background ground.
+                b.surface(ground_role, x, z, here - 1.0)
                 water = b.palette.resolve("water")
                 if water is not None:
-                    b.add(place_tile(water, x, z, grade - 1.0))
+                    b.add(place_tile(water, x, z, here - 1.0))
                 continue
             role = surface_roles.get(s, ground_role)
             if (x, z) in bank and b.palette.resolve("field_1x1") is not None:
                 role = "field_1x1"          # shingle shore
-            b.surface(role, x, z, grade)
+            b.surface(role, x, z, here)
+            b.ground_baseline[(x, z)] = here - b.palette.require(role).size_y
 
 
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) -> None:
@@ -1295,7 +1420,8 @@ def build_from_tilemap(
         R.PIER: "street",
         R.FLOOR: "floor",
     }
-    _lay_terrain(b, tm, surface_roles, grade=floor.size_y)
+    taper = edge_taper(tm)
+    _lay_terrain(b, tm, surface_roles, grade=floor.size_y, taper=taper)
 
     top = floor.size_y
     storey_h = ext_wall.size_y
@@ -1417,7 +1543,7 @@ def build_from_tilemap(
 
     _lay_town_wall(b, tm, town_wall, top, wall_height)
 
-    _dress_districts(b, tm, grade=floor.size_y)
+    _dress_districts(b, tm, grade=floor.size_y, taper=taper)
 
     return b
 
@@ -1512,7 +1638,8 @@ def _plant_conifer(scatter: Scatter, palette: Palette, cx: float, cz: float,
     return scatter.place(pieces)
 
 
-def _dress_districts(b: Builder, tm, grade: float) -> None:
+def _dress_districts(b: Builder, tm, grade: float,
+                     taper: dict[tuple[int, int], float | None]) -> None:
     """Scatter district-appropriate props so each quarter reads as itself.
 
     Bare surfaces carry no story: a field of Tilled Earth is just brown, a
@@ -1559,13 +1686,20 @@ def _dress_districts(b: Builder, tm, grade: float) -> None:
     for z in range(tm.depth):
         for x in range(tm.width):
             surf = tm.surface[z][x]
+            # Scenery stands on the ground as laid, which near the border is
+            # the tapered height -- otherwise a fringe of trees floats over
+            # the falloff. Where the fringe is unbuilt, nothing is planted.
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+            here = grade - drop
 
             if surf == R.FIELD:
                 roll = rng.random()
                 if roll < 0.10 and wheat is not None:
-                    scatter.one(wheat, x + 0.5, z + 0.5, grade, rng.randrange(24))
+                    scatter.one(wheat, x + 0.5, z + 0.5, here, rng.randrange(24))
                 elif roll < 0.12 and straw is not None:
-                    scatter.one(straw, x + 0.5, z + 0.5, grade, rng.randrange(24))
+                    scatter.one(straw, x + 0.5, z + 0.5, here, rng.randrange(24))
 
             elif surf == R.GROUND and not near(x, z, frozenset({R.STREET, R.PLAZA})):
                 roll = rng.random()
@@ -1579,19 +1713,19 @@ def _dress_districts(b: Builder, tm, grade: float) -> None:
                     cx, cz = x + 0.5 + jx, z + 0.5 + jz
                     rot = rng.randrange(24)
                     if pick < 0.62:
-                        _plant_conifer(scatter, b.palette, cx, cz, grade, rot,
+                        _plant_conifer(scatter, b.palette, cx, cz, here, rot,
                                        tall=rng.random() < 0.35)
                     else:
                         role = "tree_broadleaf" if pick < 0.92 else "tree_dead"
                         tree = b.palette.resolve(role)
                         if tree is not None:
-                            scatter.one(tree, cx, cz, grade, rot)
+                            scatter.one(tree, cx, cz, here, rot)
                 elif roll < 0.045 and pine_stump is not None:
                     # The stump stands alone as an occasional cut tree.
-                    scatter.one(pine_stump, x + 0.5, z + 0.5, grade, rng.randrange(24))
+                    scatter.one(pine_stump, x + 0.5, z + 0.5, here, rng.randrange(24))
                 elif roll < 0.07 and fern_small is not None:
                     fern = fern_big if rng.random() < 0.3 and fern_big else fern_small
-                    scatter.one(fern, x + 0.5, z + 0.5, grade, rng.randrange(24))
+                    scatter.one(fern, x + 0.5, z + 0.5, here, rng.randrange(24))
 
             elif surf in (R.PLAZA, R.STREET):
                 # This export has no plaza cells (MFCG's squares came through
@@ -1607,11 +1741,11 @@ def _dress_districts(b: Builder, tm, grade: float) -> None:
                 # share of an already narrow set, so it has to be high.
                 roll = rng.random()
                 if not plaza_dressed and well is not None and surf == R.STREET:
-                    if scatter.one(well, x + 0.5, z + 0.5, grade, rng.randrange(24)):
+                    if scatter.one(well, x + 0.5, z + 0.5, here, rng.randrange(24)):
                         plaza_dressed = True
                 elif roll < 0.30 and barrels is not None:
                     pick = cart if rng.random() < 0.4 and cart else barrels
-                    scatter.one(pick, x + 0.5, z + 0.5, grade, rng.randrange(24))
+                    scatter.one(pick, x + 0.5, z + 0.5, here, rng.randrange(24))
 
 
 def _build_city_wall(b: Builder, city: City, base_y: float) -> None:
