@@ -650,3 +650,28 @@ def test_surface_tiles_align_at_the_top_not_the_bottom():
     grass, cobble = b.placements
     assert grass.y == 0.0 and cobble.y == 0.25
     assert grass.y + GROUND.size_y == cobble.y + thin.size_y == 0.5
+
+
+def test_gatehouse_ring_includes_diagonal_jambs():
+    """The wall circuit stair-steps, so a jamb is often only diagonal.
+
+    An orthogonal-only ring left the flanking towers with gaps in them.
+    """
+    from citysmith.build import _gatehouse_cells
+
+    #  # # #
+    #  # G #     G is the passage, everything else is wall
+    #  # # #
+    mass = {(x, z) for x in range(3) for z in range(3)}
+    gates = {(1, 1)}
+    ring = _gatehouse_cells(mass, gates)
+    assert ring == mass - gates
+    assert (0, 0) in ring, "the diagonal jamb has to rise with the rest"
+
+
+def test_gatehouse_never_raises_the_passage_itself():
+    from citysmith.build import _gatehouse_cells
+
+    mass = {(x, 0) for x in range(5)}
+    gates = {(2, 0)}
+    assert gates.isdisjoint(_gatehouse_cells(mass, gates))

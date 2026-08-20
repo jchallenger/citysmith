@@ -106,6 +106,36 @@ Assets in the same role differ in thickness and height. `place_tile` /
 is what produces floating walls and sunken floors the moment someone swaps a
 pack.
 
+Deriving the offset is necessary but not sufficient — you also have to check
+the asset is the *shape* the placement helper assumes. Two rules follow.
+
+## `place_tile` needs an asset that fills the cell
+
+Much of the medieval kit is **curtain wall**: pieces authored to stand *on* a
+cell boundary, not to fill a cell. `castle wall 1x1` is 1.0 × 2.0 × **0.5**,
+and the whole `castle wall` family is 0.5 deep.
+
+Laying one per cell across a rampart four cells thick therefore produced four
+parallel fins with a 0.5-tile slot between each pair — 2.5 ft of daylight
+straight through the fortification, for the entire circuit — while every check
+that read the tile grid reported the wall as solid, because in the grid every
+one of those cells *is* wall.
+
+A mass gets a full-cell block (`city_wall_core`) and the thin pieces are hung
+on the faces that show, via `place_wall`. Before pinning an asset to a role
+laid with `place_tile`, check `size_x == size_z == 1.0`.
+
+## Surfaces align at the top, not the bottom
+
+Ground tiles are not all the same thickness: cobble is 0.25 and grass is 0.5.
+Laid from a common bottom, every street sat a quarter tile below the grass
+beside it — a 15 inch kerb along both sides of every road, on 1,234 tiles.
+
+What has to line up is the plane a creature stands on. `Builder.surface(role,
+x, z, top_y)` places by top height; use it for anything walkable.
+`Builder.tile()` places by bottom and is for stacking courses, where the
+bottom is what matters.
+
 ## Rotation pivot
 
 A placement coordinate is the **min corner of the bounding box after

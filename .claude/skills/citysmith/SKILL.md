@@ -25,7 +25,7 @@ python -m citysmith import mytown.json                  # -> out/layout.json + l
 python -m citysmith verify out/layout.json              # cheap sanity check
 python -m citysmith build out/layout.json --stem mytown # -> out/mytown-rNNcNN[+N].slab.txt
 ```
-`import`: `--house-ft` (scale anchor, default 20), `--feet-per-unit` (override),
+`import`: `--house-ft` (scale anchor, default 35), `--feet-per-unit` (override),
 `--margin-ft` (suburb kept outside walls, default 60), `--no-clip`, `--name`,
 `--seed`, `--scale`, `--no-svg`.
 `build`: `--style {medieval,cyberpunk}`, `--seed`, `--storeys` (default 3),
@@ -111,6 +111,22 @@ Must print `off-grid 0`. Check every chunk, not just the first.
 `verify` fails below 90% and warns below 98%. Report the actual percentage — do
 not say "looks good". Also read `slab export` (largest chunk must be ≤ 30,720
 compressed bytes) and `street width`.
+
+**4. The placement checks.** `build` runs two families of check that read the
+*emitted geometry* rather than the tile grid, and both fail the build:
+
+- `placements` — off-grid tiles, doorways that resolved to nothing and got
+  built as solid wall, and town-wall cells with gaps in the masonry. The last
+  one exists because a wall built from 0.5-deep curtain pieces laid one per
+  cell scores perfectly on any check that reads the grid, while being visibly
+  see-through on the board.
+- `chunk coverage` — chunks dropped as open country that the map encloses.
+  An unpasted chunk is bare board, not grass, so an enclosed one pastes as a
+  rectangular hole in the ground.
+
+Never add a new check to the TileMap pass. If it can be fooled by geometry
+that was never built, it belongs in `verify.check_placements`, which has
+`_Occupancy` for asking "is there solid matter at this point".
 
 ## Debugging technique
 

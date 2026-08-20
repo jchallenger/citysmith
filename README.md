@@ -10,9 +10,9 @@ It also has a self-contained procedural city generator and an interior
 floorplan builder, but the MFCG path is the one that produces a whole town.
 
 ```
-forest_church.json ──▶ layout.json ──▶ raster ──▶ forest-r00c00+126.slab.txt ──▶ Ctrl+V
-  (Watabou export)      + layout.svg    + city-raster.svg   forest-r08c12+126.slab.txt
-                                                            forest-r17c08+45.slab.txt
+forest_church.json ──▶ layout.json ──▶ raster ──▶ forest-r00c00+17.slab.txt ──▶ Ctrl+V
+  (Watabou export)      + layout.svg    + city-raster.svg   forest-r02c02+14.slab.txt
+                                                            forest-r04c02+20.slab.txt
 ```
 
 ## Prerequisites
@@ -69,7 +69,7 @@ python -m citysmith verify out/layout.json
 python -m citysmith build out/layout.json --stem mytown
 ```
 
-Writes one file per chunk — `out/mytown-r00c00+126.slab.txt` and friends —
+Writes one file per chunk — `out/mytown-r00c00+17.slab.txt` and friends —
 plus `out/city-raster.svg`, and prints the verification report followed by a
 map of which chunk covers which tile range.
 

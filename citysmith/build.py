@@ -1045,6 +1045,12 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) 
 #: streets were widened for in the first place.
 GATE_HEADROOM_TILES = 2.0
 
+#: Extra courses on the wall flanking a gate. Without them the curtain runs
+#: over the opening at its ordinary height and nothing on the board says a
+#: gate is there -- the tunnel mouth alone reads as damage rather than as an
+#: entrance. Two courses is enough to be unmistakable from across the map.
+GATEHOUSE_RISE = 2
+
 
 def _corners_affordable(cells: set[tuple[int, int]]) -> bool:
     """Whether a footprint can spare a whole tile for each outside corner.
@@ -1098,24 +1104,45 @@ def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None
     mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
             if tm.wall[z][x]} | set(tm.gates)
     outside = _outside_the_wall(tm, mass)
+    towers = _gatehouse_cells(mass, set(tm.gates))
 
     for (x, z) in sorted(mass):
         gate = (x, z) in tm.gates
         if gate and lintel_from is None:
             continue
+        courses = wall_height + (GATEHOUSE_RISE if (x, z) in towers else 0)
         shows = [s for s, dx, dz in SIDE_OFFSETS if (x + dx, z + dz) not in mass]
-        for level in range(lintel_from if gate else 0, wall_height):
+        for level in range(lintel_from if gate else 0, courses):
             y = top + level * course
             b.add(place_tile(core, x, z, y))
             for s in shows:
                 b.add(place_wall(facing, x, z, s, y))
 
-        crown = top + wall_height * course
+        crown = top + courses * course
         faces_out = any((x + dx, z + dz) in outside for _, dx, dz in SIDE_OFFSETS)
         if faces_out and cap_asset is not None:
             b.add(place_tile(cap_asset, x, z, crown))
         elif walk is not None:
             b.add(place_tile(walk, x, z, crown))
+
+
+def _gatehouse_cells(mass: set[tuple[int, int]],
+                     gates: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    """Wall cells that flank a gate, and so rise into gatehouse towers.
+
+    A ring one cell deep around the opening, diagonals included: the wall
+    circuit is a stair-stepped diagonal, so a jamb is often only diagonally
+    adjacent to the passage it guards, and an orthogonal-only ring left the
+    towers with gaps in them.
+    """
+    ring: set[tuple[int, int]] = set()
+    for (gx, gz) in gates:
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                cell = (gx + dx, gz + dz)
+                if cell in mass and cell not in gates:
+                    ring.add(cell)
+    return ring
 
 
 def _outside_the_wall(tm, mass: set[tuple[int, int]]) -> set[tuple[int, int]]:
