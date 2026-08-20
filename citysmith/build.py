@@ -1311,7 +1311,7 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
                          if rings.get((x + dx, z + dz), -1) < r)
             piece, rot = _roof_piece(fall, side_piece, corner, flat,
                                      b.palette.resolve("roof_corner_inner"),
-                                     _is_reflex(cells, x, z, fall))
+                                     _is_reflex(rings, x, z, fall))
             if piece is not None:
                 b.add(place_tile(piece, x, z, crown + (r - 1) * rise, rot))
 
@@ -1424,7 +1424,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             fall = tuple(s for s, dx, dz in SIDE_OFFSETS
                          if rings.get((x + dx, z + dz), -1) < r)
             piece, rot = _roof_piece(fall, side, corner, cap, inner,
-                                     _is_reflex(cells, x, z, fall))
+                                     _is_reflex(rings, x, z, fall))
             if piece is not None:
                 b.add(place_tile(piece, x, z, y, rot))
 
@@ -1620,12 +1620,21 @@ def _roof_piece(fall: tuple[str, ...], side, corner, cap, inner=None,
 _OPPOSITE_CORNER = {"nw": "se", "ne": "sw", "sw": "ne", "se": "nw"}
 
 
-def _is_reflex(cells: set[tuple[int, int]], x: int, z: int,
+def _is_reflex(rings: dict[tuple[int, int], int], x: int, z: int,
                fall: tuple[str, ...]) -> bool:
-    """Whether a two-fall corner turns *into* the block rather than away.
+    """Whether a two-fall corner turns *into* the roof rather than away.
 
-    The test is the diagonal between the two falling sides: if the block
-    continues there, the roof wraps around an inside angle.
+    The test is the diagonal between the two falling sides -- but against the
+    **ring numbers**, not against mere membership of the block. Testing
+    membership marks every corner of every inner course as reflex, because on
+    a plain rectangle the diagonal from a ring-1 corner is the ring-0 cell,
+    which is of course still part of the building. A 6x6 square came out with
+    eight "inner" corners and a square has none; that mistake put the wrong
+    piece on 212 cells across the map.
+
+    A corner is reflex only where the diagonal sits at the *same or higher*
+    course. Where it sits lower, the roof is falling away on that diagonal
+    too, which is what an outside corner is.
     """
     if len(fall) != 2:
         return False
@@ -1633,7 +1642,8 @@ def _is_reflex(cells: set[tuple[int, int]], x: int, z: int,
     a, b = off[fall[0]], off[fall[1]]
     if a[0] + b[0] == 0 and a[1] + b[1] == 0:
         return False                      # opposite sides: a ridge, not a corner
-    return (x + a[0] + b[0], z + a[1] + b[1]) in cells
+    here = rings.get((x, z), 0)
+    return rings.get((x + a[0] + b[0], z + a[1] + b[1]), -1) >= here
 
 
 #: Roof rotations, measured from a hand-built community cottage. A quarter
@@ -1826,7 +1836,8 @@ def build_from_tilemap(
             # Same reflex problem as the roof: at the elbow of an L the wall
             # turns into the building, so a full-cell outside corner there
             # looks wrong and eats a floor tile the plan needs.
-            if corner is not None and _is_reflex(own, x, z, tuple(sorted(exposed))):
+            if corner is not None and _is_reflex(
+                    {c: 0 for c in own}, x, z, tuple(sorted(exposed))):
                 corner = None
             # A door has to keep a segment of its own, so a corner cell
             # carrying one falls back to per-side walls for the ground course
