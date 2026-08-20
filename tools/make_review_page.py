@@ -43,13 +43,17 @@ DISTRICTS = [
       ("shipped", "quay rail where paving meets water"),
       ("shipped", "open water uses the 2x2 tile: 115 blocks, 460 cells")]),
 
-    ("The Roofscape", "c-roofscape", "Dense quarter against open pinewood",
-     "The join between built and unbuilt, which is where a generated town usually gives itself "
-     "away. Gables at differing heights give archers roof positions reachable from a cart, and "
-     "the wood is mixed rather than a plantation &mdash; 62% conifer, 30% broadleaf, 8% dead "
-     "trunk, each one spaced clear of its neighbours.",
-     [("shipped", "mixed species, jittered placement"),
-      ("shipped", "adjacent gables at differing heights")]),
+    ("The Roofscape", "c-roofscape", "Yards cut out of the plans",
+     "20 of 51 buildings have a yard cut from one corner now, so the town is not 51 boxes. The "
+     "regulariser reduces every imported blob to its largest inscribed rectangle &mdash; which is "
+     "what makes wall runs straight and roofs seat &mdash; and the fix was not to put the blobs "
+     "back. An L is still built <em>from</em> rectangles, and roof depth has come from a search "
+     "inward from the real boundary since the L-terrace bug, so an L roofs correctly where a blob "
+     "never could. A notch that would seal a courtyard, or take the facade a door needed, is put "
+     "back.",
+     [("shipped", "20 of 51 footprints are L-plans with a yard"),
+      ("shipped", "notches reverted where they would cost a doorway"),
+      ("next", "no porches, wings or lean-tos yet")]),
 
     ("The Rampart", "d-rampart", "Solid masonry, battlements out, wall-walk behind",
      "A wall a party can be chased along. Two revs ago this same circuit was four parallel fins "
@@ -69,16 +73,16 @@ DISTRICTS = [
       ("shipped", "flanking towers, diagonal jambs included"),
       ("next", "no gate leaves or arch dressing yet")]),
 
-    ("The Back Lanes", "e-back-lanes", "Signed doors and barrels against the walls",
-     "Eighteen trade buildings hang a sign now &mdash; inns, smithies, shops, stables &mdash; "
-     "because a street of 28 identical cottages tells a party nothing, and &ldquo;which door is "
-     "the tavern&rdquo; is the question a town map exists to answer. Houses also stopped having "
-     "two front doors: a back door on a cottage is ordinary, two on a small one is a generator "
-     "sizing them by a single number. Homes need 32 tiles for a second entrance now rather than "
-     "15, which took houses from 3-with-one-door to 23.",
-     [("shipped", "18 signed trade buildings"),
-      ("shipped", "door count scaled to footprint and kind"),
-      ("next", "every footprint is still a perfect rectangle")]),
+    ("The Back Lanes", "e-back-lanes", "Trodden earth between the houses",
+     "872 tiles of lane. A lane starts as ground pinched between buildings and is then walked "
+     "outward to the nearest road &mdash; that second step is what makes it work, because houses "
+     "stand back from the carriageway and of 121 pinched cells <em>none</em> touched a street. "
+     "Requiring a lane to begin at a road found nothing at all. There is a market square now too, "
+     "opened where the most street already meets, which is where the town&#39;s own road layout "
+     "says the centre is; the well and the market clutter finally have somewhere to stand.",
+     [("shipped", "872 lane tiles, walked out to the road"),
+      ("shipped", "7x7 market square on the busiest junction"),
+      ("shipped", "18 signed trade buildings")]),
 
     ("The Pinewood", "g-pinewood", "Trees with trunks, spaced so they all arrive",
      "Every conifer used to be a bare canopy cone sitting on the grass. &ldquo;Stackable Pine "
@@ -195,7 +199,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 17</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 18</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -203,7 +207,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,525</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,772</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -219,6 +223,18 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 18 &middot; Aug 20</span><div><b>L-plans, a market square, paved back
+    lanes.</b> 20 of 51 footprints now have a yard cut from a corner, the town has a 7&times;7
+    square on its busiest junction, and 872 tiles of trodden lane run between the houses. Then
+    building access fell from 100% to 96% and I spent two rounds blaming the notching, tightening
+    its guards and making it worse each time. The cause was the lanes: <code>LANE</code> was
+    missing from the open-space set and the door-priority map, so paving a lane beside a building
+    invalidated the only frontage its door could use. <em>A feature that adds a surface has to say
+    where that surface belongs in every set that classifies surfaces.</em> Separately,
+    <code>reachable_from</code> returns a bool grid rather than a set, so the notch guard's
+    membership test was always false and every notch was silently rejected &mdash; the code read
+    as though it were cutting L-shapes while emitting 51 rectangles. Caught by asserting on the
+    outcome, not the code path.</div></li>
   <li><span class="when">rev 17 &middot; Aug 20</span><div><b>A church that looks like one.</b>
     A survey of the design rather than the geometry: 51 of 51 footprints are perfect rectangles,
     twelve building kinds share two treatments between them, and the map named Forest Church had
