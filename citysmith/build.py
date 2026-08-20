@@ -98,10 +98,16 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
 
     The map used to stop on a ruler-straight line with a sheer drop to bare
     board, so from outside it read as a cropped rectangle. Two things fix that
-    together: the outer rings step *down*, and the outermost ring is **ragged**
-    -- a stable per-cell nudge moves each cell in or out of the falloff, and
-    the cells that fall past the end are not laid at all. A straight edge one
-    tile lower is still a straight edge.
+    together: the outermost ring steps *down* by one course, and it is
+    **ragged** -- a stable per-block nudge takes bites out of it, and the cells
+    in a bite are not laid at all. A straight edge one tile lower is still a
+    straight edge, so the raggedness is doing the work; the step only stops the
+    last tile from ending in a sheer face.
+
+    **The step is the outer ring and nothing else.** It used to spread across a
+    falloff four to eight tiles wide, which put a half-tile cliff wherever that
+    band's ragged inner boundary happened to fall -- 1,740 lips of
+    grass-above-grass sitting in open country with no edge anywhere near them.
 
     Cells carrying a building or a wall, or next to one, keep their ground: a
     foundation over a hole is worse than a hard edge.
@@ -137,19 +143,10 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
         bx, bz = b
         return [(bx + 1, bz), (bx - 1, bz), (bx, bz + 1), (bx, bz - 1)]
 
-    reach: dict[tuple[int, int], int] = {}
     border: set[tuple[int, int]] = set()
     for bz in range(blocks_z):
         for bx in range(blocks_x):
-            depth_in = min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz)
-            # The nudge varies how far *in* the falloff reaches, never whether
-            # the outermost block is lowered. Letting it do the latter left a
-            # third of the border sitting at full grade against the void --
-            # which is the sheer edge this exists to remove. Ground drops
-            # monotonically outward; only the reach is ragged.
-            noise = zlib.crc32(f"edge:{bx}:{bz}".encode())
-            reach[(bx, bz)] = rings + noise % 3
-            if depth_in == 0:
+            if min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz) == 0:
                 border.add((bx, bz))
 
     # -- which blocks the fringe bites out ---------------------------------
@@ -192,24 +189,29 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
         break
 
     out: dict[tuple[int, int], float | None] = {}
-    for bz in range(blocks_z):
-        for bx in range(blocks_x):
-            depth_in = min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz)
-            if depth_in >= reach[(bx, bz)]:
-                continue
-            # **One step down, however far the falloff reaches.** Stepping per
-            # ring gave terraces up to four deep, and a 4-8 tile wide flat
-            # terrace half a tile below grade does not read as land falling
-            # away -- it reads as a second layer of land laid over the first,
-            # which is what it was called twice. The raggedness is what stops
-            # the map looking cropped; the height was never doing that work.
-            drop: float | None = min(
-                (reach[(bx, bz)] - depth_in) * step, EDGE_TAPER_MAX_DROP)
-            if (bx, bz) in bite:
-                drop = None
+    for (bx, bz) in sorted(border):
+        # **The step belongs at the edge, and nowhere else.** Stepping per ring
+        # gave terraces up to four deep; flattening them to one step instead
+        # spread that single step across a falloff four to eight tiles wide,
+        # which did not remove the terrace -- it moved the cliff *inland*, to
+        # wherever the ragged inner boundary of the band happened to fall. On
+        # this map that was 1,740 half-tile lips of grass-over-grass sitting in
+        # open country, well away from any edge.
+        #
+        # So the drop is the outermost ring only. Two tiles of ground half a
+        # tile down, right where the board ends, reads as land falling away;
+        # anything further in is an internal cliff nobody asked for. The
+        # raggedness that stops the map looking cropped is the *bite*, which
+        # takes cells out entirely, and that was always on this ring.
+        drop: float | None = None if (bx, bz) in bite else EDGE_TAPER_MAX_DROP
 
-            for (x, z) in cells(bx, bz):
-                out[(x, z)] = EDGE_TAPER_MAX_DROP if (x, z) in protected else drop
+        for (x, z) in cells(bx, bz):
+            # Absent means grade. A protected cell gets no entry at all --
+            # writing it the maximum drop, which is what the previous revision
+            # of this function did, sinks a foundation half a tile into the
+            # ground it is standing on.
+            if (x, z) not in protected:
+                out[(x, z)] = drop
     return out
 
 
