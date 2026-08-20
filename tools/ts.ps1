@@ -18,7 +18,7 @@ does not rediscover them each time.
 #>
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
-    'focus','paste','click','drop','key','chord','orbit','pan','zoom','select','copyout','setclip')]
+    'focus','paste','click','drop','clear','key','chord','orbit','pan','zoom','select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
@@ -107,17 +107,28 @@ switch ($Cmd) {
     [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 150
     Send-Chord "ctrl+v"; Start-Sleep -Milliseconds 1500
     Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP)
-    # A committed paste stays in hand as a repeat stamp. Leaving it there is
+    # A committed paste can stay in hand as a repeat stamp. Leaving it there is
     # how a stray copy of the map ends up under the next click, so unless the
-    # caller asks to keep stamping, the hand is emptied here.
+    # caller asks to keep stamping, the hand is emptied by switching tools --
+    # see 'clear' for why that rather than a right-click.
     if (-not $Keep) {
       Start-Sleep -Milliseconds 400
-      Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP)
+      Send-Chord "k" 150
     }
     "pasted $Slab at $X,$Y"
   }
   'click'   { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "clicked $X,$Y" }
   'drop'    { Focus-TS; Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP); "dropped" }
+  'clear'   {
+    # Empty the hand without side effects. Right-click drops what is held but
+    # opens the asset library when nothing is; Escape backs out toward the main
+    # menu. Switching the active build tool drops the hand either way, and `K`
+    # is bound to one -- so it is safe to press before every review capture,
+    # whether or not anything is actually held.
+    Focus-TS
+    Send-Chord "k" 150
+    "cleared"
+  }
   'key'     { Focus-TS; Send-Chord $Keys ([int]($Hold*1000)); "sent $Keys" }
   'chord'   { Focus-TS; Send-Chord $Keys; "sent $Keys" }
   'orbit'   {

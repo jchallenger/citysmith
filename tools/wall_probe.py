@@ -1,21 +1,26 @@
-"""Show every candidate rampart block in the two shapes a circuit actually makes.
+"""Show every candidate rampart block from every side, in the harshest shape.
 
-The mass of the town wall is laid one full-cell block per cell, and the block
-was chosen by pasting six candidates as flat 3x3x2 masses. A flat mass is the
-one shape a circuit never is. `md_wall_1x1_diag_01` -- the piece that won that
-probe -- is a *diagonal*: its mesh cuts the cell corner to corner. Tiled across
-a flat face the cut edges meet and it reads as coursed stone; run along a wall
-it leaves a vertical slot of daylight between every pair of cells.
+Twice now a block has been chosen from too few views and put daylight through
+the whole circuit.
 
-So this probe builds what the generator builds. Per candidate, two shapes:
+  * `md_wall_1x1_diag_01` measures a full cell and is a blade cutting it corner
+    to corner. It won a probe of flat 3x3x2 masses read from the front, which is
+    the one view where a rank of blades hides its own gaps.
+  * `Castle Ruins Wallbase 02` replaced it and is *ruined* masonry -- the kit is
+    broken wall by design. It read solid from overhead and from one oblique,
+    because at those angles its own front face covers its holes. Tiled into a
+    town it produced a lattice of piers and lintels you can see straight
+    through, houses included.
 
-    a straight run, and the stair-stepped diagonal a raster circuit is made of
+So this probe is built to be walked around. Three shapes per candidate, worst
+first:
 
-Two cells thick and two courses tall, on a grass pad, so anything that fails to
-close shows as a bright slot rather than as a void. The whole grid is laid in
-one screenful deliberately: the camera in TaleSpire pans by dragging and does
-not do it reliably under synthetic input, so a probe that needs scrolling is a
-probe that does not get read from more than one angle.
+    a single block  |  a run one cell thick  |  a mass two cells thick
+
+A one-cell run is the harshest test there is: nothing stands behind the block to
+plug what it leaves open, so any hole shows sky. Candidates are laid in a single
+row so that one orbit of the camera reads all of them, and the review is four
+low passes at ninety degrees plus one from overhead -- not one screenshot.
 
     python tools/wall_probe.py > out/wallprobe.slab.txt
 """
@@ -31,54 +36,31 @@ from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
 from citysmith.slab import Slab, encode
 
-#: Candidates, by catalog name. The first is what the wall is built from today,
-#: and it stays first so every screenshot has the control in the corner.
+#: Candidates, by catalog name, with the two known-bad ones kept as controls so
+#: every screenshot contains a failure to calibrate against.
 BLOCKS = [
-    "md_wall_1x1_diag_01",
-    "md_pref_wall_1x1_01",
     "md_stairblock_01",
-    "Tall 1x1x2",
-    "Castle Ruins Wallbase 02",
-    "castle wall corner 1x1 base",
+    "md_stairblock_02",
+    "bg_stairblock_01",
+    "Dungeon Stair Block",
+    "shugunRockBlock_1x2",
+    "Castle Ruins Wallbase 02",     # control: ruined, gaps
+    "md_wall_1x1_diag_01",          # control: a blade
 ]
 
-COLS = 3           #: candidates across, so six fit one screen
-THICK = 2          #: cells through the wall
-COURSES = 2        #: blocks stacked
-RUN = 5            #: cells along a straight section
-CELL_W, CELL_D = 8, 11
-GAP = 1
-
-#: A marker course of merlons sits at the north-west corner of each candidate's
-#: pad, one per index, so a screenshot says which block it is without counting.
-TALLY = "city_wall_cap"
-
-
-def straight_cells() -> list[tuple[int, int]]:
-    return [(x, z) for x in range(RUN) for z in range(THICK)]
-
-
-def stair_cells() -> list[tuple[int, int]]:
-    """A diagonal run as the rasteriser makes it: one cell across per step.
-
-    A straight line on a diagonal is a staircase on a square grid, so this is
-    the shape most of the circuit is -- and the shape the flat-mass probe that
-    picked the current block never tested.
-    """
-    cells: set[tuple[int, int]] = set()
-    for step in range(RUN):
-        for t in range(THICK):
-            cells.add((step, step + t))
-    return sorted(cells)
+RUN = 4            #: cells along a run
+WALL_TILES = 5.0   #: how tall to build, in tiles, so candidates match in height
+CELL_W, CELL_D = 6, 12
+GAP = 2
 
 
 def main() -> None:
     palette = Palette(load_or_build(), MEDIEVAL)
     byname: dict[str, object] = {}
     for a in palette.catalog.assets:
-        byname.setdefault(a.name, a)     # first match is what resolve() picks
+        byname.setdefault(a.name, a)
     grass = palette.require("ground")
-    tally = palette.require(TALLY)
+    tally = byname["castle merlon 1x1 filler"]
 
     out = []
     for i, name in enumerate(BLOCKS):
@@ -86,29 +68,29 @@ def main() -> None:
         if block is None:
             print(f"# {name}: not in catalog, skipped", file=sys.stderr)
             continue
-        x0 = (i % COLS) * (CELL_W + GAP)
-        z0 = (i // COLS) * (CELL_D + GAP)
+        x0 = i * (CELL_W + GAP)
+        courses = max(1, round(WALL_TILES / block.size_y))
 
         for dz in range(CELL_D):
             for dx in range(CELL_W):
-                out.append(place_tile(grass, x0 + dx, z0 + dz, -grass.size_y))
-
-        # Index tally, so the screenshot is self-labelling.
+                out.append(place_tile(grass, x0 + dx, dz, -grass.size_y))
         for t in range(i + 1):
-            out.append(place_tile(tally, x0 + t, z0, 0.0))
+            out.append(place_tile(tally, x0 + t, 0, 0.0))
 
-        for cx, cz in straight_cells():
-            for course in range(COURSES):
-                out.append(place_tile(block, x0 + cx + 1, z0 + cz + 2,
-                                      course * block.size_y))
-        for cx, cz in stair_cells():
-            for course in range(COURSES):
-                out.append(place_tile(block, x0 + cx + 1, z0 + cz + 5,
-                                      course * block.size_y))
+        def stack(cx: int, cz: int) -> None:
+            for level in range(courses):
+                out.append(place_tile(block, x0 + cx, cz, level * block.size_y))
+
+        stack(2, 2)                                  # one block, alone
+        for cx in range(1, 1 + RUN):
+            stack(cx, 5)                             # a run one cell thick
+        for cx in range(1, 1 + RUN):
+            for cz in (8, 9):
+                stack(cx, cz)                        # a mass two cells thick
 
         print(f"# {i + 1}: {name}  "
-              f"({block.size_x:.2f}x{block.size_y:.2f}x{block.size_z:.2f})",
-              file=sys.stderr)
+              f"({block.size_x:.2f}x{block.size_y:.2f}x{block.size_z:.2f}), "
+              f"{courses} courses", file=sys.stderr)
 
     byid = {a.id: a for a in palette.catalog.assets}
     print(encode(_normalized_whole_tiles(Slab(out), byid)))

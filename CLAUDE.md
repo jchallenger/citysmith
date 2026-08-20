@@ -119,11 +119,15 @@ actually matters, all confirmed in-game:
   outruns the camera and registers as nothing, which reads exactly like "pan
   does not work". `--crop` a window onto its own board is still the quick way
   to review one quarter.
-- **Empty the hand after every paste.** A committed slab stays in hand as a
-  repeat stamp, so the next click anywhere stamps another copy of the map.
-  `ts.ps1 paste` right-clicks unless `-Keep` is passed. Do *not* right-click
-  pre-emptively with an empty hand -- that opens the asset library over the
-  board.
+- **Empty the hand after every paste, with `K`.** A committed slab can stay in
+  hand as a repeat stamp, so the next click anywhere stamps another copy of the
+  map. Switching the active build tool drops whatever is held, and `K` is bound
+  to one -- so `ts.ps1 clear` presses it, and it is safe before every capture
+  whether or not anything is held. The alternatives are all worse: right-click
+  drops the hand but opens the asset library when the hand is empty, `Escape`
+  backs out toward the main menu, and `G` is a toggle that adds toolbar
+  buttons. The bottom hint bar would say all this, but it is clipped unless the
+  window is sized to fit the desktop.
 - Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
   not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
@@ -175,12 +179,23 @@ shape instead of reading it. The rules that fall out:
   `castle merlon 1x1` because its group tag is "merlon". It is a *hoarding* --
   boarded timber, not stone -- and so is every other piece in that group. The
   circuit was crowned with wooden crates for eleven revisions.
-- **A probe read from one angle is a probe that lies.** The diagonal block won
-  a six-candidate probe laid as flat 3x3x2 masses and photographed from the
-  front, which is the one view where a rank of blades hides its own gaps. Probe
-  the shape the generator actually builds -- for a wall, the stair-stepped
-  diagonal a raster circuit is made of -- and read it from overhead as well as
-  from the side. `tools/wall_probe.py` and `tools/parapet_probe.py` do both.
+- **A probe read from one angle is a probe that lies, and this cost three
+  picks in a row.** `md_wall_1x1_diag_01` won a probe of flat 3x3x2 masses
+  photographed from the front -- the one view where a rank of blades hides its
+  own gaps. `Castle Ruins Wallbase 02` replaced it and is *ruined* masonry;
+  read from overhead and one oblique it looks solid, because at those angles
+  its front face covers its own holes, and it tiled a town into a lattice of
+  piers you could see straight through. Nothing in the catalog data says either
+  of these things.
+
+  The standard now: probe the shape the generator actually builds, including a
+  **run one cell thick** -- the harshest case, since nothing stands behind the
+  block to plug what it leaves open -- and **orbit all four sides plus
+  overhead** before choosing. Keep the known-bad pieces in the probe as
+  controls so every screenshot contains a failure to calibrate against.
+  A plain solid cube (`md_stairblock_01`) has no relief to hide a hole in and
+  nothing directional to line up; that is why it is the mass now.
+  `tools/wall_probe.py` and `tools/parapet_probe.py` build for this.
 
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**

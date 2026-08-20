@@ -410,10 +410,19 @@ MEDIEVAL = Style(
         # This one is solid, finely coursed, closes on the stair as cleanly as
         # on the straight, and shares its tone with the ruins floor that paves
         # the wall-walk on top of it.
+        # Third pick, and the first one reviewed from all four sides.
+        # `Castle Ruins Wallbase 02` is *ruined* masonry -- the whole kit is
+        # broken wall by design -- and it read solid from overhead and from one
+        # oblique because at those angles its own front face covers its holes.
+        # Tiled into a town it made a lattice of piers and lintels you could see
+        # straight through. A stair block is a plain solid cube: no relief to
+        # hide a hole in, nothing directional to line up, and it stays shut from
+        # every angle and in a run one cell thick, which is the harshest shape
+        # `tools/wall_probe.py` builds.
         "city_wall_core": [
-            _tile(name="Castle Ruins Wallbase 02", **_MED, **_UNIT),
             _tile(name="md_stairblock_01", **_MED, **_UNIT),
-            _tile(name="Sewer Wall - Small", **_MED, **_UNIT),
+            _tile(name="md_stairblock_02", **_MED, **_UNIT),
+            _tile(name="bg_stairblock_01", **_MED, **_UNIT),
         ],
         # Battlements, on the outer ring only, so the middle of the rampart
         # stays walkable as a wall-walk.

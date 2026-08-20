@@ -1189,7 +1189,11 @@ def test_the_rampart_block_is_not_a_thin_piece():
     """
     from citysmith.palette import STYLES
 
-    banned = ("diag", "_1x2", "1x2_")
+    # Names the kits use for pieces that are not a solid full cell. "ruins" is
+    # here because `Castle Ruins Wallbase 02` is broken masonry: it measures a
+    # full cell, tiles into a see-through lattice, and nothing but the word
+    # "Ruins" says so.
+    banned = ("diag", "_1x2", "1x2_", "ruins")
     for name, style in STYLES.items():
         for query in style.roles.get("city_wall_core", []):
             pinned = query[1].get("name", "")
