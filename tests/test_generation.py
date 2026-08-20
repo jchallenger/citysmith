@@ -675,3 +675,65 @@ def test_gatehouse_never_raises_the_passage_itself():
     mass = {(x, 0) for x in range(5)}
     gates = {(2, 0)}
     assert gates.isdisjoint(_gatehouse_cells(mass, gates))
+
+
+# -- scatter ------------------------------------------------------------------
+
+TRUNK = Asset(id="1" * 8 + "-1111-2222-3333-444444444444", name="trunk", kind="prop",
+              pack="p", group_tag="prop", tags=(), folder="",
+              size_x=1.0, size_y=1.3, size_z=1.0)
+CROWN = Asset(id="2" * 8 + "-1111-2222-3333-444444444444", name="crown", kind="prop",
+              pack="p", group_tag="prop", tags=(), folder="",
+              size_x=2.5, size_y=2.4, size_z=2.5)
+
+
+def test_scatter_refuses_a_prop_that_overlaps_one_already_placed():
+    """TaleSpire silently drops overlapping props, so we must not emit them."""
+    from citysmith.build import Builder, Scatter
+
+    s = Scatter(Builder(StubPalette()))
+    assert s.one(CROWN, 5.0, 5.0, 0.5, 0)
+    assert not s.one(CROWN, 6.0, 5.0, 0.5, 0), "overlapping crown must be refused"
+    assert s.one(CROWN, 8.0, 5.0, 0.5, 0), "clear of the first, so it goes down"
+    assert s.rejected == 1
+    assert len(s.b.placements) == 2
+
+
+def test_scatter_allows_props_stacked_clear_of_each_other():
+    """A crown sitting on top of a trunk shares its footprint, not its height."""
+    from citysmith.build import Builder, Scatter
+
+    s = Scatter(Builder(StubPalette()))
+    assert s.one(TRUNK, 5.0, 5.0, 0.0, 0)
+    assert s.one(CROWN, 5.0, 5.0, TRUNK.size_y, 0)
+    assert len(s.b.placements) == 2
+
+
+def test_scatter_places_a_group_all_or_nothing():
+    """A crown that landed while its trunk was refused is the exact defect."""
+    from citysmith.build import Builder, Scatter
+
+    s = Scatter(Builder(StubPalette()))
+    s.one(CROWN, 5.0, 5.0, 0.5, 0)                      # blocks the site
+    placed = s.place([(TRUNK, 5.2, 5.2, 0.5, 0),        # clashes
+                      (CROWN, 5.2, 5.2, 1.8, 0)])       # would not have
+    assert placed is False
+    assert len(s.b.placements) == 1, "no half of the tree may survive"
+
+
+def test_conifer_is_a_whole_tree_with_its_crown_on_its_trunk():
+    """"Stackable Pine Top" alone is a canopy cone lying on the grass."""
+    from citysmith.build import Builder, Scatter, _plant_conifer
+
+    class PineKit:
+        def resolve(self, role, variant=0):
+            return {"tree_conifer_trunk": TRUNK, "tree_conifer_crown": CROWN}.get(role)
+
+        def require(self, role, variant=0):
+            return self.resolve(role)
+
+    s = Scatter(Builder(StubPalette()))
+    assert _plant_conifer(s, PineKit(), 4.0, 4.0, 0.5, 0, tall=False)
+    trunk, crown = s.b.placements
+    assert trunk.y == 0.5
+    assert crown.y == 0.5 + TRUNK.size_y, "the crown sits on the trunk, not the ground"

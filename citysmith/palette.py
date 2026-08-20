@@ -213,7 +213,15 @@ MEDIEVAL = Style(
         #: Broadleaf to stand beside the conifer. A forest of one species reads
         #: as a plantation; the pack has exactly one other single-piece tree
         #: that is neither jungle nor palm.
-        "tree_conifer": [_tile(name="Stackable Pine Top", kind="prop", **_MED)],
+        # A conifer is a *kit*, not an asset: Stump -> Middle -> Top, and the
+        # Top on its own is a 2.42-tall canopy cone. Planted alone it is a
+        # bush sitting on the grass with no trunk under it, which is what 577
+        # of these looked like on the board -- while stumps scattered as
+        # separate felled-tree dressing read as trunks that did not line up
+        # with any leaves. ``build._plant_conifer`` stacks them.
+        "tree_conifer_trunk": [_tile(name="Stackable Pine Stump", kind="prop", **_MED)],
+        "tree_conifer_mid": [_tile(name="Stackable Pine Middle 04", kind="prop", **_MED)],
+        "tree_conifer_crown": [_tile(name="Stackable Pine Top", kind="prop", **_MED)],
         "tree_broadleaf": [_tile(name="Tree 01", kind="prop", **_MED)],
         "tree_dead": [
             _tile(name="Dead Tree 03", kind="prop", **_MED),

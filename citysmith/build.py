@@ -1417,12 +1417,102 @@ def build_from_tilemap(
 
     _lay_town_wall(b, tm, town_wall, top, wall_height)
 
-    _dress_districts(b, tm)
+    _dress_districts(b, tm, grade=floor.size_y)
 
     return b
 
 
-def _dress_districts(b: Builder, tm) -> None:
+class Scatter:
+    """Places scenery only where nothing already stands.
+
+    **TaleSpire silently drops a prop whose collider overlaps one already in
+    the slab.** No error, no warning -- the prop simply is not in the pasted
+    result. So scatter with no collision test does not produce a dense wood:
+    it produces a thin one, plus a pile of assets that never arrive, plus the
+    half-there mess of whatever did. On the Forest Church map 1,000 of 2,137
+    props were inside another prop's collider.
+
+    Placement is **all or nothing** per group, so a tree assembled from a
+    trunk and a crown either arrives whole or is not attempted. A crown that
+    landed while its trunk was rejected is exactly the "leaves that do not
+    line up with a trunk" this class exists to prevent.
+    """
+
+    def __init__(self, builder: Builder):
+        self.b = builder
+        self._at: dict[tuple[int, int], list[tuple[float, ...]]] = {}
+        self.rejected = 0
+
+    @staticmethod
+    def box(asset: Asset, cx: float, cz: float, y: float, rot: int
+            ) -> tuple[float, ...]:
+        sx, sz = rotated_footprint(asset, rot)
+        return (cx - sx / 2, cz - sz / 2, y,
+                cx + sx / 2, cz + sz / 2, y + asset.size_y)
+
+    def _clear(self, box: tuple[float, ...]) -> bool:
+        e = 1e-6
+        for cx in range(int(math.floor(box[0])), int(math.ceil(box[3])) + 1):
+            for cz in range(int(math.floor(box[1])), int(math.ceil(box[4])) + 1):
+                for o in self._at.get((cx, cz), ()):
+                    if (box[0] < o[3] - e and o[0] < box[3] - e
+                            and box[1] < o[4] - e and o[1] < box[4] - e
+                            and box[2] < o[5] - e and o[2] < box[5] - e):
+                        return False
+        return True
+
+    def _record(self, box: tuple[float, ...]) -> None:
+        for cx in range(int(math.floor(box[0])), int(math.ceil(box[3])) + 1):
+            for cz in range(int(math.floor(box[1])), int(math.ceil(box[4])) + 1):
+                self._at.setdefault((cx, cz), []).append(box)
+
+    def place(self, pieces: list[tuple[Asset, float, float, float, int]]) -> bool:
+        """Place every piece, or none of them. True if it went down."""
+        pieces = [p for p in pieces if p[0] is not None]
+        if not pieces:
+            return False
+        boxes = [self.box(*p) for p in pieces]
+        if not all(self._clear(bx) for bx in boxes):
+            self.rejected += 1
+            return False
+        for (asset, cx, cz, y, rot), bx in zip(pieces, boxes):
+            self.b.add(place_centered(asset, cx, cz, y, rot), prop=True)
+            self._record(bx)
+        return True
+
+    def one(self, asset, cx: float, cz: float, y: float, rot: int) -> bool:
+        return self.place([(asset, cx, cz, y, rot)])
+
+
+def _plant_conifer(scatter: Scatter, palette: Palette, cx: float, cz: float,
+                   y: float, rot: int, tall: bool) -> bool:
+    """Stack a pine out of its kit so it has a trunk under its leaves.
+
+    Piece heights come from the assets, so the crown sits exactly on top of
+    what is below it: stump 1.3, optional middle 1.3, crown 2.42. Stacking by
+    measured height is also what keeps the pieces from overlapping each other
+    and being dropped -- the failure that made two-piece pines lose roughly a
+    third of their canopies the first time this was tried.
+    """
+    trunk = palette.resolve("tree_conifer_trunk")
+    crown = palette.resolve("tree_conifer_crown")
+    if crown is None:
+        return False
+    if trunk is None:
+        return scatter.one(crown, cx, cz, y, rot)
+
+    pieces = [(trunk, cx, cz, y, rot)]
+    top = y + trunk.size_y
+    if tall:
+        mid = palette.resolve("tree_conifer_mid")
+        if mid is not None:
+            pieces.append((mid, cx, cz, top, rot))
+            top += mid.size_y
+    pieces.append((crown, cx, cz, top, rot))
+    return scatter.place(pieces)
+
+
+def _dress_districts(b: Builder, tm, grade: float) -> None:
     """Scatter district-appropriate props so each quarter reads as itself.
 
     Bare surfaces carry no story: a field of Tilled Earth is just brown, a
@@ -1451,6 +1541,7 @@ def _dress_districts(b: Builder, tm) -> None:
     cart = named("Wooden Cart")
 
     rng = random.Random("dress:stable")  # deterministic across rebuilds
+    scatter = Scatter(b)
 
     # Parks come from the layout as GROUND repainted by area polygons; the
     # raster keeps no park mask, so rediscover them cheaply: ground cells not
@@ -1472,11 +1563,9 @@ def _dress_districts(b: Builder, tm) -> None:
             if surf == R.FIELD:
                 roll = rng.random()
                 if roll < 0.10 and wheat is not None:
-                    b.add(place_centered(wheat, x + 0.5, z + 0.5, 0.5,
-                                         rng.randrange(24)), prop=True)
+                    scatter.one(wheat, x + 0.5, z + 0.5, grade, rng.randrange(24))
                 elif roll < 0.12 and straw is not None:
-                    b.add(place_centered(straw, x + 0.5, z + 0.5, 0.5,
-                                         rng.randrange(24)), prop=True)
+                    scatter.one(straw, x + 0.5, z + 0.5, grade, rng.randrange(24))
 
             elif surf == R.GROUND and not near(x, z, frozenset({R.STREET, R.PLAZA})):
                 roll = rng.random()
@@ -1486,21 +1575,23 @@ def _dress_districts(b: Builder, tm) -> None:
                     # broadleaf for relief and the occasional dead trunk,
                     # which is also the best cover a scout gets out here.
                     pick = rng.random()
-                    role = ("tree_conifer" if pick < 0.62 else
-                            "tree_broadleaf" if pick < 0.92 else "tree_dead")
-                    tree = b.palette.resolve(role) or pine_top
-                    if tree is not None:
-                        jx, jz = rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25)
-                        b.add(place_centered(tree, x + 0.5 + jx, z + 0.5 + jz,
-                                             0.5, rng.randrange(24)), prop=True)
+                    jx, jz = rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25)
+                    cx, cz = x + 0.5 + jx, z + 0.5 + jz
+                    rot = rng.randrange(24)
+                    if pick < 0.62:
+                        _plant_conifer(scatter, b.palette, cx, cz, grade, rot,
+                                       tall=rng.random() < 0.35)
+                    else:
+                        role = "tree_broadleaf" if pick < 0.92 else "tree_dead"
+                        tree = b.palette.resolve(role)
+                        if tree is not None:
+                            scatter.one(tree, cx, cz, grade, rot)
                 elif roll < 0.045 and pine_stump is not None:
                     # The stump stands alone as an occasional cut tree.
-                    b.add(place_centered(pine_stump, x + 0.5, z + 0.5, 0.5,
-                                         rng.randrange(24)), prop=True)
+                    scatter.one(pine_stump, x + 0.5, z + 0.5, grade, rng.randrange(24))
                 elif roll < 0.07 and fern_small is not None:
                     fern = fern_big if rng.random() < 0.3 and fern_big else fern_small
-                    b.add(place_centered(fern, x + 0.5, z + 0.5, 0.5,
-                                         rng.randrange(24)), prop=True)
+                    scatter.one(fern, x + 0.5, z + 0.5, grade, rng.randrange(24))
 
             elif surf in (R.PLAZA, R.STREET):
                 # This export has no plaza cells (MFCG's squares came through
@@ -1509,15 +1600,18 @@ def _dress_districts(b: Builder, tm) -> None:
                 # touches a wall, and one well at the busiest such spot.
                 if not near(x, z, frozenset()):  # building adjacency only
                     continue
+                # Only the street cells that *touch* a building are eligible,
+                # and once main streets widened to four tiles that is a small
+                # set -- 39 cells on this map, against 1,234 street tiles. At
+                # the old 2.5% the entire town got one barrel. The rate is a
+                # share of an already narrow set, so it has to be high.
                 roll = rng.random()
-                if not plaza_dressed and well is not None and surf == R.STREET                         and roll < 0.02:
-                    b.add(place_centered(well, x + 0.5, z + 0.5, 0.5,
-                                         rng.randrange(24)), prop=True)
-                    plaza_dressed = True
-                elif roll < 0.025 and barrels is not None:
+                if not plaza_dressed and well is not None and surf == R.STREET:
+                    if scatter.one(well, x + 0.5, z + 0.5, grade, rng.randrange(24)):
+                        plaza_dressed = True
+                elif roll < 0.30 and barrels is not None:
                     pick = cart if rng.random() < 0.4 and cart else barrels
-                    b.add(place_centered(pick, x + 0.5, z + 0.5, 0.5,
-                                         rng.randrange(24)), prop=True)
+                    scatter.one(pick, x + 0.5, z + 0.5, grade, rng.randrange(24))
 
 
 def _build_city_wall(b: Builder, city: City, base_y: float) -> None:
