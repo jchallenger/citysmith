@@ -57,9 +57,21 @@ switch ($Recipe) {
     Shot "plan"
     TS orbit -X 800 -Y 420 -DX 0 -DY -320
     Shot "eye"
-    TS orbit -X 800 -Y 420 -DX 0 -DY 130     # leave it usable
 
-    "360 on $Slab -> out\flyby\$Name-{n,e,s,w,plan,eye}.jpg"
+    # Then cut it open. Six views around the outside say the faces close;
+    # they cannot say the mass behind them is solid, and a mesh that hides
+    # its own holes hides them from outside -- which is how the diagonal
+    # blade and then the ruined wallbase each got approved. The cut box
+    # (`N`) removes a region so the section is on show, and a blade reads as
+    # a blade the moment you see it end-on. It is also how buried geometry,
+    # the tile seams `verify` warns about, becomes visible.
+    TS orbit -X 800 -Y 420 -DX 0 -DY 130     # leave it usable
+    TS cutbox
+    Start-Sleep -Milliseconds 800
+    Shot "cut"
+    TS cutbox                                # leave the board as found
+
+    "360 on $Slab -> out\flyby\$Name-{n,e,s,w,plan,eye,cut}.jpg"
   }
 
   'flyby' {
