@@ -46,16 +46,17 @@ DISTRICTS = [
       ("shipped", "quay rail where paving meets water"),
       ("shipped", "open water uses the 2x2 tile: 115 blocks, 460 cells")]),
 
-    ("The Roofscape", "c-roofscape", "Where a notched plan still defeats the kit",
-     "Shown because it is the one thing still wrong. Rectangular plans roof as clean hips; the "
-     "notched ones come out with ridge lines that meet at angles resolving into nothing. Probed in "
-     "isolation &mdash; a 6&times;6, an L and a U side by side, photographed from directly "
-     "overhead &mdash; the square is correct and both notched shapes are not. It is not a corner-"
-     "piece problem: with axis-aligned notches the reflex corner falls on a <em>vertex between</em> "
-     "cells, so no single cell can carry an inner piece. An L-shaped building has two ridges "
-     "meeting at a valley, and roofing one as a single hip is the mistake.",
-     [("shipped", "rectangular plans roof cleanly"),
-      ("flaw", "notched plans need two ridges and a valley, not one hip")]),
+    ("The Roofscape", "c-roofscape", "A ridge per wing, and a valley where they meet",
+     "A hip roof is a rectangle&#39;s answer to being roofed. Forced over a notched plan it gave a "
+     "valid height field and incoherent ridges &mdash; from directly overhead a 6&times;6 came out "
+     "a clean pyramid while an L and a U came out with ridge lines meeting at angles that resolved "
+     "into nothing. Not a corner-piece problem, which is what an earlier rev assumed and got wrong: "
+     "with axis-aligned notches the reflex corner falls on a <em>vertex between</em> cells, so no "
+     "cell can carry an inner piece. A footprint is cut into maximal rectangles now and each is "
+     "roofed as its own hip, so an L reads as a main range with a side wing.",
+     [("shipped", "one hip per rectangular wing, largest first"),
+      ("shipped", "chimney stays on the main wing"),
+      ("shipped", "verified overhead, the angle that condemned the old version")]),
 
     ("The Rampart", "d-rampart", "Coursed masonry, and 928 assets lighter",
      "A buried-geometry check found 928 wall facings sitting <em>entirely inside</em> the block "
@@ -209,7 +210,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 28</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 29</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -233,6 +234,14 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 29 &middot; Aug 20</span><div><b>A notched plan is roofed as wings.</b>
+    The last visible fault. A hip roof answers a rectangle; forced over an L or a U it produced
+    ridges meeting at angles that resolved into nothing, which was only obvious from directly
+    overhead and merely looked &ldquo;chunky&rdquo; from anywhere else. Footprints are cut into
+    maximal rectangles &mdash; the same largest-rectangle-under-a-histogram the rasteriser already
+    uses to regularise a plan &mdash; and each is roofed as its own hip, largest first, so the main
+    mass keeps the dominant ridge and the chimney. The L becomes a 4&times;6 range with a
+    2&times;4 wing; the U becomes three.</div></li>
   <li><span class="when">rev 28 &middot; Aug 20</span><div><b>Props store their centre; tiles store
     their corner.</b> A trunk anchored to the corner of its own canopy turned out not to be the
     tree at all &mdash; it was every prop on the map. TaleSpire&#39;s collider bounds carry a
