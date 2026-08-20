@@ -86,6 +86,10 @@ NEIGHBOURS = tuple((dx, dz) for _, dx, dz in SIDE_OFFSETS)
 EDGE_TAPER_BLOCKS = 2
 EDGE_TAPER_STEP = 0.5
 
+#: The most the border may drop, total. One tile-half: enough to show the map
+#: ends on ground rather than on a cut, not enough to read as a terrace.
+EDGE_TAPER_MAX_DROP = 0.5
+
 
 def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
                step: float = EDGE_TAPER_STEP) -> dict[tuple[int, int], float | None]:
@@ -133,7 +137,13 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
             reach = rings + noise % 3
             if depth_in >= reach:
                 continue
-            drop = (reach - depth_in) * step
+            # **One step down, however far the falloff reaches.** Stepping per
+            # ring gave terraces up to four deep, and a 4-8 tile wide flat
+            # terrace half a tile below grade does not read as land falling
+            # away -- it reads as a second layer of land laid over the first,
+            # which is what it was called twice. The raggedness is what stops
+            # the map looking cropped; the height was never doing that work.
+            drop = min((reach - depth_in) * step, EDGE_TAPER_MAX_DROP)
             if depth_in == 0 and (noise >> 8) % 4 == 0:
                 drop = None                   # a bite out of the outer fringe
 
@@ -146,8 +156,10 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
                         continue
                     if drop is None and tm.surface[z][x] not in (R.GROUND, R.FIELD):
                         # A street that ends in a hole is a bug however ragged
-                        # the meadow beside it looks; keep it, just lowered.
-                        out[(x, z)] = rings * step
+                        # the meadow beside it looks; keep it, at the same
+                        # single step as everything else so it does not build
+                        # its own terrace across the road.
+                        out[(x, z)] = EDGE_TAPER_MAX_DROP
                     else:
                         out[(x, z)] = drop
     return out
@@ -1902,15 +1914,13 @@ def _plant_conifer(scatter: Scatter, palette: Palette, cx: float, cz: float,
     if trunk is None:
         return scatter.one(crown, cx, cz, y, rot)
 
-    pieces = [(trunk, cx, cz, y, rot)]
-    top = y + trunk.size_y
-    if tall:
-        mid = palette.resolve("tree_conifer_mid")
-        if mid is not None:
-            pieces.append((mid, cx, cz, top, rot))
-            top += mid.size_y
-    pieces.append((crown, cx, cz, top, rot))
-    return scatter.place(pieces)
+    # Stump and crown only. The kit's Middle section is a bare trunk: stacked
+    # between them it shows as a dark gap under the foliage, which is the
+    # "tree that does not match its trunk" -- probed side by side against the
+    # two-piece pine, which meets the ground cleanly. Height variety has to
+    # come from somewhere that does not break the tree.
+    return scatter.place([(trunk, cx, cz, y, rot),
+                          (crown, cx, cz, y + trunk.size_y, rot)])
 
 
 #: Building kinds that trade with the public, and so hang a sign. A smithy or

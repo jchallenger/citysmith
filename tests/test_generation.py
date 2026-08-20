@@ -801,9 +801,11 @@ def test_edge_taper_never_leaves_the_outermost_block_at_grade():
     for cell in border:
         assert cell in taper, f"{cell} on the border was left at grade"
 
-    # and the fall is monotonic: nothing further in drops more than the edge
-    edge = [v for (x, z), v in taper.items() if min(x, z, 39 - x, 39 - z) == 0]
-    assert all(v is None or v >= 1.0 for v in edge)
+    # One step, not a flight of terraces: a wide flat terrace half a tile
+    # below grade reads as a second layer of land, not as a slope.
+    from citysmith.build import EDGE_TAPER_MAX_DROP
+
+    assert {v for v in taper.values() if v is not None} == {EDGE_TAPER_MAX_DROP}
 
 
 def test_place_wall_handles_a_mesh_authored_along_z():
