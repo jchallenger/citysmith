@@ -100,16 +100,16 @@ DISTRICTS = [
      [("shipped", "pines stacked from their kit: 557 joints, none misaligned"),
       ("shipped", "0 overlapping props, down from 1,000 of 2,137")]),
 
-    ("The Map Edge", "z-map-edge", "Terraces stepping down out of the map",
-     "The falloff, finally caught at an angle that shows it: the ground steps down in irregular "
-     "blocks with a ragged outer boundary, so the map ends as country running out rather than as "
-     "a slab someone cut a town from. What it cost is the interesting part &mdash; lowering the "
-     "border would have stopped that ground counting as &ldquo;at grade&rdquo;, which is how "
-     "open-country chunks are recognised, so the taper would have silently disabled the skipping "
-     "that drops a fifth of the map. Ground is tested against its own cell&#39;s baseline now. "
-     "Ten chunks skipped before, ten after.",
-     [("shipped", "terraced, ragged falloff on every border"),
-      ("shipped", "skipping survives it: 10 chunks before and after")]),
+    ("The Map Edge", "z-map-edge", "One ragged step, not a flight of terraces",
+     "The falloff used to step down per ring, up to four terraces deep &mdash; and a 4-8 tile wide "
+     "<em>flat</em> terrace half a tile below grade does not read as land falling away. It reads as "
+     "a second layer of land laid over the first, which is what it got called twice before the "
+     "penny dropped. It is one step now, however far the falloff reaches. The ragged outline is "
+     "what stops the map looking cropped; the height was never doing that work. Worth noting the "
+     "measurement that said &ldquo;terrain is flat everywhere except the taper&rdquo; was true and "
+     "useless &mdash; the taper <em>was</em> the complaint.",
+     [("shipped", "one 0.5 step at the border, ragged in extent"),
+      ("shipped", "conifers are stump and crown: no bare trunk gap")]),
 ]
 
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
@@ -206,7 +206,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 23</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 24</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -214,7 +214,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>25,337</b> in <b>4</b> chunks</span>
+    <span>assets <b>25,193</b> in <b>4</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -230,6 +230,15 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 24 &middot; Aug 20</span><div><b>One step at the border, and pines that
+    meet their trunks.</b> The &ldquo;second layer of land&rdquo; was the edge taper: stepping down
+    per ring gave terraces up to four deep, and a wide flat terrace half a tile down reads as a
+    second layer rather than a slope. One step now. And the tree that did not match its trunk is
+    the three-piece pine &mdash; probed as five stacks side by side, the two-piece meets the ground
+    cleanly while the three-piece shows a bare dark trunk under the foliage, because the kit's
+    Middle section is trunk with no canopy to close the gap. Two other hypotheses were measured and
+    rejected first: standalone stumps under someone else's canopy came to 7 of 124, and roof tiles
+    intersecting wall tiles came to exactly 0.</div></li>
   <li><span class="when">rev 23 &middot; Aug 20</span><div><b>The rampart is masonry, not stacked
     crates.</b> Six full-cell blocks probed as 3&times;3&times;2 masses rather than judged one tile
     at a time. What the wall had been built from is a <em>corner</em> mesh, with relief authored for
