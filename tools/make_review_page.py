@@ -80,14 +80,19 @@ DISTRICTS = [
      [("shipped", "pines stacked from their kit: 557 joints, none misaligned"),
       ("shipped", "0 overlapping props, down from 1,000 of 2,137")]),
 
-    ("The Map Edge", "z-map-edge", "The one thing still visibly unfinished",
-     "Shown because it is still wrong. The ground plane ends on a hard straight cut and a road "
-     "runs off it into nothing, so from outside the map reads as a cropped rectangle rather than "
-     "as country continuing past the frame. A stepped-down border ring is the fix, but it "
-     "interacts with the chunk-skipping that drops a fifth of the map as open country &mdash; "
-     "tapered ground stops counting as open country, so both have to be designed together.",
-     [("flaw", "ground plane ends on a sheer void cliff"),
-      ("next", "taper and chunk-skip rule need designing together")]),
+    ("The Map Edge", "z-map-edge", "Ground that falls away instead of stopping",
+     "The outer rings now step down &mdash; modal ground climbs 1.0 to 3.0 tiles over seven cells "
+     "inland &mdash; and the outermost row is mostly bitten away, so the boundary is not a ruler "
+     "line. Honest caveat: at TaleSpire&#39;s near-top-down camera a half-tile step is subtle, so "
+     "this reads as a gentle shelf rather than a dramatic falloff. The interesting part is what it "
+     "cost. Lowering the border would have stopped that ground counting as &ldquo;at grade&rdquo;, "
+     "which is how open-country chunks are recognised &mdash; the taper would have silently "
+     "disabled the skipping that drops a fifth of the map. Ground is tested against its own "
+     "cell&#39;s baseline now, so a lowered border is still background while a sunken channel is "
+     "still a feature. Ten chunks skipped before, ten after.",
+     [("shipped", "outer rings step down; ragged outer row"),
+      ("shipped", "skipping survives the taper: 10 chunks before and after"),
+      ("next", "falloff is subtle at the game's camera angle")]),
 ]
 
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
@@ -184,7 +189,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 14</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 15</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -192,7 +197,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>24,040</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,973</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -208,6 +213,16 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 15 &middot; Aug 19</span><div><b>The map edge tapers, and chunk
+    skipping was taught about it.</b> These could not be done separately: open-country detection
+    asked whether ground sat at grade, so lowering the border would have reclassified every
+    tapered cell as a feature and silently disabled the skipping that drops a fifth of the map.
+    Ground is now tested against its own cell&#39;s baseline, which the taper defines &mdash; a
+    cell with no baseline is not background, so a sunken channel still disqualifies its chunk
+    while a lowered border does not. The falloff lives on the 2x2 block lattice rather than per
+    cell, because the terrain pass lays open ground as 2x2 tiles and a per-cell height field
+    breaks every quad; doing it per cell cost a thousand border tiles for a step nobody can see.
+    Ten chunks skipped before the change, ten after.</div></li>
   <li><span class="when">rev 14 &middot; Aug 19</span><div><b>Trees with trunks, and scenery that
     survives the paste.</b> 47% of props sat inside another prop&#39;s collider, and TaleSpire
     drops those silently &mdash; so the scatter was making a thin wood plus several hundred assets
