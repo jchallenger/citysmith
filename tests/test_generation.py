@@ -1225,3 +1225,76 @@ def test_a_parapet_stands_on_the_lip_not_in_place_of_the_walk():
     assert not is_curtain_piece(core), "the rampart mass must fill its cell"
     assert is_curtain_piece(cap), "the parapet must stand on the cell edge"
     assert not is_curtain_piece(walk), "the wall-walk must pave its cell"
+
+
+def _taper_fringe(tm):
+    """The border blocks the taper keeps and the ones it bites out."""
+    from citysmith.build import edge_taper
+
+    taper = edge_taper(tm)
+    blocks_x, blocks_z = (tm.width + 1) // 2, (tm.depth + 1) // 2
+    border, bitten = set(), set()
+    for bz in range(blocks_z):
+        for bx in range(blocks_x):
+            if min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz) != 0:
+                continue
+            border.add((bx, bz))
+            cells = [(bx * 2 + dx, bz * 2 + dz)
+                     for dz in (0, 1) for dx in (0, 1)
+                     if bx * 2 + dx < tm.width and bz * 2 + dz < tm.depth]
+            if all(taper.get(c, 0.0) is None for c in cells):
+                bitten.add((bx, bz))
+    return border, bitten
+
+
+def test_the_fringe_is_runs_not_teeth():
+    """A kept block with no kept neighbour projects over nothing.
+
+    Bites were decided per block and independently, so the border came out as a
+    comb: 2x2 tabs standing off the edge with void under them, which at eye
+    level is the map reading as a torn sheet rather than as land running out.
+    """
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+
+    tm = rasterize(Layout.load("out/layout.json"))
+    border, bitten = _taper_fringe(tm)
+    kept = border - bitten
+    assert bitten, "nothing was bitten -- the fringe is not ragged at all"
+
+    def around(b):
+        return [(b[0] + 1, b[1]), (b[0] - 1, b[1]),
+                (b[0], b[1] + 1), (b[0], b[1] - 1)]
+
+    teeth = [b for b in kept
+             if not any(n in kept for n in around(b))]
+    assert teeth == [], f"{len(teeth)} border block(s) project alone: {teeth[:5]}"
+
+
+def test_no_road_runs_out_over_the_void():
+    """A road leaving town is fine; a road leaving the world is not.
+
+    The fringe used to bite a block and then rescue the paved cells inside it,
+    which removes the ground either side and leaves the street on a two-tile
+    causeway over bare board.
+    """
+    from citysmith import raster as R
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+
+    tm = rasterize(Layout.load("out/layout.json"))
+    border, bitten = _taper_fringe(tm)
+
+    for (bx, bz) in bitten:
+        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)):
+            nb = (bx + dx, bz + dz)
+            if nb not in border:
+                continue
+            for cx, cz in [(nb[0] * 2 + a, nb[1] * 2 + c)
+                           for c in (0, 1) for a in (0, 1)]:
+                if not (cx < tm.width and cz < tm.depth):
+                    continue
+                assert tm.surface[cz][cx] in (R.GROUND, R.FIELD, R.VOID), (
+                    f"bite at {(bx, bz)} strands "
+                    f"{tm.surface[cz][cx]!r} at {(cx, cz)}"
+                )

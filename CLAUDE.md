@@ -217,7 +217,11 @@ shape instead of reading it. The rules that fall out:
   coursed stone layer on layer, which is a stronger statement than any number of
   exterior angles. It is also how buried geometry -- the tile seams `verify`
   warns about -- becomes visible, and eventually how interiors get reviewed.
-  `ts.ps1 cutbox`.
+  `ts.ps1 cutbox`. **It is a persistent toggle and it survives making a new
+  board**, so a box left on from an earlier probe reads as a rectangular hole in
+  the terrain with the trees still standing in it -- which is exactly how it was
+  misread once. `review.ps1 360` turns it off again; anything driving it by hand
+  has to as well.
 
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**

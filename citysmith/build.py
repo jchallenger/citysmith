@@ -103,10 +103,14 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
     the cells that fall past the end are not laid at all. A straight edge one
     tile lower is still a straight edge.
 
-    Cells carrying a building or a wall, or next to one, are left at grade: a
-    foundation half a tile down its own footprint is worse than a hard edge.
-    Only plain ground and field may be dropped entirely -- a street that ends
-    in a hole is a bug, however ragged the meadow beside it looks.
+    Cells carrying a building or a wall, or next to one, keep their ground: a
+    foundation over a hole is worse than a hard edge.
+
+    Two rules keep the raggedness from turning into wreckage. A bite may not
+    touch paving or sit beside a block that carries it, so a road reaches the
+    edge with shoulders instead of running out over the void. And no kept block
+    may be left without a kept neighbour, so the fringe is made of runs rather
+    than of 2x2 teeth standing on nothing.
     """
     from . import raster as R
 
@@ -124,19 +128,74 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
     blocks_x = (tm.width + 1) // 2
     blocks_z = (tm.depth + 1) // 2
 
-    out: dict[tuple[int, int], float | None] = {}
+    def cells(bx: int, bz: int) -> list[tuple[int, int]]:
+        return [(bx * 2 + dx, bz * 2 + dz)
+                for dz in (0, 1) for dx in (0, 1)
+                if 0 <= bx * 2 + dx < tm.width and 0 <= bz * 2 + dz < tm.depth]
+
+    def around(b: tuple[int, int]) -> list[tuple[int, int]]:
+        bx, bz = b
+        return [(bx + 1, bz), (bx - 1, bz), (bx, bz + 1), (bx, bz - 1)]
+
+    reach: dict[tuple[int, int], int] = {}
+    border: set[tuple[int, int]] = set()
     for bz in range(blocks_z):
         for bx in range(blocks_x):
             depth_in = min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz)
-            noise = zlib.crc32(f"edge:{bx}:{bz}".encode())
-
             # The nudge varies how far *in* the falloff reaches, never whether
             # the outermost block is lowered. Letting it do the latter left a
             # third of the border sitting at full grade against the void --
             # which is the sheer edge this exists to remove. Ground drops
             # monotonically outward; only the reach is ragged.
-            reach = rings + noise % 3
-            if depth_in >= reach:
+            noise = zlib.crc32(f"edge:{bx}:{bz}".encode())
+            reach[(bx, bz)] = rings + noise % 3
+            if depth_in == 0:
+                border.add((bx, bz))
+
+    # -- which blocks the fringe bites out ---------------------------------
+    #
+    # **A bite may not touch anything paved.** Biting a block and then rescuing
+    # the street cells inside it -- which is what this used to do -- removes the
+    # ground either side and leaves the road running out over the void on a
+    # two-tile causeway. A road leaving town is fine; a road leaving the world
+    # is not. So a block carrying paving, and its neighbours along the border,
+    # keep their ground: the road ends at the edge with shoulders.
+    paved = {b for b in border
+             if any(tm.surface[z][x] not in (R.GROUND, R.FIELD)
+                    for (x, z) in cells(*b))}
+    sheltered = set(paved)
+    for b in paved:
+        sheltered |= {n for n in around(b) if n in border}
+
+    bite = {b for b in border - sheltered
+            if (zlib.crc32(f"edge:{b[0]}:{b[1]}".encode()) >> 8) % 4 == 0}
+
+    # **No lone teeth.** Bites were decided per block and independently, so a
+    # kept block between two bitten ones projects from the fringe as a 2x2 tab
+    # standing over nothing -- a row of them reads as a comb, not a coastline.
+    # The repair fills rather than cuts: give an isolated block a neighbour
+    # back, so the fringe is made of runs. Cutting instead would eat inward,
+    # and every cell it removed would be one more tile of missing map.
+    while True:
+        lonely = sorted(b for b in border - bite
+                        if not any(n in border and n not in bite
+                                   for n in around(b)))
+        if not lonely:
+            break
+        for b in lonely:
+            company = sorted(n for n in around(b) if n in bite)
+            if not company:
+                break
+            bite.discard(company[0])
+        else:
+            continue
+        break
+
+    out: dict[tuple[int, int], float | None] = {}
+    for bz in range(blocks_z):
+        for bx in range(blocks_x):
+            depth_in = min(bx, bz, blocks_x - 1 - bx, blocks_z - 1 - bz)
+            if depth_in >= reach[(bx, bz)]:
                 continue
             # **One step down, however far the falloff reaches.** Stepping per
             # ring gave terraces up to four deep, and a 4-8 tile wide flat
@@ -144,25 +203,13 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
             # away -- it reads as a second layer of land laid over the first,
             # which is what it was called twice. The raggedness is what stops
             # the map looking cropped; the height was never doing that work.
-            drop = min((reach - depth_in) * step, EDGE_TAPER_MAX_DROP)
-            if depth_in == 0 and (noise >> 8) % 4 == 0:
-                drop = None                   # a bite out of the outer fringe
+            drop: float | None = min(
+                (reach[(bx, bz)] - depth_in) * step, EDGE_TAPER_MAX_DROP)
+            if (bx, bz) in bite:
+                drop = None
 
-            for dz in (0, 1):
-                for dx in (0, 1):
-                    x, z = bx * 2 + dx, bz * 2 + dz
-                    if not (0 <= x < tm.width and 0 <= z < tm.depth):
-                        continue
-                    if (x, z) in protected:
-                        continue
-                    if drop is None and tm.surface[z][x] not in (R.GROUND, R.FIELD):
-                        # A street that ends in a hole is a bug however ragged
-                        # the meadow beside it looks; keep it, at the same
-                        # single step as everything else so it does not build
-                        # its own terrace across the road.
-                        out[(x, z)] = EDGE_TAPER_MAX_DROP
-                    else:
-                        out[(x, z)] = drop
+            for (x, z) in cells(bx, bz):
+                out[(x, z)] = EDGE_TAPER_MAX_DROP if (x, z) in protected else drop
     return out
 
 
