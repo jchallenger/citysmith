@@ -21,13 +21,16 @@ def img(stem: str) -> str:
 
 
 DISTRICTS = [
-    ("The Town Edge", "a-town-edge", "Where the last houses meet the river meadow",
-     "The establishing shot: cobble flush with the verge, rooflines varying by storey count, and "
-     "a wood that thins into pasture rather than stopping at a line. Cobble is 0.25 thick against "
-     "grass at 0.5, and both used to be laid from a common bottom &mdash; a 15 inch kerb down "
-     "both sides of every road, on 1,234 tiles. Surfaces align at the top now.",
-     [("shipped", "surfaces align at the top, not the bottom"),
-      ("shipped", "roof height follows each building's storey count")]),
+    ("The Town Edge", "a-town-edge", "Cleared ground between houses and wood",
+     "Trees used to scatter at a flat rate regardless of the town, so pines stood tight against "
+     "walls and filled the yards the notches had just cut &mdash; a village losing to the forest "
+     "rather than one that cleared ground to live in. Density is gated on distance from the "
+     "nearest building now: 1 tree of 561 stands within three cells of a wall. Those cells get "
+     "worked-yard clutter instead, so a cut corner reads as somebody&#39;s back yard. Weed tufts "
+     "and spilled pebbles break the seam where grass meets paving.",
+     [("shipped", "woodland thins toward the built-up area"),
+      ("shipped", "yards get firewood and a barrow, not pines"),
+      ("shipped", "95 verge props softening surface seams")]),
 
     ("The Riverbank", "b-riverbank", "Shallows at the bank, a channel down the middle",
      "This is what read as accidental terracing, and the reading was fair &mdash; it was a trench. "
@@ -199,7 +202,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 18</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 19</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -207,7 +210,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,772</b> in <b>3</b> chunks</span>
+    <span>assets <b>23,875</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -223,6 +226,15 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 19 &middot; Aug 20</span><div><b>Dressing that knows where it is.</b>
+    Three gaps, all of them the scatter not knowing what surface it stood on. The market square
+    was empty because its branch was gated on building adjacency, which nothing in the middle of a
+    7&times;7 square satisfies; it has a well and eight pieces of goods now, and lanes get the same
+    at a seventh of the rate. Woodland grew to the doorsteps &mdash; density is gated on a
+    distance-to-building field now, and the cells nearest a wall get worked-yard clutter instead
+    of pines. And the ruler-straight seams where grass meets paving are broken by low growth and
+    spilled pebbles, the same trick as the shingle shore but for edges with no material of their
+    own.</div></li>
   <li><span class="when">rev 18 &middot; Aug 20</span><div><b>L-plans, a market square, paved back
     lanes.</b> 20 of 51 footprints now have a yard cut from a corner, the town has a 7&times;7
     square on its busiest junction, and 872 tiles of trodden lane run between the houses. Then
