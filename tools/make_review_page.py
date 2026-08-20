@@ -58,16 +58,17 @@ DISTRICTS = [
       ("shipped", "notches reverted where they would cost a doorway"),
       ("next", "no porches, wings or lean-tos yet")]),
 
-    ("The Rampart", "d-rampart", "Solid masonry, and 928 assets lighter",
-     "A check for buried geometry paid for itself the first time it ran: it found 928 wall facings "
-     "sitting <em>entirely inside</em> the block that fills the same cell &mdash; one whole cubic "
-     "tile of overlap each. The facing has never been visible; the block&#39;s own face is what the "
-     "wall has always shown. That is 948 assets recovered on a map that was sitting at its byte "
-     "ceiling. The honest remaining flaw: the block is a <em>corner</em> mesh tiled across the whole "
-     "mass, so its relief reads as irregular blocks up close.",
+    ("The Rampart", "d-rampart", "Coursed masonry, and 928 assets lighter",
+     "A buried-geometry check found 928 wall facings sitting <em>entirely inside</em> the block "
+     "filling the same cell &mdash; a whole cubic tile of overlap each, so the facing was never "
+     "visible and the block&#39;s own face is what the wall always showed. Removing them recovered "
+     "948 assets and made the block&#39;s character matter, which exposed the next problem: it was "
+     "a <em>corner</em> mesh, relief authored for two faces, tiled across a whole mass. It read as "
+     "stacked crates. Six candidate blocks were then probed as 3x3x2 masses &mdash; which is what a "
+     "rampart is &mdash; and the winner is flat, finely coursed and seams into itself.",
      [("shipped", "928 invisible facings removed"),
-      ("shipped", "interpenetration 3,850 pairs down to 77"),
-      ("flaw", "mass is a corner mesh; relief reads as jumbled")]),
+      ("shipped", "mass block chosen by probing masses, not tiles"),
+      ("shipped", "interpenetration 3,850 pairs down to 77")]),
 
     ("The Gate Towers", "f-gatehouse", "The circuit rising either side of the road in",
      "Where the main street crosses the wall there used to be eighteen cells of nothing &mdash; a "
@@ -205,7 +206,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 22</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 23</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -229,6 +230,14 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 23 &middot; Aug 20</span><div><b>The rampart is masonry, not stacked
+    crates.</b> Six full-cell blocks probed as 3&times;3&times;2 masses rather than judged one tile
+    at a time. What the wall had been built from is a <em>corner</em> mesh, with relief authored for
+    two faces &mdash; tiled across a mass it read as crates. Worth recording why this is not a
+    contradiction of the previous rev, which moved houses <em>off</em> md walls: there the piece was
+    a 0.5-deep curtain panel whose dungeon relief left dark gaps at every join; here it is a
+    full-cell block and the same relief reads as coursing. The family was never the problem. Using
+    a piece outside what it was authored for was &mdash; in both directions.</div></li>
   <li><span class="when">rev 22 &middot; Aug 20</span><div><b>Walls and floors stop intersecting.</b>
     The floor fills its cell, the wall stands on the cell boundary, and they shared exactly 0.25
     cubic tiles &mdash; the band slicing the masonry at every storey. The cause was pitching a
