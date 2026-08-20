@@ -58,14 +58,16 @@ DISTRICTS = [
       ("shipped", "notches reverted where they would cost a doorway"),
       ("next", "no porches, wings or lean-tos yet")]),
 
-    ("The Rampart", "d-rampart", "Solid masonry, battlements out, wall-walk behind",
-     "A wall a party can be chased along. Two revs ago this same circuit was four parallel fins "
-     "of curtain wall with 2.5 ft of daylight between them &mdash; an archer could have shot "
-     "clean through the fortification, and every check that read the tile grid called it solid. "
-     "Merlons crown only the cells facing out of town; the weathered flags behind them are a "
-     "fighting surface two abreast.",
-     [("shipped", "full-cell core: no daylight through the wall"),
-      ("shipped", "battlements face out, walk paved behind")]),
+    ("The Rampart", "d-rampart", "Solid masonry, and 928 assets lighter",
+     "A check for buried geometry paid for itself the first time it ran: it found 928 wall facings "
+     "sitting <em>entirely inside</em> the block that fills the same cell &mdash; one whole cubic "
+     "tile of overlap each. The facing has never been visible; the block&#39;s own face is what the "
+     "wall has always shown. That is 948 assets recovered on a map that was sitting at its byte "
+     "ceiling. The honest remaining flaw: the block is a <em>corner</em> mesh tiled across the whole "
+     "mass, so its relief reads as irregular blocks up close.",
+     [("shipped", "928 invisible facings removed"),
+      ("shipped", "interpenetration 3,850 pairs down to 77"),
+      ("flaw", "mass is a corner mesh; relief reads as jumbled")]),
 
     ("The Gate Towers", "f-gatehouse", "The circuit rising either side of the road in",
      "Where the main street crosses the wall there used to be eighteen cells of nothing &mdash; a "
@@ -76,16 +78,17 @@ DISTRICTS = [
       ("shipped", "flanking towers, diagonal jambs included"),
       ("next", "no gate leaves or arch dressing yet")]),
 
-    ("The Back Lanes", "e-back-lanes", "Trodden earth between the houses",
-     "872 tiles of lane. A lane starts as ground pinched between buildings and is then walked "
-     "outward to the nearest road &mdash; that second step is what makes it work, because houses "
-     "stand back from the carriageway and of 121 pinched cells <em>none</em> touched a street. "
-     "Requiring a lane to begin at a road found nothing at all. There is a market square now too, "
-     "opened where the most street already meets, which is where the town&#39;s own road layout "
-     "says the centre is; the well and the market clutter finally have somewhere to stand.",
-     [("shipped", "872 lane tiles, walked out to the road"),
-      ("shipped", "7x7 market square on the busiest junction"),
-      ("shipped", "18 signed trade buildings")]),
+    ("The Back Lanes", "e-back-lanes", "Timber framing, and floors that stop at the wall",
+     "A floor used to drive a quarter of a cubic tile through the wall at every storey, because a "
+     "storey was pitched at the <em>wall&#39;s</em> height &mdash; so the wall column was continuous "
+     "and there was nowhere a slab could go. The pack answers this in its own vocabulary: all 75 of "
+     "its Wall/Floor combination pieces are 2.5 tall, exactly wall plus floor. Pitching a storey at "
+     "that leaves a floor-thick gap between courses. Zero intersections now, and the storey "
+     "divisions read as tidy bands. The facade is also one kit at last &mdash; it was megadungeon "
+     "brick, a Village window and a Rural floor meeting at every corner.",
+     [("shipped", "storey pitch = wall + deck: 0 floor/wall intersections"),
+      ("shipped", "one timber kit per house facade"),
+      ("shipped", "clustered goods and signed doors")]),
 
     ("The Pinewood", "g-pinewood", "Trees with trunks, spaced so they all arrive",
      "Every conifer used to be a bare canopy cone sitting on the grass. &ldquo;Stackable Pine "
@@ -202,7 +205,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 20</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 22</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -210,7 +213,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>24,011</b> in <b>3</b> chunks</span>
+    <span>assets <b>25,337</b> in <b>4</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -226,6 +229,25 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 22 &middot; Aug 20</span><div><b>Walls and floors stop intersecting.</b>
+    The floor fills its cell, the wall stands on the cell boundary, and they shared exactly 0.25
+    cubic tiles &mdash; the band slicing the masonry at every storey. The cause was pitching a
+    storey at the wall&#39;s own height, which leaves the wall column continuous and no room for a
+    slab. All 75 Wall/Floor pieces in the pack are 2.5 tall, which is the kit stating the correct
+    pitch; adopting it drops the slab into the gap between courses. Wall material was probed three
+    ways &mdash; the megadungeon brick we used is dungeon masonry with deep relief that leaves dark
+    gaps at every join, so houses moved to the Village panel our windows already came from. And a
+    new buried-geometry check immediately found 928 rampart facings completely inside the wall
+    core, recovering 948 assets. Interpenetration: 3,850 pairs to 77.</div></li>
+  <li><span class="when">rev 21 &middot; Aug 20</span><div><b>Woodland that grows in stands.</b>
+    Measured before touching: nearest-neighbour species agreement was 46% against a random rate of
+    46% &mdash; not approximately random, exactly random. Spacing sat between 3.4 and 4.9 tiles with
+    almost no spread, and density measured 2.1-3.1% at every distance from town. Two hashed noise
+    fields fix all three: a coarse canopy field drives density, a finer stand field picks species.
+    Agreement rose to 65% and density now runs 0.8% in glades against 4.2% in stands. Fixing the
+    undergrowth exposed a bug of my own: the scatter is an elif ladder, so its thresholds are
+    cumulative bands, and written as independent values ferns became unreachable in exactly the
+    places they should be thickest.</div></li>
   <li><span class="when">rev 20 &middot; Aug 20</span><div><b>Porches, hedgerows, clustered
     goods.</b> Sixteen public buildings carry a porch over the door &mdash; set high enough to
     clear the signs on the same facade, which occupy up to 2.65 and would otherwise have been
