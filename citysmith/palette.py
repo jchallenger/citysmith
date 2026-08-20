@@ -316,6 +316,24 @@ MEDIEVAL = Style(
             _tile(name="gravel_1x1_01", **_MED),
             _tile(name="Dirt 1x1", **_MED),
         ],
+        # -- dressing by place ---------------------------------------------
+        # Market stalls and their goods, for the square.
+        "market_goods": [
+            _prop(name=("Crate - Large", "Baskets", "Apple Basket",
+                        "Barrels", "Sack", "Bench -Shabby"), **_MED),
+        ],
+        # A yard is a working back-of-house, not a park: firewood, a barrow,
+        # something being mended. Cut from the same corner the notch opened.
+        "yard_clutter": [
+            _prop(name=("Log Pile", "Stackable Pine chopped", "Wooden Cart",
+                        "Ladder wood short 01", "bucket_wood", "Barrels"), **_MED),
+        ],
+        # Low growth for softening a hard tile seam. Nothing here is taller
+        # than knee height -- a seam wants breaking up, not hiding.
+        "verge": [
+            _prop(name=("Rock pebbles 01", "bush_berry_01", "Fern 01",
+                        "Rubble pebbles spread out"), **_MED),
+        ],
         "quay_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),

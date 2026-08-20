@@ -1870,6 +1870,80 @@ SIGNED_KINDS = frozenset({"tavern", "shop", "smithy", "apothecary", "stable",
                           "warehouse", "guildhall"})
 
 
+#: Woodland stops this many cells short of a building. Trees scattered at a
+#: flat rate grew tight against walls and filled the yards the notches cut,
+#: which reads as a village abandoned to the forest rather than one clearing
+#: ground to live in.
+TREE_CLEARANCE = 3
+
+
+def building_distance(tm, limit: int = 8) -> dict[tuple[int, int], int]:
+    """Cells out from the nearest building, breadth-first, capped at ``limit``.
+
+    Density of anything scattered should fall off near the built-up area:
+    that gradient is what makes a settlement look like it was cleared, and
+    its absence is what made the woodland grow up to the doorsteps.
+    """
+    dist: dict[tuple[int, int], int] = {}
+    frontier: list[tuple[int, int]] = []
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.building[z][x]:
+                dist[(x, z)] = 0
+                frontier.append((x, z))
+    step = 0
+    while frontier and step < limit:
+        step += 1
+        nxt: list[tuple[int, int]] = []
+        for x, z in frontier:
+            for dx, dz in NEIGHBOURS:
+                n = (x + dx, z + dz)
+                if (0 <= n[0] < tm.width and 0 <= n[1] < tm.depth
+                        and n not in dist):
+                    dist[n] = step
+                    nxt.append(n)
+        frontier = nxt
+    return dist
+
+
+def _dress_seams(b: Builder, tm, scatter: "Scatter", rng, grade: float,
+                 taper: dict[tuple[int, int], float | None]) -> None:
+    """Break the hard tile line where one surface meets another.
+
+    Grass meets lane meets cobble on a ruler-straight edge everywhere, which
+    is the most reliable tell that a map was rasterised rather than built. The
+    shore course proved a one-cell transition works; this is the same idea for
+    seams that have no natural material of their own, done with low growth and
+    spill rather than by retexturing the cell.
+    """
+    from . import raster as R
+
+    verges = [b.palette.resolve("verge", v) for v in range(4)]
+    verges = [v for v in verges if v is not None]
+    if not verges:
+        return
+
+    soft = (R.GROUND, R.FIELD)
+    hard = (R.STREET, R.PLAZA, R.LANE)
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] not in soft or tm.building[z][x]:
+                continue
+            if not any(0 <= x + dx < tm.width and 0 <= z + dz < tm.depth
+                       and tm.surface[z + dz][x + dx] in hard
+                       for dx, dz in NEIGHBOURS):
+                continue
+            if rng.random() > 0.22:
+                continue
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+            scatter.one(verges[rng.randrange(len(verges))],
+                        x + 0.5 + rng.uniform(-0.3, 0.3),
+                        z + 0.5 + rng.uniform(-0.3, 0.3),
+                        grade - drop, rng.randrange(24))
+
+
 def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
                 taper: dict[tuple[int, int], float | None]) -> None:
     """Hang a trade sign beside the primary door of each public building.
@@ -1935,6 +2009,11 @@ def _dress_districts(b: Builder, tm, grade: float,
     rng = random.Random("dress:stable")  # deterministic across rebuilds
     scatter = Scatter(b)
     _hang_signs(b, tm, scatter, grade, taper)
+    near_town = building_distance(tm)
+    market = [b.palette.resolve("market_goods", v) for v in range(4)]
+    market = [m for m in market if m is not None]
+    yard = [b.palette.resolve("yard_clutter", v) for v in range(4)]
+    yard = [y for y in yard if y is not None]
 
     # Parks come from the layout as GROUND repainted by area polygons; the
     # raster keeps no park mask, so rediscover them cheaply: ground cells not
@@ -1974,6 +2053,15 @@ def _dress_districts(b: Builder, tm, grade: float,
                     # conifer still dominates -- this is pine country -- with
                     # broadleaf for relief and the occasional dead trunk,
                     # which is also the best cover a scout gets out here.
+                    # A yard is worked ground, not woodland. The cells a
+                    # notch opened sit right against a wall, and filling them
+                    # with pines made the cut read as neglect rather than as
+                    # somebody's back yard.
+                    if near_town.get((x, z), 99) <= TREE_CLEARANCE:
+                        if yard and rng.random() < 0.28:
+                            scatter.one(yard[rng.randrange(len(yard))],
+                                        x + 0.5, z + 0.5, here, rng.randrange(24))
+                        continue
                     pick = rng.random()
                     jx, jz = rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25)
                     cx, cz = x + 0.5 + jx, z + 0.5 + jz
@@ -1993,7 +2081,26 @@ def _dress_districts(b: Builder, tm, grade: float,
                     fern = fern_big if rng.random() < 0.3 and fern_big else fern_small
                     scatter.one(fern, x + 0.5, z + 0.5, here, rng.randrange(24))
 
-            elif surf in (R.PLAZA, R.STREET):
+            elif surf == R.PLAZA:
+                # A square with nothing on it is worse than no square. Goods
+                # cluster loosely, leaving room in the middle for the crowd --
+                # and for whatever the party is about to do in it.
+                if market and rng.random() < 0.16:
+                    scatter.one(market[rng.randrange(len(market))],
+                                x + 0.5 + rng.uniform(-0.2, 0.2),
+                                z + 0.5 + rng.uniform(-0.2, 0.2),
+                                here, rng.randrange(24))
+                elif well is not None and not plaza_dressed and rng.random() < 0.06:
+                    if scatter.one(well, x + 0.5, z + 0.5, here, rng.randrange(24)):
+                        plaza_dressed = True
+
+            elif surf == R.LANE:
+                # Lanes are where things get left, sparsely and against a wall.
+                if yard and rng.random() < 0.07:
+                    scatter.one(yard[rng.randrange(len(yard))],
+                                x + 0.5, z + 0.5, here, rng.randrange(24))
+
+            elif surf == R.STREET:
                 # This export has no plaza cells (MFCG's squares came through
                 # empty), so market clutter leans against buildings along the
                 # streets instead: barrels and carts where a street cell
@@ -2012,6 +2119,9 @@ def _dress_districts(b: Builder, tm, grade: float,
                 elif roll < 0.30 and barrels is not None:
                     pick = cart if rng.random() < 0.4 and cart else barrels
                     scatter.one(pick, x + 0.5, z + 0.5, here, rng.randrange(24))
+
+    # Last, so it can see everything already standing and not fight it.
+    _dress_seams(b, tm, scatter, rng, grade, taper)
 
 
 def _build_city_wall(b: Builder, city: City, base_y: float) -> None:
