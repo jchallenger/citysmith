@@ -21,77 +21,73 @@ def img(stem: str) -> str:
 
 
 DISTRICTS = [
-    ("The Greens", "01-woodland-park", "Pine woodland on the old commons",
-     "A ranger scouting ahead moves tree to tree with real cover, and jittered trunks kill the "
-     "orchard-grid look. The lone stable in the clearing is the proof module: rectangular, full "
-     "wall circuit, saddle roof seated. The party&#39;s where-do-we-camp conversation has an "
-     "obvious answer.",
-     [("shipped", "single-piece pines, jittered"), ("shipped", "stable = clean proof module")]),
-    ("The Farmland Fringe", "02-farmland", "Tilled strips and wheat sheaves at the town's edge",
-     "Chest-high wheat is concealment a kobold skirmisher will absolutely use, and the gravel "
-     "margins from the field-fringe fix read as worked headlands. The map edge still drops to "
-     "void &mdash; a stepped-down border ring stays queued.",
-     [("shipped", "wheat rows + gravel margins"), ("flaw", "map edge is a sheer void cliff")]),
-    ("Town Edge", "03-town-edge", "Where the last cottage meets the treeline",
-     "Rooflines now vary by storey and every facade carries windows, so the street silhouette "
-     "reads as a settlement rather than a bunker row. The civic flank behind still wants its "
-     "windows checked at eye level.",
-     [("shipped", "windows on every facade"), ("shipped", "varied rooflines")]),
-    ("The Back Lanes", "04-back-lanes", "Between houses in the dense quarter",
-     "Grass alleys between lots read as lived-in shortcuts &mdash; a rogue's escape route during "
-     "a chase. Adjacent gables at differing heights give archers roof positions reachable from a "
-     "cart. Lanes are grass, not mud; a churned-earth strip would sell it harder.",
-     [("shipped", "varied roof heights by storey"), ("next", "consider dirt/gravel back lanes")]),
-    ("The Riverbank", "05-riverbank", "Stepped banks down to the sunken channel",
-     "Water sits a full tile low, so shoving a bandit off the bank is a real 5-ft decision, and "
-     "the stepping-stone planks are a legible chokepoint for a fighting retreat. Bank sides "
-     "still show raw tile edges; the gravel shore course stays queued.",
-     [("shipped", "sunken water, plank chokepoint"), ("flaw", "bank sides show raw tile edges")]),
-    ("The Civic Quarter", "06-civic-flank", "The guildhall's long flank",
-     "The citadel ring turned out to be the real tenant here, and at eye level it reads as a "
-     "ruin: the wall line rasterises to diagonal stair-steps, so the circuit breaks into "
-     "free-standing pillars with arched tiles. Atmospheric, but it should be a choice, not an "
-     "accident.",
-     [("shipped", "parapet cap course"), ("flaw", "diagonal wall cells break into pillars")]),
-]
-
-DISTRICTS += [
-    ("The Rampart", "10-rampart-walk", "Solid masonry, battlements facing out, a walk behind",
-     "The wall a party can actually be chased along. Merlons crown only the cells that look out "
-     "of town, so the parapet is a line rather than a hedge of teeth, and the weathered flags "
-     "behind them are a fighting surface two abreast. Until this rev the same circuit was four "
-     "parallel fins of curtain wall with 2.5 ft of daylight between them &mdash; an archer could "
-     "have shot straight through the fortification.",
-     [("shipped", "full-cell core: no daylight through the wall"),
-      ("shipped", "battlements face out; walk paved behind"),
-      ("next", "no arch, doors or flanking towers at the gate")]),
-    ("The Main Road", "11-level-streets", "Cobble laid flush with the verge",
-     "Cobble is 0.25 thick and grass is 0.5, and both were laid from a common bottom, so every "
-     "street sat a quarter tile low &mdash; a 15 inch kerb down both sides of every road in town, "
-     "on 1,234 tiles. Nothing in the tile grid could show it. Surfaces now align at the top, "
-     "which is the plane a creature stands on.",
+    ("The Town Edge", "a-town-edge", "Where the last houses meet the river meadow",
+     "The establishing shot: cobble flush with the verge, rooflines varying by storey count, and "
+     "a wood that thins into pasture rather than stopping at a line. Cobble is 0.25 thick against "
+     "grass at 0.5, and both used to be laid from a common bottom &mdash; a 15 inch kerb down "
+     "both sides of every road, on 1,234 tiles. Surfaces align at the top now.",
      [("shipped", "surfaces align at the top, not the bottom"),
-      ("shipped", "varied rooflines by storey count")]),
-    ("The Gatehouse", "12-gatehouse", "Towers flanking the road in",
-     "Two revs ago this was an 18-cell breach with nothing in it &mdash; a 35 ft hole in the "
-     "circuit, open to the sky, where the main street crossed. It became a tunnel with the "
-     "rampart carried over on a lintel, and now the wall either side rises two courses into "
-     "towers, so the approach along the road reads as a defended entrance from a long way off. "
-     "The passage still keeps its cart headroom.",
+      ("shipped", "roof height follows each building's storey count")]),
+
+    ("The Riverbank", "b-riverbank", "Shingle shore along the sunken channel",
+     "Water sits half a tile below the bank, so shoving someone in is a real five-foot decision "
+     "rather than a cosmetic one, and the shingle course gives a party somewhere to stand that is "
+     "visibly not the river. Stumps and fallen trunks along the bank are cover a scout can use "
+     "without leaving the waterline.",
+     [("shipped", "shingle shore, 748 tiles"),
+      ("shipped", "water half a tile down: a bank, not a canal")]),
+
+    ("The Roofscape", "c-roofscape", "Dense quarter against open pinewood",
+     "The join between built and unbuilt, which is where a generated town usually gives itself "
+     "away. Gables at differing heights give archers roof positions reachable from a cart, and "
+     "the wood is mixed rather than a plantation &mdash; 62% conifer, 30% broadleaf, 8% dead "
+     "trunk, each one spaced clear of its neighbours.",
+     [("shipped", "mixed species, jittered placement"),
+      ("shipped", "adjacent gables at differing heights")]),
+
+    ("The Rampart", "d-rampart", "Solid masonry, battlements out, wall-walk behind",
+     "A wall a party can be chased along. Two revs ago this same circuit was four parallel fins "
+     "of curtain wall with 2.5 ft of daylight between them &mdash; an archer could have shot "
+     "clean through the fortification, and every check that read the tile grid called it solid. "
+     "Merlons crown only the cells facing out of town; the weathered flags behind them are a "
+     "fighting surface two abreast.",
+     [("shipped", "full-cell core: no daylight through the wall"),
+      ("shipped", "battlements face out, walk paved behind")]),
+
+    ("The Gate Towers", "f-gatehouse", "The circuit rising either side of the road in",
+     "Where the main street crosses the wall there used to be eighteen cells of nothing &mdash; a "
+     "35 ft breach open to the sky. It became a tunnel with the rampart carried over on a lintel, "
+     "and the wall flanking it now rises two courses so the approach reads as a defended entrance "
+     "from across the valley. The passage keeps its cart headroom.",
      [("shipped", "wall carried over the road on a lintel"),
       ("shipped", "flanking towers, diagonal jambs included"),
-      ("next", "no gate leaves, arch dressing or murder holes")]),
-    ("The Pinewood", "13-woodland", "Trees with trunks, spaced so they all arrive",
-     "Every conifer here used to be a bare canopy cone lying on the grass &mdash; "
-     "&ldquo;Stackable Pine Top&rdquo; is the top of a three-piece kit, and it was being planted "
-     "on its own, while cut stumps were scattered separately nearby. Read together they were "
-     "leaves that did not line up with any trunk. Worse, 47% of all scenery sat inside another "
-     "prop&#39;s collider, and TaleSpire drops those on paste without saying so, which is what "
-     "made the woods look half-built. Spacing is now enforced, so what is in the file is what "
-     "reaches the board.",
+      ("next", "no gate leaves or arch dressing yet")]),
+
+    ("The Back Lanes", "e-back-lanes", "Between houses in the dense quarter",
+     "Grass alleys between lots read as lived-in shortcuts &mdash; a rogue's line during a chase. "
+     "Barrels and a cart now actually appear against the walls: street clutter is only eligible on "
+     "cells touching a building, which is 39 cells out of 1,234 once main streets widened to four "
+     "tiles, so the old 2.5% rate gave the entire town one barrel.",
+     [("shipped", "street clutter appears at a rate that suits 39 eligible cells"),
+      ("next", "lanes are grass; a churned dirt strip would sell them harder")]),
+
+    ("The Pinewood", "g-pinewood", "Trees with trunks, spaced so they all arrive",
+     "Every conifer used to be a bare canopy cone sitting on the grass. &ldquo;Stackable Pine "
+     "Top&rdquo; is the top of a three-piece kit and it was being planted on its own, while cut "
+     "stumps were scattered separately nearby &mdash; read together, leaves that did not line up "
+     "with any trunk. Worse, 47% of all scenery sat inside another prop&#39;s collider, and "
+     "TaleSpire drops those on paste without saying so.",
      [("shipped", "pines stacked from their kit: 557 joints, none misaligned"),
-      ("shipped", "0 overlapping props, down from 1,000 of 2,137"),
-      ("shipped", "street clutter actually appears now")]),
+      ("shipped", "0 overlapping props, down from 1,000 of 2,137")]),
+
+    ("The Map Edge", "z-map-edge", "The one thing still visibly unfinished",
+     "Shown because it is still wrong. The ground plane ends on a hard straight cut and a road "
+     "runs off it into nothing, so from outside the map reads as a cropped rectangle rather than "
+     "as country continuing past the frame. A stepped-down border ring is the fix, but it "
+     "interacts with the chunk-skipping that drops a fifth of the map as open country &mdash; "
+     "tapered ground stops counting as open country, so both have to be designed together.",
+     [("flaw", "ground plane ends on a sheer void cliff"),
+      ("next", "taper and chunk-skip rule need designing together")]),
 ]
 
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
@@ -190,11 +186,11 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 <header>
   <div class="kicker">citysmith &middot; design review &middot; rev 14</div>
   <h1>Forest Church</h1>
-  <p class="deck">A 117 &times; 113-tile TaleSpire village generated from a Watabou export &mdash;
-  reviewed district by district at avatar eye level, the way a party will actually see it.
-  This page is updated as the design changes.</p>
+  <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
+  by district at avatar eye level, the way a party will actually see it. Every image below is a
+  fresh capture of the current build; nothing here is a render or a mock-up.</p>
   <div class="stats">
-    <span>tiles <b>187 &times; 179</b> (933 &times; 896 ft)</span>
+    <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
     <span>assets <b>24,040</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
