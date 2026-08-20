@@ -81,6 +81,17 @@ DISTRICTS += [
      [("shipped", "wall carried over the road on a lintel"),
       ("shipped", "flanking towers, diagonal jambs included"),
       ("next", "no gate leaves, arch dressing or murder holes")]),
+    ("The Pinewood", "13-woodland", "Trees with trunks, spaced so they all arrive",
+     "Every conifer here used to be a bare canopy cone lying on the grass &mdash; "
+     "&ldquo;Stackable Pine Top&rdquo; is the top of a three-piece kit, and it was being planted "
+     "on its own, while cut stumps were scattered separately nearby. Read together they were "
+     "leaves that did not line up with any trunk. Worse, 47% of all scenery sat inside another "
+     "prop&#39;s collider, and TaleSpire drops those on paste without saying so, which is what "
+     "made the woods look half-built. Spacing is now enforced, so what is in the file is what "
+     "reaches the board.",
+     [("shipped", "pines stacked from their kit: 557 joints, none misaligned"),
+      ("shipped", "0 overlapping props, down from 1,000 of 2,137"),
+      ("shipped", "street clutter actually appears now")]),
 ]
 
 MARK = {"shipped": "&#10003; ", "flaw": "&#9651; ", "next": "&rarr; "}
@@ -177,7 +188,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 13</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 14</div>
   <h1>Forest Church</h1>
   <p class="deck">A 117 &times; 113-tile TaleSpire village generated from a Watabou export &mdash;
   reviewed district by district at avatar eye level, the way a party will actually see it.
@@ -185,11 +196,12 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 179</b> (933 &times; 896 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,957</b> in <b>3</b> chunks</span>
+    <span>assets <b>24,040</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
     <span>ground-plane holes <b class="ok">0</b></span>
+    <span>overlapping props <b class="ok">0</b></span>
   </div>
 </header>
 
@@ -200,6 +212,16 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 14 &middot; Aug 19</span><div><b>Trees with trunks, and scenery that
+    survives the paste.</b> 47% of props sat inside another prop&#39;s collider, and TaleSpire
+    drops those silently &mdash; so the scatter was making a thin wood plus several hundred assets
+    that never arrived. Scatter is collision-checked now, all-or-nothing per group. And the
+    conifer had never been a tree: &ldquo;Stackable Pine Top&rdquo; is the canopy cone of a
+    Stump&nbsp;&rarr;&nbsp;Middle&nbsp;&rarr;&nbsp;Top kit, planted alone on the grass. Pines are
+    stacked from the kit by measured piece height &mdash; 557 joints, none misaligned, no crown
+    without a trunk. An earlier attempt at two-piece pines lost a third of its canopies and was
+    abandoned; that was the right diagnosis and the wrong fix, because the pieces were overlapping
+    <em>vertically</em>.</div></li>
   <li><span class="when">rev 13 &middot; Aug 19</span><div><b>A gatehouse, and docs that match
     the build.</b> The gate was structurally correct but undressed: the curtain ran over it at
     ordinary height, so nothing said a gate was there. The wall flanking each opening now rises
