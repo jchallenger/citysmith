@@ -18,7 +18,7 @@ does not rediscover them each time.
 #>
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
-    'focus','paste','click','drop','clear','key','chord','orbit','pan','zoom','select','copyout','setclip')]
+    'focus','paste','click','drop','clear','move','key','chord','orbit','pan','zoom','select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
@@ -92,9 +92,10 @@ function Focus-TS {
 }
 # A zero-duration synthetic click is swallowed by Unity's input polling, so
 # every press is down / short hold / up.
-function Press([int]$px,[int]$py,[uint32]$down,[uint32]$up) {
+function Press([int]$px,[int]$py,[uint32]$down,[uint32]$up,[int]$ms = -1) {
+  if ($ms -lt 0) { $ms = [int]($Hold*1000) }
   [TSIn]::Move($px,$py); Start-Sleep -Milliseconds 120
-  [TSIn]::Btn($down,$up,[int]($Hold*1000)); Start-Sleep -Milliseconds 250
+  [TSIn]::Btn($down,$up,$ms); Start-Sleep -Milliseconds 250
 }
 
 switch ($Cmd) {
@@ -113,20 +114,29 @@ switch ($Cmd) {
     # see 'clear' for why that rather than a right-click.
     if (-not $Keep) {
       Start-Sleep -Milliseconds 400
-      Send-Chord "k" 150
+      Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP) 40
     }
     "pasted $Slab at $X,$Y"
   }
   'click'   { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "clicked $X,$Y" }
-  'drop'    { Focus-TS; Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP); "dropped" }
+  'move'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200; "moved to $X,$Y" }
+  'drop'    { Focus-TS; Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP) 40; "dropped" }
   'clear'   {
-    # Empty the hand without side effects. Right-click drops what is held but
-    # opens the asset library when nothing is; Escape backs out toward the main
-    # menu. Switching the active build tool drops the hand either way, and `K`
-    # is bound to one -- so it is safe to press before every review capture,
-    # whether or not anything is actually held.
+    # Empty the hand. A right-click does it -- but it has to be a *tap*.
+    #
+    # This is the exact opposite of the left click that commits a paste, which
+    # Unity's input polling swallows unless it is held ~200 ms. A right-click
+    # held that long is read as the start of a drag and the slab stays in hand,
+    # which is why `drop` appeared not to work for a whole session and stray
+    # copies of the map kept landing under the next click. Verified on a blank
+    # board: 250 ms holds it, 40 ms drops it.
+    #
+    # Things that do *not* clear the hand, all tested the same way: `K` (it
+    # only toggles its own tool), clicking a tool on the build toolbar, and
+    # `B`. `Escape` is untested and stays that way -- it backs out toward the
+    # main menu.
     Focus-TS
-    Send-Chord "k" 150
+    Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP) 40
     "cleared"
   }
   'key'     { Focus-TS; Send-Chord $Keys ([int]($Hold*1000)); "sent $Keys" }

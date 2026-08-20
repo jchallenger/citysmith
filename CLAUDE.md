@@ -91,10 +91,17 @@ actually matters, all confirmed in-game:
 - **Paste is cursor-anchored, not coordinate-anchored.** The slab arrives in
   hand at the cursor, snapped to the global grid, and *stays in hand* afterwards
   as a repeat stamp — so one paste can be committed many times.
-- **Right-click drops what is in hand** (and resets the tool to the pointer).
-  Switching tools on the build toolbar also works. `Escape` does *not* clear it
-  -- it backs out toward the main menu, which is how a stray Escape ended a
-  session on the campaign screen -- and neither does toggling `B`.
+- **Right-click drops what is in hand -- but it has to be a *tap*.** This is
+  the exact opposite of the left click that commits a paste, and getting it
+  wrong is invisible: a right-click held ~250 ms is read as the start of a drag
+  and the slab stays in hand, so every later click stamps another copy of the
+  map. Verified on a blank board with the cursor moved away afterwards (a held
+  slab follows the cursor; a committed one does not): 250 ms holds, 40 ms
+  drops. `ts.ps1 clear`.
+  **Nothing else clears the hand**, all tested the same way: not `K`, which
+  only toggles its own tool; not clicking a tool on the build toolbar; not `B`.
+  `Escape` is untested and stays that way -- it backs out toward the main menu,
+  which is how a stray Escape once ended a session on the campaign screen.
 - Drive every click as explicit mouse-down / short wait / mouse-up. Never
   press-and-hold on the window title bar — that drags the window, and resizing
   the window from outside stalls Unity's renderer until the mouse moves over
@@ -119,15 +126,12 @@ actually matters, all confirmed in-game:
   outruns the camera and registers as nothing, which reads exactly like "pan
   does not work". `--crop` a window onto its own board is still the quick way
   to review one quarter.
-- **Empty the hand after every paste, with `K`.** A committed slab can stay in
-  hand as a repeat stamp, so the next click anywhere stamps another copy of the
-  map. Switching the active build tool drops whatever is held, and `K` is bound
-  to one -- so `ts.ps1 clear` presses it, and it is safe before every capture
-  whether or not anything is held. The alternatives are all worse: right-click
-  drops the hand but opens the asset library when the hand is empty, `Escape`
-  backs out toward the main menu, and `G` is a toggle that adds toolbar
-  buttons. The bottom hint bar would say all this, but it is clipped unless the
-  window is sized to fit the desktop.
+- **Empty the hand after every paste** -- see the right-click tap above. A
+  right-click with an empty hand opens the asset library over the board, so
+  clear once, deliberately, rather than pre-emptively before each camera move.
+  The community keybind lists do not cover any of this and are stale besides
+  (they give WASD for the camera, which does nothing here); the bottom hint bar
+  would, but it is clipped unless the window is sized to fit the desktop.
 - Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
   not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
