@@ -286,6 +286,19 @@ MEDIEVAL = Style(
         # thick left a 0.5-tile slot between every course: 2.5 ft of daylight
         # through the wall, the length of the whole circuit. The mass is built
         # from a full-cell block and the thin pieces face it.
+        # Open water tiles perfectly and is the biggest single surface on a
+        # river map, so the 2x2 pays for itself four cells at a time. Both
+        # water assets in the pack are named "temp"; that is TaleSpire's
+        # naming, not a placeholder -- there is nothing else to pin.
+        "water_2x2": [_tile(name="tempWater2x2", **_MED)],
+        # Where paving meets water there is no shingle to lay -- a road is not
+        # going to become gravel -- so the bank was simply a cliff the cobbles
+        # stopped at. A low harbour rail turns that into a quay edge. Piers
+        # deliberately do not get one: a pier exists to reach the water.
+        "quay_rail": [
+            _tile(name="Harbor Fence 02", **_MED),
+            _tile(name="Desert fence low", **_MED),
+        ],
         "city_wall_core": [
             _tile(name="castle wall corner 1x1 base", **_MED),
             _tile(name="Castle Ruins Wallbase 01", **_MED),

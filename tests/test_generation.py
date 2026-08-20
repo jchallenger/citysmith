@@ -804,3 +804,34 @@ def test_edge_taper_never_leaves_the_outermost_block_at_grade():
     # and the fall is monotonic: nothing further in drops more than the edge
     edge = [v for (x, z), v in taper.items() if min(x, z, 39 - x, 39 - z) == 0]
     assert all(v is None or v >= 1.0 for v in edge)
+
+
+def test_place_wall_handles_a_mesh_authored_along_z():
+    """Edge pieces are not all authored the same way round.
+
+    Wall kits run their length along x with a thin z. The harbour fences are
+    the reverse (0.5 x 0.5 x 1.0), and placing one on the wall convention put
+    it a quarter tile off the grid on *both* axes -- which the build's own
+    off-grid check caught.
+    """
+    along_z = Asset(id="3" * 8 + "-1111-2222-3333-444444444444", name="rail",
+                    kind="tile", pack="p", group_tag="fence", tags=(), folder="",
+                    size_x=0.5, size_y=0.5, size_z=1.0)
+
+    for side in ("n", "e", "s", "w"):
+        p = place_wall(along_z, 4, 7, side, y=0.5)
+        assert abs(p.x * 2 - round(p.x * 2)) < 1e-9, f"{side}: x={p.x} off grid"
+        assert abs(p.z * 2 - round(p.z * 2)) < 1e-9, f"{side}: z={p.z} off grid"
+
+    # and it still spans the edge it was asked for, rather than crossing it
+    n = place_wall(along_z, 4, 7, "n", y=0.0)
+    sx, sz = rotated_footprint(along_z, n.rot)
+    assert (sx, sz) == (1.0, 0.5), "the long axis must run along the edge"
+    assert n.z == 7.0 and n.x == 4.0
+
+
+def test_place_wall_leaves_x_authored_meshes_alone():
+    """The correction must be a no-op for every kit already in use."""
+    n = place_wall(WALL, 2, 3, "n", y=0.5)
+    assert n.rot == ROT_N
+    assert (n.x, n.z) == (2.0, 3.0)

@@ -212,17 +212,29 @@ def place_wall(asset: Asset, tx: int, tz: int, side: str, y: float = 0.0) -> Pla
 
     The wall's thin axis is inset to sit exactly on the cell boundary, so two
     buildings sharing a lot line do not produce overlapping geometry.
+
+    **The mesh may be authored along either axis.** Most wall kits run their
+    length along x with a thin z -- but the harbour fences are the other way
+    round (0.5 x 0.5 x 1.0), and placing one of those on the wall convention
+    put it a quarter tile off the grid on both axes. The quarter turn needed
+    is read off which axis is thin rather than assumed, so a role can be
+    pinned to either kind of piece.
     """
-    thickness = min(asset.size_x, asset.size_z)
+    rot = _SIDE_ROT[side] if side in _SIDE_ROT else None
+    if rot is None:
+        raise ValueError(f"side must be one of {SIDES}, got {side!r}")
+    if asset.size_z > asset.size_x:
+        rot = (rot + _QUARTER) % 24
+
+    sx, sz = rotated_footprint(asset, rot)
+    thickness = min(sx, sz)
     if side == "n":
-        return place_centered(asset, tx + 0.5, tz + thickness / 2, y, ROT_N)
+        return place_centered(asset, tx + 0.5, tz + thickness / 2, y, rot)
     if side == "s":
-        return place_centered(asset, tx + 0.5, tz + 1 - thickness / 2, y, ROT_S)
+        return place_centered(asset, tx + 0.5, tz + 1 - thickness / 2, y, rot)
     if side == "w":
-        return place_centered(asset, tx + thickness / 2, tz + 0.5, y, ROT_W)
-    if side == "e":
-        return place_centered(asset, tx + 1 - thickness / 2, tz + 0.5, y, ROT_E)
-    raise ValueError(f"side must be one of {SIDES}, got {side!r}")
+        return place_centered(asset, tx + thickness / 2, tz + 0.5, y, rot)
+    return place_centered(asset, tx + 1 - thickness / 2, tz + 0.5, y, rot)
 
 
 @dataclass
@@ -993,6 +1005,62 @@ _PROP_CATEGORY_BY_KIND: dict[str, str] = {
 #: raster (there is no PARK surface), so they tile as ground.
 _BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field"}
 
+#: How much deeper the bed goes per cell away from the bank, and the most it
+#: is allowed to drop. **TaleSpire's water tile is translucent and tints with
+#: what is under it** -- verified with a three-channel probe whose beds sat 0,
+#: 1 and 2 tiles down under one flat water surface: pale, teal, deep teal.
+#: So depth is free. The surface stays a single layer of tiles and only the
+#: bed moves, which is why a river can read as deep without costing a thing.
+#:
+#: Flush bed was the palest of the three, and every cell of the old river was
+#: flush -- a uniform, washed-out ditch. Shallows still are: a bank cell keeps
+#: its flush bed, which is what makes a ford read as crossable.
+WATER_DEEPEN_STEP = 0.5
+WATER_MAX_DEEPEN = 1.5
+
+
+def water_depth(tm) -> dict[tuple[int, int], int]:
+    """Cells away from the nearest bank, for every water cell.
+
+    Breadth-first out from the land, so 1 is a cell touching the shore. The
+    river bed follows this, which turns a rectangular trench into something
+    with shallows at the edges and a channel down the middle.
+    """
+    from . import raster as R
+
+    depth: dict[tuple[int, int], int] = {}
+    frontier: list[tuple[int, int]] = []
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] != R.WATER:
+                continue
+            if any(not (0 <= x + dx < tm.width and 0 <= z + dz < tm.depth)
+                   or tm.surface[z + dz][x + dx] != R.WATER
+                   for dx, dz in NEIGHBOURS):
+                depth[(x, z)] = 1
+                frontier.append((x, z))
+
+    step = 1
+    while frontier:
+        step += 1
+        nxt: list[tuple[int, int]] = []
+        for x, z in frontier:
+            for dx, dz in NEIGHBOURS:
+                n = (x + dx, z + dz)
+                if not (0 <= n[0] < tm.width and 0 <= n[1] < tm.depth):
+                    continue
+                if tm.surface[n[1]][n[0]] != R.WATER or n in depth:
+                    continue
+                depth[n] = step
+                nxt.append(n)
+        frontier = nxt
+    return depth
+
+
+def _bed_drop(depth: dict[tuple[int, int], int], cell: tuple[int, int]) -> float:
+    """How far below the water's underside this cell's bed sits."""
+    return min((depth.get(cell, 1) - 1) * WATER_DEEPEN_STEP, WATER_MAX_DEEPEN)
+
 
 def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
                  taper: dict[tuple[int, int], float | None]) -> None:
@@ -1007,6 +1075,9 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
     from . import raster as R
 
     covered: set[tuple[int, int]] = set()
+    water_tile = b.palette.resolve("water")
+    water_block = b.palette.resolve("water_2x2")
+    wdepth = water_depth(tm)
 
     # A grass tile that ends flush at a sunken watercourse shows its bare side
     # to anyone standing on the bank. A course of shingle along the waterline
@@ -1015,7 +1086,7 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
     bank: set[tuple[int, int]] = set()
     for z in range(tm.depth):
         for x in range(tm.width):
-            if tm.surface[z][x] != R.GROUND or tm.building[z][x]:
+            if tm.surface[z][x] not in (R.GROUND, R.FIELD) or tm.building[z][x]:
                 continue
             for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, nz = x + dx, z + dz
@@ -1032,10 +1103,26 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
     for z in range(0, tm.depth - 1, 2):
         for x in range(0, tm.width - 1, 2):
             s = surface_at(x, z)
+            quad = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)]
+
+            # Open water is the largest single surface on a river map and it
+            # tiles perfectly, so a 2x2 quad of it saves three water tiles and
+            # three bed tiles. It only qualifies where the whole quad is the
+            # same depth, since one 2x2 bed cannot step.
+            if (s == R.WATER and water_block is not None
+                    and all(surface_at(qx, qz) == R.WATER for qx, qz in quad)):
+                drops = {taper.get(q, 0.0) for q in quad}
+                beds = {_bed_drop(wdepth, q) for q in quad}
+                if len(drops) == 1 and None not in drops and len(beds) == 1:
+                    here = grade - drops.pop()
+                    b.surface("ground_2x2", x, z, here - 1.0 - beds.pop())
+                    b.add(place_tile(water_block, x, z, here - 1.0))
+                    covered.update(quad)
+                continue
+
             role = _BLOCK_SURFACES.get(s or "")
             if role is None or b.palette.resolve(role) is None:
                 continue
-            quad = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)]
             if any(surface_at(qx, qz) != s for qx, qz in quad):
                 continue
             if any(tm.building[qz][qx] for qx, qz in quad):
@@ -1075,16 +1162,50 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
                 # The bed and its water fall with the land, so a river does
                 # not end up perched above a tapered bank. No baseline is
                 # recorded: a channel is a feature, not background ground.
-                b.surface(ground_role, x, z, here - 1.0)
-                water = b.palette.resolve("water")
-                if water is not None:
-                    b.add(place_tile(water, x, z, here - 1.0))
+                #
+                # Only the *bed* varies with distance from the bank; the
+                # surface stays one flat layer. The water tile is translucent,
+                # so that alone gives shallows at the edges and a dark channel
+                # down the middle without a single extra tile.
+                b.surface(ground_role, x, z, here - 1.0 - _bed_drop(wdepth, (x, z)))
+                if water_tile is not None:
+                    b.add(place_tile(water_tile, x, z, here - 1.0))
                 continue
             role = surface_roles.get(s, ground_role)
             if (x, z) in bank and b.palette.resolve("field_1x1") is not None:
                 role = "field_1x1"          # shingle shore
             b.surface(role, x, z, here)
             b.ground_baseline[(x, z)] = here - b.palette.require(role).size_y
+
+
+def _lay_quays(b: Builder, tm, grade: float,
+               taper: dict[tuple[int, int], float | None]) -> None:
+    """Rail the edge where paved ground meets water.
+
+    The shingle shore only forms on soft ground -- a street is not going to
+    become gravel -- so a road running along the bank simply stopped at a
+    half-tile cliff over the river, which is most of why the channel read as a
+    trench cut through the town rather than as a river it was built beside.
+
+    Piers are left open on purpose: a pier exists to get to the water.
+    """
+    from . import raster as R
+
+    rail = b.palette.resolve("quay_rail")
+    if rail is None:
+        return
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] not in (R.STREET, R.PLAZA) or tm.building[z][x]:
+                continue
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+            for side, dx, dz in SIDE_OFFSETS:
+                nx, nz = x + dx, z + dz
+                if (0 <= nx < tm.width and 0 <= nz < tm.depth
+                        and tm.surface[nz][nx] == R.WATER):
+                    b.add(place_wall(rail, x, z, side, grade - drop))
 
 
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int) -> None:
@@ -1422,6 +1543,7 @@ def build_from_tilemap(
     }
     taper = edge_taper(tm)
     _lay_terrain(b, tm, surface_roles, grade=floor.size_y, taper=taper)
+    _lay_quays(b, tm, grade=floor.size_y, taper=taper)
 
     top = floor.size_y
     storey_h = ext_wall.size_y
