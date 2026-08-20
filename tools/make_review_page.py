@@ -202,7 +202,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 </style>
 <div class="wrap">
 <header>
-  <div class="kicker">citysmith &middot; design review &middot; rev 19</div>
+  <div class="kicker">citysmith &middot; design review &middot; rev 20</div>
   <h1>Forest Church</h1>
   <p class="deck">A TaleSpire village generated from a Watabou export &mdash; reviewed district
   by district at avatar eye level, the way a party will actually see it. Every image below is a
@@ -210,7 +210,7 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
   <div class="stats">
     <span>tiles <b>187 &times; 180</b> (935 &times; 900 ft)</span>
     <span>buildings <b>51</b></span>
-    <span>assets <b>23,875</b> in <b>3</b> chunks</span>
+    <span>assets <b>24,011</b> in <b>3</b> chunks</span>
     <span>off-grid tiles <b class="ok">0</b></span>
     <span>main streets <b class="ok">20 ft &mdash; two carts pass</b></span>
     <span>reachable <b class="ok">100%</b></span>
@@ -226,6 +226,17 @@ footer {{ margin-top:40px; color:var(--muted); font-size:13.5px;
 
 <div class="section-h"><h2>Design log</h2><div class="rule"></div></div>
 <ol class="log">
+  <li><span class="when">rev 20 &middot; Aug 20</span><div><b>Porches, hedgerows, clustered
+    goods.</b> Sixteen public buildings carry a porch over the door &mdash; set high enough to
+    clear the signs on the same facade, which occupy up to 2.65 and would otherwise have been
+    dropped for overlapping it. Field boundaries get a hedgerow rather than the weeds a
+    grass-to-cobble seam gets, because a field boundary is a boundary. And scenery gathers now:
+    fuel against a smithy, crates at a warehouse, empties behind an inn, stacked on the open cells
+    each building's own perimeter touches so a pile leans on its wall instead of floating in the
+    road. Separately, packing stopped trusting asset count as a proxy for bytes &mdash; the map's
+    growing height variety compresses worse, and the largest chunk had crept to 29,634 of the
+    30,720-byte cap with no signal until an export would have failed outright. Merges are encoded
+    and measured now.</div></li>
   <li><span class="when">rev 19 &middot; Aug 20</span><div><b>Dressing that knows where it is.</b>
     Three gaps, all of them the scatter not knowing what surface it stood on. The market square
     was empty because its branch was gated on building adjacency, which nothing in the middle of a
