@@ -904,3 +904,38 @@ def test_the_town_has_a_market_square():
     plaza = sum(1 for z in range(tm.depth) for x in range(tm.width)
                 if tm.surface[z][x] == R.PLAZA)
     assert plaza > 0, "MFCG gave no square, so one has to be carved"
+
+
+def test_packing_respects_the_byte_cap_not_just_the_asset_count():
+    """Assets are a proxy for bytes, and a proxy that drifts.
+
+    As the map gained height variety and dressing, the same asset count
+    compressed worse and the largest chunk crept to 29,634 of the 30,720-byte
+    cap on an unchanged budget. Merges are measured now, so a run that will
+    not encode is closed one chunk early.
+    """
+    from citysmith import build as build_mod
+    from citysmith.slab import MAX_COMPRESSED_BYTES, encode
+
+    b = _builder()
+    _ground_field(b, 24, 24)
+    for tz in range(0, 24, 4):
+        for tx in range(0, 24, 4):
+            b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    generous = b.chunk_plan(max_assets=100000, chunk_tiles=4, pack=True,
+                            register=False)
+    for chunk in generous.chunks:
+        raw = len(encode(chunk.slab).encode()) * 3 // 4
+        assert raw <= MAX_COMPRESSED_BYTES
+
+    # With a tiny cap the packer must stop merging and emit more slabs.
+    original = build_mod.MAX_COMPRESSED_BYTES
+    try:
+        build_mod.MAX_COMPRESSED_BYTES = 400
+        tight = b.chunk_plan(max_assets=100000, chunk_tiles=4, pack=True,
+                             register=False)
+    finally:
+        build_mod.MAX_COMPRESSED_BYTES = original
+    assert len(tight.chunks) > len(generous.chunks), (
+        "a byte cap the run cannot meet must force more slabs")

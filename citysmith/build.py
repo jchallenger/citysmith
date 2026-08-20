@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from .catalog import Asset
 from .city import Building, City, Rect
 from .palette import Palette
-from .slab import Placement, Slab
+from .slab import MAX_COMPRESSED_BYTES, Placement, Slab, SlabError, encode
 
 #: Rotation steps per quarter turn (24 steps in a full turn).
 _QUARTER = 6
@@ -499,11 +499,18 @@ class _Cell:
 
 
 def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list["SlabChunk"]:
-    """Merge adjacent chunks up to ``max_assets`` so fewer slabs are pasted.
+    """Merge adjacent chunks up to the slab limit so fewer slabs are pasted.
 
     Chunks arrive at detection resolution, which is deliberately fine. Each
     output slab is still a contiguous run of neighbours, so pasting a subset
     gives a coherent region rather than scattered fragments.
+
+    **The binding limit is bytes, not assets.** ``max_assets`` is a proxy, and
+    a proxy that drifts: as the map gained height variety and dressing, the
+    same asset count compressed worse, and the largest chunk crept to 29,634
+    of the 30,720-byte cap on an unchanged budget. Every merge is therefore
+    encoded and measured, and a run that would not fit is closed one chunk
+    early. Slower than counting, and it cannot be wrong.
     """
     if not chunks:
         return chunks
@@ -512,12 +519,19 @@ def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list[
         row, col = ch.row, ch.col
         return (row, -col if row % 2 else col)   # serpentine
 
+    def fits(run: list["SlabChunk"]) -> bool:
+        try:
+            return len(encode(_fuse(run).slab).encode()) * 3 // 4 <= MAX_COMPRESSED_BYTES
+        except SlabError:
+            return False
+
     ordered = sorted(chunks, key=key)
     out: list["SlabChunk"] = []
     run: list["SlabChunk"] = []
     total = 0
     for ch in ordered:
-        if run and total + ch.count > max_assets:
+        over_count = run and total + ch.count > max_assets
+        if over_count or (run and not fits(run + [ch])):
             out.append(_fuse(run))
             run, total = [], 0
         run.append(ch)
@@ -1760,6 +1774,7 @@ def build_from_tilemap(
                 for x, z in sorted(cells_xy):
                     b.add(place_tile(upper, x, z, y))
 
+    _build_porches(b, tm, floor.size_y, taper, storey_h)
     towers = pick_towers(tm, storeys)
     if roof_asset is not None:
         _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
@@ -1923,6 +1938,31 @@ def _dress_seams(b: Builder, tm, scatter: "Scatter", rng, grade: float,
     if not verges:
         return
 
+    hedges = [b.palette.resolve("hedge", v) for v in range(4)]
+    hedges = [h for h in hedges if h is not None]
+
+    # A field ending on a straight edge against grass is the same ruler line
+    # as grass against cobble, and wants the same treatment -- but a field
+    # boundary is a *boundary*, so it gets a hedgerow rather than weeds.
+    if hedges:
+        for z in range(tm.depth):
+            for x in range(tm.width):
+                if tm.surface[z][x] != R.FIELD or tm.building[z][x]:
+                    continue
+                if not any(0 <= x + dx < tm.width and 0 <= z + dz < tm.depth
+                           and tm.surface[z + dz][x + dx] == R.GROUND
+                           for dx, dz in NEIGHBOURS):
+                    continue
+                if rng.random() > 0.35:
+                    continue
+                drop = taper.get((x, z), 0.0)
+                if drop is None:
+                    continue
+                scatter.one(hedges[rng.randrange(len(hedges))],
+                            x + 0.5 + rng.uniform(-0.2, 0.2),
+                            z + 0.5 + rng.uniform(-0.2, 0.2),
+                            grade - drop, rng.randrange(24))
+
     soft = (R.GROUND, R.FIELD)
     hard = (R.STREET, R.PLAZA, R.LANE)
     for z in range(tm.depth):
@@ -1942,6 +1982,102 @@ def _dress_seams(b: Builder, tm, scatter: "Scatter", rng, grade: float,
                         x + 0.5 + rng.uniform(-0.3, 0.3),
                         z + 0.5 + rng.uniform(-0.3, 0.3),
                         grade - drop, rng.randrange(24))
+
+
+#: Buildings that get a porch over the door. A blank wall with a hole in it is
+#: a warehouse; an entrance somebody sheltered under is a place of business.
+PORCHED_KINDS = frozenset({"tavern", "shop", "apothecary", "guildhall",
+                           "temple", "manor", "smithy"})
+
+
+#: What gathers outside each trade, as palette prop categories. Uniform
+#: scatter never clusters, and real scenery does: a smithy has fuel stacked
+#: against it, a warehouse has crates waiting, an inn has empties out the
+#: back. A cluster also tells a party what the building *is* from further off
+#: than a sign does.
+TRADE_CLUTTER = {
+    "smithy": "smithy",
+    "warehouse": "shop",
+    "shop": "shop",
+    "tavern": "tavern",
+    "stable": "house",
+    "apothecary": "shop",
+}
+
+
+def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
+                       taper: dict[tuple[int, int], float | None]) -> int:
+    """Gather a few props against the wall of each trade building.
+
+    Placed on the open cells the building's own perimeter touches, so the pile
+    leans on the wall rather than floating in the road, and capped at a few
+    per building so a workshop reads as busy rather than barricaded.
+    """
+    placed = 0
+    for bid, cells in sorted(tm.perimeter.items()):
+        category = TRADE_CLUTTER.get(bid.split("-")[0])
+        if category is None:
+            continue
+        spots: list[tuple[int, int]] = []
+        for x, z, side in cells:
+            dx, dz = next((d, e) for sd, d, e in SIDE_OFFSETS if sd == side)
+            ox, oz = x + dx, z + dz
+            if not (0 <= ox < tm.width and 0 <= oz < tm.depth):
+                continue
+            if tm.building[oz][ox] or tm.wall[oz][ox]:
+                continue
+            if taper.get((ox, oz), 0.0) is None:
+                continue
+            if (ox, oz, side) in [(dx_, dz_, s_) for dx_, dz_, s_ in
+                                  tm.doors.get(bid, [])]:
+                continue                      # keep the doorway clear
+            spots.append((ox, oz))
+        if not spots:
+            continue
+        rng.shuffle(spots)
+        for ox, oz in spots[:rng.randint(2, 4)]:
+            asset = b.palette.prop(category, rng)
+            if asset is None:
+                continue
+            drop = taper.get((ox, oz), 0.0) or 0.0
+            if scatter.one(asset, ox + 0.5, oz + 0.5, grade - drop,
+                           rng.randrange(24)):
+                placed += 1
+    return placed
+
+
+def _build_porches(b: Builder, tm, grade: float,
+                   taper: dict[tuple[int, int], float | None],
+                   storey_h: float) -> int:
+    """Roof the cell outside the primary door of each public building.
+
+    Every building is otherwise one flat-topped mass, and an entrance reads
+    as a hole punched in a wall. The porch sits high enough to clear the
+    signs hung on the same facade -- they occupy up to 2.65, so anything
+    lower would have its sign silently dropped for overlapping it.
+    """
+    piece = b.palette.resolve("roof_side")
+    if piece is None:
+        return 0
+    built = 0
+    for bid, doors in sorted(tm.doors.items()):
+        if bid.split("-")[0] not in PORCHED_KINDS or not doors:
+            continue
+        x, z, side = doors[0]
+        dx, dz = next((d, e) for sd, d, e in SIDE_OFFSETS if sd == side)
+        ox, oz = x + dx, z + dz
+        if not (0 <= ox < tm.width and 0 <= oz < tm.depth):
+            continue
+        if tm.building[oz][ox] or tm.wall[oz][ox]:
+            continue
+        drop = taper.get((ox, oz), 0.0)
+        if drop is None:
+            continue
+        # Slopes away from the wall it is attached to.
+        b.add(place_tile(piece, ox, oz, grade - drop + storey_h + 0.5,
+                         ROOF_EDGE_ROT[side]))
+        built += 1
+    return built
 
 
 def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
@@ -2120,6 +2256,7 @@ def _dress_districts(b: Builder, tm, grade: float,
                     pick = cart if rng.random() < 0.4 and cart else barrels
                     scatter.one(pick, x + 0.5, z + 0.5, here, rng.randrange(24))
 
+    _stack_trade_goods(b, tm, scatter, rng, grade, taper)
     # Last, so it can see everything already standing and not fight it.
     _dress_seams(b, tm, scatter, rng, grade, taper)
 

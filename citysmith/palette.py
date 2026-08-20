@@ -334,6 +334,12 @@ MEDIEVAL = Style(
             _prop(name=("Rock pebbles 01", "bush_berry_01", "Fern 01",
                         "Rubble pebbles spread out"), **_MED),
         ],
+        # Hedgerow along a field boundary: enclosure, and cover a scout can
+        # crawl behind. Low enough not to wall the field off visually.
+        "hedge": [
+            _prop(name=("bush_reg_01", "bush_wild_01", "bush_berry_01",
+                        "Bush - Medium", "bush_thorns_01"), **_MED),
+        ],
         "quay_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),
