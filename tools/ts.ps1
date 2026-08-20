@@ -16,6 +16,7 @@ does not rediscover them each time.
   .\tools\ts.ps1 pan    -X 800 -Y 300 -DX 0 -DY 500      # left drag, also short range
   .\tools\ts.ps1 fly    -Keys w -Hold 3.0                # long haul; WASD ramps
   .\tools\ts.ps1 clear                                   # empty the hand (right TAP)
+  .\tools\ts.ps1 cutbox                                  # N: slice into a mass
   .\tools\ts.ps1 newboard
   .\tools\ts.ps1 shot   -Name mystem
   .\tools\ts.ps1 zoom   -X 800 -Y 500 -Ticks -4
@@ -25,7 +26,7 @@ does not rediscover them each time.
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
     'focus','paste','click','drop','clear','move','newboard','shot',
-    'key','chord','fly','orbit','pan','rdrag','zoom','select','copyout','setclip')]
+    'key','chord','fly','orbit','pan','rdrag','zoom','cutbox','select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
@@ -172,6 +173,18 @@ switch ($Cmd) {
     Focus-TS
     Send-Chord $Keys ([int]($Hold*1000))
     "flew $Keys for $Hold s"
+  }
+  'cutbox'  {
+    # `N` toggles the cut box, which hides everything inside a region so you can
+    # look *into* solid geometry rather than at its faces.
+    #
+    # This is the check the wall probes were missing. A mesh that covers its own
+    # holes covers them from outside; cut the mass open and a blade reads as a
+    # blade immediately. It is also the way to see buried geometry -- the tile
+    # seams `verify` warns about -- and eventually interiors.
+    Focus-TS
+    Send-Chord "n" 150
+    "cutbox toggled"
   }
   'newboard' {
     Focus-TS
