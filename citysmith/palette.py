@@ -132,7 +132,15 @@ MEDIEVAL = Style(
             _tile(group="floor", tags=("floor",), exclude_tags=_OFF_THEME,
                   exclude=_WRONG_SETTING, **_MED, **_FLOOR_H, **_UNIT),
         ],
+        # Timber-framed village panel. Probed side by side against the
+        # megadungeon brick this replaces and against Rural boarding: the md
+        # blocks are dungeon masonry with deep relief, so they protrude at
+        # different depths and leave dark gaps at every join -- the jumbled
+        # seam that showed wherever a floor slab met a wall. Village is a flat
+        # plane, and it is the family our window already comes from, so a
+        # facade is now one kit instead of three meeting at each corner.
         "wall": [
+            _tile(name=("Village Roof Side Wall 01", "Village Roof Side Wall 02"), **_MED),
             _tile(name=("Wall (Plain, Small)", "md_wall_1x1_01", "md_wall_1x1_02"), **_MED),
             _tile(group=("wall", "Wall"), tags=("wall",), exclude_tags=_NOT_PLAIN_WALL,
                   exclude=_WALL_NAME_EXCLUDE + _WRONG_SETTING, height=2.0,
@@ -249,10 +257,13 @@ MEDIEVAL = Style(
         # once in group Corner at 2.0 tall, once in Combinations at 2.5. The
         # 2.5 variant is the wrong height for the wall course and would lift
         # every storey above it out of line.
+        # Rural timber corner first now that the wall is timber-framed: a
+        # dungeon-brick corner on a Village panel is two materials meeting at
+        # the one place a facade cannot hide a join.
         "wall_corner": [
+            _tile(name="Rural Corner", height=2.0, **_MED, **_UNIT),
             _tile(name=("md_wall_corner_1x1_01", "md_wall_corner_1x1_02"),
                   group="Corner", height=2.0, **_MED, **_UNIT),
-            _tile(name="Rural Corner", height=2.0, **_MED, **_UNIT),
             _tile(name="bg_wall_1x1_corner_01", height=2.0, **_MED, **_UNIT),
         ],
         # -- civic fabric -------------------------------------------------

@@ -462,6 +462,55 @@ def check_placements(builder, tm) -> list[str]:
     return problems
 
 
+def tile_interpenetration(builder) -> list[str]:
+    """Structural tiles that occupy the same space as each other.
+
+    Two solids sharing a volume is not a paste-time failure the way an
+    overlapping prop is -- TaleSpire keeps both -- it is a *visual* one: the
+    buried geometry shows through as a seam, and the seam moves as the camera
+    does. The case that prompted this was floors against walls. A storey was
+    pitched at the wall's height, so the wall column was continuous and every
+    upper floor slab drove a quarter of a cubic tile through the masonry
+    around its whole perimeter.
+    """
+    from .build import rotated_footprint
+
+    catalog = builder.palette.catalog
+    boxes: list[tuple[float, ...]] = []
+    for p in builder.placements:
+        asset = catalog.by_id(p.asset_id)
+        if asset is None or asset.kind == "prop":
+            continue
+        if asset.size_y < 0.4:
+            continue          # ground plane and thin trim: laid flush by design
+        sx, sz = rotated_footprint(asset, p.rot)
+        boxes.append((p.x, p.z, p.y, p.x + sx, p.z + sz, p.y + asset.size_y))
+
+    at: dict[tuple[int, int], list[int]] = {}
+    for i, bx in enumerate(boxes):
+        for cx in range(int(bx[0]), int(bx[3]) + 1):
+            for cz in range(int(bx[1]), int(bx[4]) + 1):
+                at.setdefault((cx, cz), []).append(i)
+
+    e = 1e-6
+    clashes = 0
+    for ids in at.values():
+        for a in range(len(ids)):
+            for b in range(a + 1, len(ids)):
+                p, q = boxes[ids[a]], boxes[ids[b]]
+                ox = min(p[3], q[3]) - max(p[0], q[0])
+                oz = min(p[4], q[4]) - max(p[1], q[1])
+                oy = min(p[5], q[5]) - max(p[2], q[2])
+                if ox > e and oz > e and oy > e and ox * oy * oz > 0.05:
+                    clashes += 1
+    if not clashes:
+        return []
+    return [
+        f"{clashes} pairs of structural tiles occupy the same space -- buried "
+        "geometry shows through as a seam that shifts with the camera"
+    ]
+
+
 def _prop_collisions(builder) -> list[str]:
     """Props whose colliders intersect another prop's.
 

@@ -1257,33 +1257,48 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
 
     for bid, cells in sorted(by_building.items()):
         base_floors = storeys_of(tm, bid, ceiling)
-        for level in range(base_floors, base_floors + TOWER_EXTRA_STOREYS):
+        # From base_floors + 1: the building's own ceiling already fills the
+        # gap below its top course, and laying another slab there put 36 decks
+        # inside each other.
+        for level in range(base_floors + 1, base_floors + 1 + TOWER_EXTRA_STOREYS):
             y = top + level * storey_h
             for (x, z) in sorted(cells):
-                b.add(place_tile(floor_tile, x, z, y))
+                # Below the course, in the gap the storey pitch leaves for it,
+                # exactly as the building's own floors sit.
+                b.add(place_tile(floor_tile, x, z, y - floor_tile.size_y))
                 for side, dx, dz in SIDE_OFFSETS:
                     if (x + dx, z + dz) not in cells:
                         b.add(place_wall(face, x, z, side, y))
 
-        crown = top + (base_floors + TOWER_EXTRA_STOREYS) * storey_h
+        # Above the top course, not level with it. Crowning at the course's
+        # own base put every merlon inside the wall it was supposed to sit on
+        # -- the same buried-geometry mistake as the rampart facing, one
+        # storey up.
+        top_course = top + (base_floors + TOWER_EXTRA_STOREYS) * storey_h
+        crown = top_course + face.size_y
         rings = _roof_rings(cells)
         side_piece = b.palette.resolve("roof_side")
         corner = b.palette.resolve("roof_corner")
         flat = b.palette.resolve("roof")
         rise = side_piece.size_y if side_piece is not None else 1.0
+        # Battlements round the parapet, roof only *inside* them. Doing both
+        # on the same cell put a merlon and a roof piece at one height, 20
+        # pairs of them intersecting -- and a hip roof laid over a parapet is
+        # not what a bell tower looks like anyway.
+        parapet = {c for c in cells
+                   if any((c[0] + dx, c[1] + dz) not in cells
+                          for _, dx, dz in SIDE_OFFSETS)}
         for (x, z) in sorted(cells):
+            if (x, z) in parapet:
+                if cap is not None:
+                    b.add(place_tile(cap, x, z, crown))
+                continue
             r = rings[(x, z)]
             fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
                          if rings.get((x + dx, z + dz), -1) < r)
             piece, rot = _roof_piece(fall, side_piece, corner, flat)
             if piece is not None:
-                b.add(place_tile(piece, x, z, crown + r * rise, rot))
-        # Battlements round the parapet make it a bell tower rather than a
-        # cottage that happens to be tall.
-        if cap is not None:
-            for (x, z) in sorted(cells):
-                if any((x + dx, z + dz) not in cells for _, dx, dz in SIDE_OFFSETS):
-                    b.add(place_tile(cap, x, z, crown))
+                b.add(place_tile(piece, x, z, crown + (r - 1) * rise, rot))
 
 
 def _lay_quays(b: Builder, tm, grade: float,
@@ -1429,8 +1444,15 @@ def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None
     a rampart, not a fence. The castle kit's wall pieces are 0.5 deep because
     they are curtain wall, authored to stand *on* a cell boundary; laying one
     per cell left a 0.5-tile slot between every pair of cells across the band,
-    so the whole circuit was daylight-striped. The mass is therefore built from
-    a full-cell block, and the thin pieces are hung on the faces that show.
+    so the whole circuit was daylight-striped. The mass is therefore a
+    full-cell block.
+
+    It was faced with the thin pieces for a while, and they did nothing: a
+    facing inset into its own cell sits entirely *inside* the block that fills
+    that cell. The interpenetration check found 928 of them buried, one whole
+    cubic tile of overlap each -- 928 assets nobody could ever see, on a map
+    already at its byte ceiling. The block's own face is what shows, and always
+    was.
 
     **The gates.** A gate is where a main street crosses, so its cells are as
     wide as the carriageway -- eighteen of them on the Forest Church map. They
@@ -1472,8 +1494,6 @@ def _lay_town_wall(b: Builder, tm, facing, top: float, wall_height: int) -> None
         for level in range(lintel_from if gate else 0, courses):
             y = top + level * course
             b.add(place_tile(core, x, z, y))
-            for s in shows:
-                b.add(place_wall(facing, x, z, s, y))
 
         crown = top + courses * course
         faces_out = any((x + dx, z + dz) in outside for _, dx, dz in SIDE_OFFSETS)
@@ -1660,7 +1680,21 @@ def build_from_tilemap(
     _lay_quays(b, tm, grade=floor.size_y, taper=taper)
 
     top = floor.size_y
-    storey_h = ext_wall.size_y
+    # A storey is a wall *plus the floor above it*. They were the same height
+    # for a long time, which meant the wall column was continuous and there was
+    # nowhere a floor slab could go without cutting through it: the floor fills
+    # its cell (1.0 x 0.5 x 1.0) and the wall sits on the cell boundary
+    # (1.0 x 2.0 x 0.5), so they shared a quarter of a cubic tile and the slab
+    # edge showed as a band slicing through the masonry.
+    #
+    # The pack says the same thing in its own vocabulary: all 75 of its
+    # Wall/Floor combination pieces are 2.5 tall, which is exactly wall plus
+    # floor. Pitching the storey at that leaves a floor-thick gap between wall
+    # courses, and the slab drops into it touching both and intersecting
+    # neither.
+    upper = palette.resolve("floor_upper")
+    deck = upper.size_y if upper is not None else 0.0
+    storey_h = ext_wall.size_y + deck
 
     # Building shells: perimeter only -- interiors are their own boards.
     #
@@ -1766,11 +1800,13 @@ def build_from_tilemap(
     # Upper-storey floors. Without these a multi-storey building is a hollow
     # box, and now that facades carry windows you can see straight through one
     # to the underside of the roof. One slab per cell per storey above ground.
-    upper = palette.resolve("floor_upper")
     if upper is not None:
         for bid, cells_xy in sorted(plan.items()):
-            for level in range(1, storeys_of(tm, bid, storeys)):
-                y = top + level * storey_h
+            # Through the top storey, not up to it: the highest slab is the
+            # ceiling the roof seats on. Each sits in the gap *below* its
+            # storey's wall course, resting on the wall beneath.
+            for level in range(1, storeys_of(tm, bid, storeys) + 1):
+                y = top + level * storey_h - deck
                 for x, z in sorted(cells_xy):
                     b.add(place_tile(upper, x, z, y))
 

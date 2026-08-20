@@ -364,7 +364,8 @@ def cmd_build(args) -> int:
     from .layout import Layout
     from .raster import rasterize
     from .build import build_from_tilemap
-    from .verify import check_placements, enclosed_voids, tilemap_svg, verify
+    from .verify import (check_placements, enclosed_voids, tile_interpenetration,
+                     tilemap_svg, verify)
 
     layout = Layout.load(args.layout)
     tm = rasterize(layout, bridges=not args.no_bridges)
@@ -405,6 +406,11 @@ def cmd_build(args) -> int:
         report.add("fail", "placements", problem)
     for problem in enclosed_voids(plan):
         report.add("fail", "chunk coverage", problem)
+    # Buried geometry is a finish problem, not a broken map: it shows as a
+    # seam rather than stopping anything working, so it warns rather than
+    # failing the build.
+    for problem in tile_interpenetration(builder):
+        report.add("warn", "tile seams", problem)
 
     print(f"\n{plan.assets_emitted:,} assets in {len(written)} chunk(s)"
           + (f"; {len(plan.skipped)} open-country chunk(s) skipped "
