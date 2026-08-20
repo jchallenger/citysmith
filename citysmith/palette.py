@@ -245,6 +245,12 @@ MEDIEVAL = Style(
         # its position in the footprint.
         "roof_side": [_tile(name="Thatched Roof 01", **_MED)],
         "roof_corner": [_tile(name="Thatched Roof Corner 01", **_MED)],
+        # A reflex corner is not an outside corner turned round -- it is its
+        # own piece, and the kit ships one. Half of all corner cells on this
+        # map are reflex (223 of 467), because an L-shaped plan has one at its
+        # elbow and rev 18 cut twenty of them. Building those with the outside
+        # piece is what made the roofscape look jumbled.
+        "roof_corner_inner": [_tile(name="Thatched Roof Inner Corner 01", **_MED)],
         "roof_chimney": [_tile(name="Thatched Chimney", **_MED)],
         # -- corners ------------------------------------------------------
         # An outside corner is one full-cell piece, not two wall segments
@@ -260,6 +266,13 @@ MEDIEVAL = Style(
         # Rural timber corner first now that the wall is timber-framed: a
         # dungeon-brick corner on a Village panel is two materials meeting at
         # the one place a facade cannot hide a join.
+        # The wall has the same reflex problem as the roof; this is the piece
+        # for it. Thin, because unlike an outside corner it does not fill a
+        # cell -- it tucks into the angle.
+        "wall_corner_inner": [
+            _tile(name="Rural Inner Corner", **_MED),
+            _tile(name="Tavern Inner Corner 2", **_MED),
+        ],
         "wall_corner": [
             _tile(name="Rural Corner", height=2.0, **_MED, **_UNIT),
             _tile(name=("md_wall_corner_1x1_01", "md_wall_corner_1x1_02"),

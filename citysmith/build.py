@@ -1291,6 +1291,7 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         rings = _roof_rings(cells)
         side_piece = b.palette.resolve("roof_side")
         corner = b.palette.resolve("roof_corner")
+        inner = b.palette.resolve("roof_corner_inner")
         flat = b.palette.resolve("roof")
         rise = side_piece.size_y if side_piece is not None else 1.0
         # Battlements round the parapet, roof only *inside* them. Doing both
@@ -1308,7 +1309,9 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
             r = rings[(x, z)]
             fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
                          if rings.get((x + dx, z + dz), -1) < r)
-            piece, rot = _roof_piece(fall, side_piece, corner, flat)
+            piece, rot = _roof_piece(fall, side_piece, corner, flat,
+                                     b.palette.resolve("roof_corner_inner"),
+                                     _is_reflex(cells, x, z, fall))
             if piece is not None:
                 b.add(place_tile(piece, x, z, crown + (r - 1) * rise, rot))
 
@@ -1393,6 +1396,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
 
     side = b.palette.resolve("roof_side")
     corner = b.palette.resolve("roof_corner")
+    inner = b.palette.resolve("roof_corner_inner")
     cap = b.palette.resolve("roof")
     chimney = b.palette.resolve("roof_chimney")
     rise = side.size_y if side is not None else 1.0
@@ -1419,7 +1423,8 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             # real edges instead of towards the corners of the box round it.
             fall = tuple(s for s, dx, dz in SIDE_OFFSETS
                          if rings.get((x + dx, z + dz), -1) < r)
-            piece, rot = _roof_piece(fall, side, corner, cap)
+            piece, rot = _roof_piece(fall, side, corner, cap, inner,
+                                     _is_reflex(cells, x, z, fall))
             if piece is not None:
                 b.add(place_tile(piece, x, z, y, rot))
 
@@ -1582,22 +1587,53 @@ def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
     return rings
 
 
-def _roof_piece(fall: tuple[str, ...], side, corner, cap):
+def _roof_piece(fall: tuple[str, ...], side, corner, cap, inner=None,
+                reflex: bool = False):
     """The roof asset and rotation for a cell, given the sides it slopes to.
 
-    Two adjacent falls are an outside corner; one is a straight slope; none is
-    a cell with roof all round it, which takes the flat cap. Three or four --
-    the tip of a one-cell-wide arm -- also takes the cap: no single hip piece
-    describes a point, and a slope there would show its open underside.
+    Two adjacent falls are a corner; one is a straight slope; none is a cell
+    with roof all round it, which takes the flat cap. Three or four -- the tip
+    of a one-cell-wide arm -- also takes the cap: no single hip piece describes
+    a point, and a slope there would show its open underside.
+
+    **A corner is only an *outside* corner if the block turns away there.** At
+    the elbow of an L the roof turns the other way, and that reflex corner has
+    its own piece in the kit. Half the corner cells on the Forest Church map
+    are reflex -- 223 of 467 -- and building them with the outside piece is
+    what made the roofscape read as jumbled.
     """
     if len(fall) == 1:
         return side, ROOF_EDGE_ROT[fall[0]]
     if len(fall) == 2:
         which = CORNER_BY_SIDES.get(frozenset(fall))
         if which is not None:
+            if reflex and inner is not None:
+                # The inner piece is authored facing into the angle, so it
+                # takes the rotation of the corner diagonally opposite.
+                return inner, ROOF_CORNER_ROT[_OPPOSITE_CORNER[which]]
             return corner or side, ROOF_CORNER_ROT[which]
         return side, ROOF_EDGE_ROT[fall[0]]   # opposite sides: a ridge run
     return cap, 0
+
+
+#: The corner facing the other way, used to orient a reflex piece.
+_OPPOSITE_CORNER = {"nw": "se", "ne": "sw", "sw": "ne", "se": "nw"}
+
+
+def _is_reflex(cells: set[tuple[int, int]], x: int, z: int,
+               fall: tuple[str, ...]) -> bool:
+    """Whether a two-fall corner turns *into* the block rather than away.
+
+    The test is the diagonal between the two falling sides: if the block
+    continues there, the roof wraps around an inside angle.
+    """
+    if len(fall) != 2:
+        return False
+    off = {"n": (0, -1), "e": (1, 0), "s": (0, 1), "w": (-1, 0)}
+    a, b = off[fall[0]], off[fall[1]]
+    if a[0] + b[0] == 0 and a[1] + b[1] == 0:
+        return False                      # opposite sides: a ridge, not a corner
+    return (x + a[0] + b[0], z + a[1] + b[1]) in cells
 
 
 #: Roof rotations, measured from a hand-built community cottage. A quarter
@@ -1784,8 +1820,14 @@ def build_from_tilemap(
         for x, z, side in cells:
             sides_at.setdefault((x, z), set()).add(side)
 
+        own = plan.get(bid, set())
         for (x, z), exposed in sides_at.items():
             corner = CORNER_BY_SIDES.get(frozenset(exposed))
+            # Same reflex problem as the roof: at the elbow of an L the wall
+            # turns into the building, so a full-cell outside corner there
+            # looks wrong and eats a floor tile the plan needs.
+            if corner is not None and _is_reflex(own, x, z, tuple(sorted(exposed))):
+                corner = None
             # A door has to keep a segment of its own, so a corner cell
             # carrying one falls back to per-side walls for the ground course
             # only; the storeys above it still get the corner piece.
