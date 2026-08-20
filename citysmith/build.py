@@ -1458,30 +1458,38 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
 
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
         roof_y = base_y + fl * storey_h
-        rings = _roof_rings(cells)
-        top_ring = max(rings.values())
 
-        chimney_at = None
-        if chimney is not None:
-            crown = [c for c in sorted(cells) if rings[c] == top_ring]
-            if crown:
-                chimney_at = crown[len(crown) // 2]
+        # One hip per rectangular wing, not one hip forced over the whole
+        # plan. A notched footprint gets a ridge per wing and a valley where
+        # they meet, which is what the building would really have and what
+        # this kit of 1x1 slopes and corners can actually express.
+        wings = roof_wings(cells)
+        chimney_wing = max(wings, key=len) if wings else set()
 
-        for (x, z) in sorted(cells):
-            r = rings[(x, z)]
-            y = roof_y + r * rise
-            if (x, z) == chimney_at and chimney is not None:
-                b.add(place_tile(chimney, x, z, y)); continue
-            # Which way the slope falls: the sides where the roof steps back
-            # down towards the eaves. Read off the ring numbers rather than
-            # off a bounding box, so an L-shaped terrace slopes towards its
-            # real edges instead of towards the corners of the box round it.
-            fall = tuple(s for s, dx, dz in SIDE_OFFSETS
-                         if rings.get((x + dx, z + dz), -1) < r)
-            piece, rot = _roof_piece(fall, side, corner, cap, inner,
-                                     _is_reflex(rings, x, z, fall))
-            if piece is not None:
-                b.add(place_tile(piece, x, z, y, rot))
+        for wing in wings:
+            rings = _roof_rings(wing)
+            top_ring = max(rings.values())
+
+            # One chimney per building, on its main wing.
+            chimney_at = None
+            if chimney is not None and wing is chimney_wing:
+                crown = [c for c in sorted(wing) if rings[c] == top_ring]
+                if crown:
+                    chimney_at = crown[len(crown) // 2]
+
+            for (x, z) in sorted(wing):
+                r = rings[(x, z)]
+                y = roof_y + r * rise
+                if (x, z) == chimney_at and chimney is not None:
+                    b.add(place_tile(chimney, x, z, y)); continue
+                # Which way the slope falls: the sides where the roof steps
+                # back down towards this wing's own eaves.
+                fall = tuple(s for s, dx, dz in SIDE_OFFSETS
+                             if rings.get((x + dx, z + dz), -1) < r)
+                piece, rot = _roof_piece(fall, side, corner, cap, inner,
+                                         _is_reflex(rings, x, z, fall))
+                if piece is not None:
+                    b.add(place_tile(piece, x, z, y, rot))
 
 
 #: Headroom to leave under a gate lintel, in tiles. Two tiles is 10 ft -- a
@@ -1612,6 +1620,70 @@ def _outside_the_wall(tm, mass: set[tuple[int, int]]) -> set[tuple[int, int]]:
         out.add((x, z))
         stack += [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)]
     return out
+
+
+def largest_rectangle(cells: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    """The biggest axis-aligned rectangle wholly inside ``cells``.
+
+    Largest-rectangle-under-a-histogram, the same method the rasteriser uses
+    to regularise a footprint -- reused here because a roof wants the same
+    answer the plan did.
+    """
+    if not cells:
+        return set()
+    xs = [c[0] for c in cells]
+    zs = [c[1] for c in cells]
+    x0, x1, z0, z1 = min(xs), max(xs), min(zs), max(zs)
+    w = x1 - x0 + 1
+    best = (0, 0, 0, 0, 0)                        # area, bx, bz, bw, bd
+    heights = [0] * w
+    for z in range(z0, z1 + 1):
+        for i in range(w):
+            heights[i] = heights[i] + 1 if (x0 + i, z) in cells else 0
+        stack: list[int] = []
+        i = 0
+        while i <= w:
+            h = heights[i] if i < w else 0
+            if not stack or h >= heights[stack[-1]]:
+                stack.append(i)
+                i += 1
+            else:
+                top = stack.pop()
+                left = stack[-1] + 1 if stack else 0
+                area = heights[top] * (i - left)
+                if area > best[0]:
+                    best = (area, x0 + left, z - heights[top] + 1,
+                            i - left, heights[top])
+    _, bx, bz, bw, bd = best
+    return {(bx + dx, bz + dz) for dx in range(bw) for dz in range(bd)}
+
+
+def roof_wings(cells: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+    """Split a footprint into the rectangles a roof should actually be built from.
+
+    A hip roof is a rectangle's answer to being roofed. Forced over a notched
+    plan it produces a valid height *field* and incoherent ridges: probed in
+    isolation, a 6x6 roofs as a clean pyramid while an L and a U come out with
+    ridge lines meeting at angles that resolve into nothing. No choice of
+    corner piece repairs that, because with axis-aligned notches the reflex
+    corner falls on a *vertex between* cells and no single cell can carry it.
+
+    A real L-shaped building has two ridges meeting at a valley. So the plan
+    is cut into maximal rectangles, largest first, and each is roofed as its
+    own hip -- which is both what the kit can express and what the building
+    would actually have.
+    """
+    wings: list[set[tuple[int, int]]] = []
+    left = set(cells)
+    while left:
+        rect = largest_rectangle(left)
+        if not rect:
+            break
+        wings.append(rect)
+        left -= rect
+    if left:                                      # anything a rectangle missed
+        wings.append(left)
+    return wings
 
 
 def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:

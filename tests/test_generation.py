@@ -1023,3 +1023,34 @@ def test_asset_without_explicit_offsets_uses_the_tile_convention():
               pack="p", group_tag="", tags=(), folder="",
               size_x=1.0, size_y=2.0, size_z=0.5)
     assert (a.off_x, a.off_y, a.off_z) == (0.5, 1.0, 0.25)
+
+
+def test_a_notched_plan_is_roofed_as_rectangular_wings():
+    """A hip roof is a rectangle's answer to being roofed.
+
+    Forced over a notched plan it gives a valid height field and incoherent
+    ridges -- probed in isolation, a 6x6 roofs as a clean pyramid while an L
+    and a U come out with ridge lines meeting at angles that resolve into
+    nothing. No corner piece repairs it: with axis-aligned notches the reflex
+    corner falls on a vertex *between* cells, so no cell can carry one.
+    """
+    from citysmith.build import roof_wings, largest_rectangle
+
+    square = {(x, z) for x in range(6) for z in range(6)}
+    assert len(roof_wings(square)) == 1, "a rectangle is already one hip"
+
+    ell = square - {(x, z) for x in (4, 5) for z in (0, 1)}
+    wings = roof_wings(ell)
+    assert len(wings) == 2, "an L is a main range and a wing"
+    assert set().union(*wings) == ell, "the wings must tile the plan exactly"
+    assert not (wings[0] & wings[1]), "and must not overlap"
+
+    # Every wing is genuinely rectangular, which is what the kit can express.
+    for w in wings:
+        xs = [c[0] for c in w]
+        zs = [c[1] for c in w]
+        assert len(w) == (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+
+    # Largest first, so the main mass keeps the dominant ridge.
+    assert len(wings[0]) >= len(wings[1])
+    assert largest_rectangle(set()) == set()
