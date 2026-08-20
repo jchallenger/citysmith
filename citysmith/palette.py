@@ -355,10 +355,18 @@ MEDIEVAL = Style(
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),
         ],
+        # Probed as six 3x3x2 masses side by side, which is what a rampart
+        # actually is. "castle wall corner 1x1 base" is a *corner* mesh: its
+        # relief is authored for two faces, so tiled across a whole mass it
+        # reads as stacked crates. Cave Wall and the ruins pillar leave deep
+        # gaps between columns. This one is flat, finely coursed and seams
+        # into itself -- the same family that was wrong for houses, because
+        # there it was a 0.5-deep curtain piece with dungeon relief and here
+        # it is a full-cell block.
         "city_wall_core": [
+            _tile(name="md_wall_1x1_diag_01", **_MED),
+            _tile(name="Sewer Wall - Small", **_MED),
             _tile(name="castle wall corner 1x1 base", **_MED),
-            _tile(name="Castle Ruins Wallbase 01", **_MED),
-            _tile(name="Cave Wall 01", **_MED),
         ],
         # Battlements, on the outer ring only, so the middle of the rampart
         # stays walkable as a wall-walk. Full-cell, unlike the half piece this
