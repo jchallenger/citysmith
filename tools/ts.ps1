@@ -12,18 +12,22 @@ does not rediscover them each time.
   .\tools\ts.ps1 drop
   .\tools\ts.ps1 key    -Keys "^c"
   .\tools\ts.ps1 orbit  -X 800 -Y 500 -DX 260 -DY 0
-  .\tools\ts.ps1 pan    -X 800 -Y 300 -DX 0 -DY 500      # short, precise
-  .\tools\ts.ps1 key    -Keys w -Hold 3.0                # long haul; WASD ramps
-  .\tools\ts.ps1 clear                                   # empty the hand
+  .\tools\ts.ps1 rdrag  -X 800 -Y 400 -DX 0 -DY 400      # precise; hand must be clear
+  .\tools\ts.ps1 pan    -X 800 -Y 300 -DX 0 -DY 500      # left drag, also short range
+  .\tools\ts.ps1 fly    -Keys w -Hold 3.0                # long haul; WASD ramps
+  .\tools\ts.ps1 clear                                   # empty the hand (right TAP)
+  .\tools\ts.ps1 newboard
+  .\tools\ts.ps1 shot   -Name mystem
   .\tools\ts.ps1 zoom   -X 800 -Y 500 -Ticks -4
   .\tools\ts.ps1 select -X 400 -Y 300 -X2 1200 -Y2 700
   .\tools\ts.ps1 copyout
 #>
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
-    'focus','paste','click','drop','clear','move','key','chord','orbit','pan','zoom','select','copyout','setclip')]
+    'focus','paste','click','drop','clear','move','newboard','shot',
+    'key','chord','fly','orbit','pan','rdrag','zoom','select','copyout','setclip')]
   [string]$Cmd,
-  [string]$Slab, [string]$Keys, [string]$Text,
+  [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
   [double]$Hold = 0.25,
   [switch]$Keep
@@ -95,6 +99,24 @@ function Focus-TS {
 }
 # A zero-duration synthetic click is swallowed by Unity's input polling, so
 # every press is down / short hold / up.
+# Every camera move in TaleSpire is a drag, and every drag has to be slow: the
+# camera *follows* the cursor rather than jumping to it, so a fast synthetic
+# drag outruns it and registers as nothing at all. One implementation, three
+# callers (left pan, right pan, middle orbit), so they cannot drift apart.
+function Drag([int]$px,[int]$py,[int]$dx,[int]$dy,[uint32]$down,[uint32]$up,
+              [int]$steps = 60,[int]$ms = 40) {
+  [TSIn]::Move($px,$py); Start-Sleep -Milliseconds 250
+  [TSIn]::mouse_event($down,0,0,0,[IntPtr]::Zero)
+  Start-Sleep -Milliseconds 250          # let the grab register before moving
+  for ($i = 1; $i -le $steps; $i++) {
+    [TSIn]::Move($px + [int]($dx*$i/$steps), $py + [int]($dy*$i/$steps))
+    Start-Sleep -Milliseconds $ms
+  }
+  Start-Sleep -Milliseconds 300          # let it settle before letting go
+  [TSIn]::mouse_event($up,0,0,0,[IntPtr]::Zero)
+  Start-Sleep -Milliseconds 600
+}
+
 function Press([int]$px,[int]$py,[uint32]$down,[uint32]$up,[int]$ms = -1) {
   if ($ms -lt 0) { $ms = [int]($Hold*1000) }
   [TSIn]::Move($px,$py); Start-Sleep -Milliseconds 120
@@ -143,45 +165,46 @@ switch ($Cmd) {
     "cleared"
   }
   'key'     { Focus-TS; Send-Chord $Keys ([int]($Hold*1000)); "sent $Keys" }
+  'fly'     {
+    # WASD moves the camera, but velocity eases up to a maximum, so the key has
+    # to be *held*: 0.4 s crawls a few tiles, 3 s crosses a 187-tile map. A tap
+    # looks like a dead binding. Use this for distance, a drag for precision.
+    Focus-TS
+    Send-Chord $Keys ([int]($Hold*1000))
+    "flew $Keys for $Hold s"
+  }
+  'newboard' {
+    Focus-TS
+    Press 1493 111 ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Seconds 2
+    Send-Chord "b" 150                     # a fresh board opens out of build mode
+    Start-Sleep -Milliseconds 600
+    "new board, building"
+  }
+  'shot'    { & (Join-Path $PSScriptRoot "grab.ps1") -Name $Name }
   'chord'   { Focus-TS; Send-Chord $Keys; "sent $Keys" }
   'orbit'   {
+    # Middle drag rotates the camera. Reviewing from one angle is how three
+    # wrong wall blocks got chosen, so this is not optional dressing.
     Focus-TS
-    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120
-    [TSIn]::mouse_event([TSIn]::MDOWN,0,0,0,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 250
-    $steps = 48
-    for ($i=1; $i -le $steps; $i++) {
-      [TSIn]::Move($X + [int]($DX*$i/$steps), $Y + [int]($DY*$i/$steps))
-      Start-Sleep -Milliseconds 35
-    }
-    Start-Sleep -Milliseconds 300
-    [TSIn]::mouse_event([TSIn]::MUP,0,0,0,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 400
+    Drag $X $Y $DX $DY ([TSIn]::MDOWN) ([TSIn]::MUP) 48 35
     "orbited $DX,$DY"
   }
   'pan'     {
-    # TaleSpire pans on a left drag over the board. Keys do not move the camera
-    # and the wheel only zooms, so this is the only way across a 187-tile map.
-    #
-    # It has to be done *slowly*. A 24-step drag at 16 ms outruns the camera's
-    # follow and the view snaps back; at 60 steps of 40 ms it tracks the cursor
-    # the whole way. Same family of mistake as a zero-duration click.
+    # Left drag pans. No pre-emptive right-click here: with an empty hand a
+    # right-click opens the asset library over the board.
     Focus-TS
-    # No pre-emptive right-click here: with an empty hand right-click opens the
-    # asset library over the board, which is worse than the stray stamp it was
-    # meant to prevent. `paste` empties its own hand instead.
-    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 250
-    [TSIn]::mouse_event([TSIn]::LDOWN,0,0,0,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 250          # let the grab register before moving
-    $steps = 60
-    for ($i=1; $i -le $steps; $i++) {
-      [TSIn]::Move($X + [int]($DX*$i/$steps), $Y + [int]($DY*$i/$steps))
-      Start-Sleep -Milliseconds 40
-    }
-    Start-Sleep -Milliseconds 300          # let it settle before letting go
-    [TSIn]::mouse_event([TSIn]::LUP,0,0,0,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 600
+    Drag $X $Y $DX $DY ([TSIn]::LDOWN) ([TSIn]::LUP)
     "panned $DX,$DY"
+  }
+  'rdrag'   {
+    # Right drag also pans, and more precisely -- but only with an empty hand.
+    # Holding right *with something in hand* is read as the start of a drag and
+    # the slab stays put, which is the same confusion that made `drop` look
+    # broken. Clear first.
+    Focus-TS
+    Drag $X $Y $DX $DY ([TSIn]::RDOWN) ([TSIn]::RUP)
+    "right-dragged $DX,$DY"
   }
   'zoom'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120; [TSIn]::mouse_event(0x800, 0, 0, ($Ticks*120), [IntPtr]::Zero); Start-Sleep -Milliseconds 400; "zoomed $Ticks" }
   'select'  {

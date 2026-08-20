@@ -204,7 +204,11 @@ shape instead of reading it. The rules that fall out:
   controls so every screenshot contains a failure to calibrate against.
   A plain solid cube (`md_stairblock_01`) has no relief to hide a hole in and
   nothing directional to line up; that is why it is the mass now.
-  `tools/wall_probe.py` and `tools/parapet_probe.py` build for this.
+  `tools/wall_probe.py` and `tools/parapet_probe.py` build for this, and
+  `tools/review.ps1 360` runs the pass so it is a command rather than a
+  resolution: fresh board, paste, four faces at a low oblique, then overhead
+  and eye level. Caveat -- a `--crop` makes its own straight edge, so it cannot
+  be used to review the *map edge*; crop inward, or fly the real border.
 
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**
