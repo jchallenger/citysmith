@@ -1921,6 +1921,62 @@ def building_distance(tm, limit: int = 8) -> dict[tuple[int, int], int]:
     return dist
 
 
+#: Lattice spacing, in tiles, for the two woodland fields. The canopy field is
+#: coarse enough to make stands and glades you can walk between; the stand
+#: field is finer, so a species patch is a copse rather than a whole quarter.
+CANOPY_CELL = 14
+STAND_CELL = 9
+
+
+def _value_noise(x: int, z: int, cell: int, salt: str) -> float:
+    """Smooth deterministic noise in 0..1, on a lattice of ``cell`` tiles.
+
+    Bilinear between hashed lattice corners with a smoothstep fade. Hashed
+    rather than seeded so it is stable across runs and independent of how many
+    random draws happened before it -- the same reason ``zlib.crc32`` is used
+    everywhere else here instead of ``hash``.
+    """
+    gx, gz = x // cell, z // cell
+    fx, fz = (x % cell) / cell, (z % cell) / cell
+
+    def corner(ax: int, az: int) -> float:
+        return (zlib.crc32(f"{salt}:{ax}:{az}".encode()) % 1000) / 999.0
+
+    sx = fx * fx * (3 - 2 * fx)
+    sz = fz * fz * (3 - 2 * fz)
+    top = corner(gx, gz) * (1 - sx) + corner(gx + 1, gz) * sx
+    bot = corner(gx, gz + 1) * (1 - sx) + corner(gx + 1, gz + 1) * sx
+    return top * (1 - sz) + bot * sz
+
+
+def canopy_at(x: int, z: int) -> float:
+    """How thick the wood is here, 0..1.
+
+    A flat scatter rate produced an orchard: nearest-neighbour spacing ran
+    3.4 to 4.9 tiles with almost no spread, and density measured 2.1-3.1%
+    at every distance from town. Woods are not uniform -- they have closed
+    stands and open glades, and the walk between them is most of what makes
+    a forest feel like somewhere. This is that variation.
+    """
+    return _value_noise(x, z, CANOPY_CELL, "canopy")
+
+
+def species_at(x: int, z: int) -> str:
+    """Which species dominates here.
+
+    Chosen from a smooth field rather than per tree, so neighbours agree and
+    the wood grows in stands. Drawing per tree gave species agreement of 46%
+    between nearest neighbours -- exactly the random rate, which is what
+    salt-and-pepper looks like when you measure it.
+    """
+    v = _value_noise(x, z, STAND_CELL, "stand")
+    if v < 0.55:
+        return "tree_conifer"
+    if v < 0.88:
+        return "tree_broadleaf"
+    return "tree_dead"
+
+
 def _dress_seams(b: Builder, tm, scatter: "Scatter", rng, grade: float,
                  taper: dict[tuple[int, int], float | None]) -> None:
     """Break the hard tile line where one surface meets another.
@@ -2183,8 +2239,21 @@ def _dress_districts(b: Builder, tm, grade: float,
                     scatter.one(straw, x + 0.5, z + 0.5, here, rng.randrange(24))
 
             elif surf == R.GROUND and not near(x, z, frozenset({R.STREET, R.PLAZA})):
+                # Density follows the canopy field, so the wood closes up in
+                # stands and opens into glades instead of covering the map at
+                # one flat rate.
+                thickness = canopy_at(x, z)
+                # Cumulative bands, not independent thresholds. These are the
+                # arms of one elif ladder, so each has to sit *above* the last
+                # or it is unreachable -- with the tree band reaching 0.24 in a
+                # thick stand and ferns fixed at 0.15, undergrowth stopped
+                # appearing in exactly the places it should be thickest, and
+                # the fern count fell to 88 for the whole map.
+                p_tree = 0.010 + 0.230 * thickness ** 3
+                p_stump = p_tree + 0.006
+                p_fern = p_stump + 0.030 + 0.130 * thickness ** 2
                 roll = rng.random()
-                if roll < 0.04:
+                if roll < p_tree:
                     # A forest of one species is a plantation. Weighted so
                     # conifer still dominates -- this is pine country -- with
                     # broadleaf for relief and the occasional dead trunk,
@@ -2198,24 +2267,32 @@ def _dress_districts(b: Builder, tm, grade: float,
                             scatter.one(yard[rng.randrange(len(yard))],
                                         x + 0.5, z + 0.5, here, rng.randrange(24))
                         continue
-                    pick = rng.random()
-                    jx, jz = rng.uniform(-0.25, 0.25), rng.uniform(-0.25, 0.25)
+                    jx, jz = rng.uniform(-0.35, 0.35), rng.uniform(-0.35, 0.35)
                     cx, cz = x + 0.5 + jx, z + 0.5 + jz
                     rot = rng.randrange(24)
-                    if pick < 0.62:
+                    # The stand decides the species; a one-in-eight stray
+                    # keeps a stand from reading as a plantation.
+                    role = (species_at(x, z) if rng.random() > 0.12
+                            else ("tree_broadleaf", "tree_conifer",
+                                  "tree_dead")[rng.randrange(3)])
+                    if role == "tree_conifer":
+                        # Thick stands grow tall; an open glade holds scrub.
                         _plant_conifer(scatter, b.palette, cx, cz, here, rot,
-                                       tall=rng.random() < 0.35)
+                                       tall=rng.random() < 0.2 + 0.5 * thickness)
                     else:
-                        role = "tree_broadleaf" if pick < 0.92 else "tree_dead"
                         tree = b.palette.resolve(role)
                         if tree is not None:
                             scatter.one(tree, cx, cz, here, rot)
-                elif roll < 0.045 and pine_stump is not None:
+                elif roll < p_stump and pine_stump is not None:
                     # The stump stands alone as an occasional cut tree.
                     scatter.one(pine_stump, x + 0.5, z + 0.5, here, rng.randrange(24))
-                elif roll < 0.07 and fern_small is not None:
+                elif fern_small is not None and roll < p_fern:
+                    # Undergrowth belongs under the canopy, not spread evenly
+                    # over open pasture.
                     fern = fern_big if rng.random() < 0.3 and fern_big else fern_small
-                    scatter.one(fern, x + 0.5, z + 0.5, here, rng.randrange(24))
+                    scatter.one(fern, x + 0.5 + rng.uniform(-0.3, 0.3),
+                                z + 0.5 + rng.uniform(-0.3, 0.3),
+                                here, rng.randrange(24))
 
             elif surf == R.PLAZA:
                 # A square with nothing on it is worse than no square. Goods

@@ -939,3 +939,40 @@ def test_packing_respects_the_byte_cap_not_just_the_asset_count():
         build_mod.MAX_COMPRESSED_BYTES = original
     assert len(tight.chunks) > len(generous.chunks), (
         "a byte cap the run cannot meet must force more slabs")
+
+
+def test_scatter_bands_are_cumulative_not_independent():
+    """The woodland thresholds are arms of one elif ladder.
+
+    Each band must sit above the last or it is unreachable. Written as
+    independent probabilities, the tree band reached 0.24 in a thick stand
+    while ferns were fixed at 0.15 -- so undergrowth stopped appearing in
+    exactly the places it should be thickest, and the whole map fell to 88
+    ferns without anything reporting a problem.
+    """
+    for thickness in (0.0, 0.25, 0.5, 0.75, 1.0):
+        p_tree = 0.010 + 0.230 * thickness ** 3
+        p_stump = p_tree + 0.006
+        p_fern = p_stump + 0.030 + 0.130 * thickness ** 2
+        assert p_tree < p_stump < p_fern <= 1.0
+
+
+def test_woodland_grows_in_stands_not_salt_and_pepper():
+    """Species come from a smooth field, so neighbours agree.
+
+    Drawing per tree gave nearest-neighbour species agreement of 46% --
+    exactly the random rate, which is what salt-and-pepper measures as.
+    """
+    from citysmith.build import species_at, canopy_at
+
+    agree = total = 0
+    for z in range(0, 120, 3):
+        for x in range(0, 120, 3):
+            total += 1
+            if species_at(x, z) == species_at(x + 3, z):
+                agree += 1
+    assert agree / total > 0.7, "species field is not coherent enough to form stands"
+
+    # and the canopy varies rather than sitting flat
+    vals = [canopy_at(x, z) for z in range(0, 120, 7) for x in range(0, 120, 7)]
+    assert max(vals) - min(vals) > 0.6, "canopy field is too flat to make glades"
