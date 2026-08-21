@@ -19,7 +19,7 @@ Shots land in out\flyby\<Name>-<view>.jpg.
 param(
   [Parameter(Mandatory=$true)][ValidateSet('360','flyby')][string]$Recipe,
   [Parameter(Mandatory=$true)][string]$Name,
-  [string]$Slab,
+  [string[]]$Slab,
   [int]$X = 700, [int]$Y = 600,
   [int]$ZoomOut = 6
 )
@@ -38,9 +38,12 @@ switch ($Recipe) {
     # An isolated board, every time. Sharing a board with the last probe is how
     # a stray stamp gets read as a defect in the thing being probed.
     TS newboard
-    TS paste -Slab $Slab -X $X -Y $Y
-    Start-Sleep -Seconds 3
-    TS clear -X $X -Y $Y
+    foreach ($s in $Slab) {
+      TS paste -Slab $s -X $X -Y $Y
+      Start-Sleep -Seconds 3
+      TS clear -X $X -Y $Y
+      Start-Sleep -Seconds 1
+    }
     1..$ZoomOut | ForEach-Object { TS zoom -X 800 -Y 450 -Ticks -12 }
 
     # Four faces at a low oblique. Low, because that is the angle a hole in a
