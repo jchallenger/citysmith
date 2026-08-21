@@ -17,6 +17,8 @@ does not rediscover them each time.
   .\tools\ts.ps1 fly    -Keys w -Hold 3.0                # long haul; WASD ramps
   .\tools\ts.ps1 clear                                   # empty the hand (right TAP)
   .\tools\ts.ps1 cutbox                                  # N: slice into a mass
+  .\tools\ts.ps1 plane                                   # G: build plane on/off
+  .\tools\ts.ps1 planestate                              # is it on? (reads the icon)
   .\tools\ts.ps1 newboard
   .\tools\ts.ps1 shot   -Name mystem
   .\tools\ts.ps1 zoom   -X 800 -Y 500 -Ticks -4
@@ -26,7 +28,8 @@ does not rediscover them each time.
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
     'focus','paste','hold','commit','raise','lower','click','drop','clear','move','newboard','shot',
-    'key','chord','fly','orbit','pan','rdrag','zoom','cutbox','select','copyout','setclip')]
+    'key','chord','fly','orbit','pan','rdrag','zoom','cutbox','plane','planestate',
+    'select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
@@ -145,6 +148,12 @@ switch ($Cmd) {
     "pasted $Slab at $X,$Y"
   }
   'hold'    {
+    # Refuse to hold anything while the build plane is up. It is the one piece
+    # of state that silently changes where a paste lands, and it survives making
+    # a new board, so "I did not turn it on this session" is not a defence.
+    $plane = & $PSCommandPath planestate
+    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+
     # Ctrl+V only: the slab arrives in hand at the cursor and is NOT committed.
     # Paste is cursor-anchored *and snaps to whatever is under the cursor*, so
     # once one chunk is down the next one hovering over that new terrain can
@@ -215,6 +224,42 @@ switch ($Cmd) {
     Focus-TS
     Send-Chord "n" 150
     "cutbox toggled"
+  }
+  'plane'   {
+    # `G` toggles the build plane: a grid at a fixed elevation that a paste
+    # snaps to *instead of* to the terrain under the cursor. Shift+scroll moves
+    # it. Both survive making a new board.
+    #
+    # This is a paste-time fault with the exact shape of "grass above grass": a
+    # chunk lands a course above its neighbours and nothing in the slab data is
+    # wrong. It is easy to leave on by accident -- pressing `g` while probing
+    # keybinds is enough -- and the only tell is a small orange highlight on one
+    # toolbar icon.
+    Focus-TS
+    Send-Chord "g" 150
+    "build plane toggled"
+  }
+  'planestate' {
+    # Read the G icon rather than remembering. TaleSpire highlights an active
+    # tool with an orange box, so the whole icon square is averaged: a single
+    # pixel lands on the white glyph and reads the same either way. Calibrated
+    # in-game -- off is rgb(71,71,71), on is rgb(173,117,73), so red minus blue
+    # separates them by a mile.
+    Focus-TS
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object System.Drawing.Bitmap 40,40
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen(908, 212, 0, 0, (New-Object System.Drawing.Size 40,40))
+    $r = 0; $g = 0; $b = 0; $n = 0
+    for ($y = 0; $y -lt 40; $y += 2) {
+      for ($x = 0; $x -lt 40; $x += 2) {
+        $c = $bmp.GetPixel($x, $y); $r += $c.R; $g += $c.G; $b += $c.B; $n++
+      }
+    }
+    $gfx.Dispose(); $bmp.Dispose()
+    $r = [int]($r/$n); $g = [int]($g/$n); $b = [int]($b/$n)
+    if ($r - $b -gt 50) { "build plane ON  (rgb($r,$g,$b)) -- a paste will snap to it, not to the ground" }
+    else                { "build plane off (rgb($r,$g,$b))" }
   }
   'newboard' {
     Focus-TS

@@ -139,6 +139,17 @@ actually matters, all confirmed in-game:
   right. Pan so the paste point is at the centre of the client area (~955, 546)
   first -- near the screen edge the cursor's ground projection is at a grazing
   angle and the snap is harder to judge.
+- **`G` raises a build plane, and a paste snaps to it instead of the ground.**
+  A grid at a fixed elevation; Shift+scroll moves it; **both survive making a
+  new board.** While it is up a chunk lands a course above its neighbours and
+  nothing in the slab data is wrong -- which is exactly the shape of "grass
+  above grass", arriving at paste time. It is trivial to leave on by accident
+  (pressing `g` while probing keybinds does it) and the only tell is a small
+  orange highlight on one toolbar icon and a faint orange grid out over the
+  void. `ts.ps1 planestate` reads the icon rather than trusting memory -- the
+  whole icon square is averaged, because a single pixel lands on the white
+  glyph and reads the same either way; off is rgb(71,71,71), on is
+  rgb(173,117,73). `ts.ps1 hold` refuses to pick up a slab while it is up.
 - **Empty the hand after every paste** -- see the right-click tap above. A
   right-click with an empty hand opens the asset library over the board, so
   clear once, deliberately, rather than pre-emptively before each camera move.
