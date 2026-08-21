@@ -146,6 +146,20 @@ actually matters, all confirmed in-game:
   Shift, which is the horizontal one -- so every "nudge it down a course" test
   in a whole session was sliding the slab sideways and reading the result as
   evidence about height. `ts.ps1 nudge -Mode vertical|plane|rotate`.
+- **Ctrl + right-click drag controls elevation** -- the working plane the build
+  tools and the X+drag selection are cut at. `ts.ps1 elev`. Worth knowing
+  before reverse-engineering anything else: several tools behave as if they are
+  broken when the plane is simply somewhere unexpected.
+- **Copy-out is only half solved.** `X`+drag draws a selection marquee and the
+  submenu that appears offers a button whose own tooltip reads "copies a slab
+  into the clipboard" -- but driven synthetically it returns a valid *empty*
+  slab (31 bytes) over open ground, and real content only when the region
+  contains a building. The marquee draws, the button is the right button, and
+  the selection is nevertheless empty. Not yet understood; a hand-made
+  selection copies terrain fine, so this is a driving problem rather than a
+  game limitation. Copy-out matters because it is the *only* way to read what
+  actually landed on the board rather than what was written to the file, and
+  that distinction has been the crux of a whole session.
 - **The right-hand vertical track is a camera *height* slider, and it goes far
   higher than the wheel.** Zoom-out is capped well short of a 187-tile map;
   raising the camera is how a whole quarter fits one frame, which is what a

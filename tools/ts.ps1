@@ -18,6 +18,7 @@ does not rediscover them each time.
   .\tools\ts.ps1 clear                                   # empty the hand (right TAP)
   .\tools\ts.ps1 cutbox                                  # N: slice into a mass
   .\tools\ts.ps1 camera -DY -260                         # raise the camera; wide view
+  .\tools\ts.ps1 elev   -X 900 -Y 450 -DY 200            # ctrl+right drag: elevation
   .\tools\ts.ps1 plane                                   # G: build plane on/off
   .\tools\ts.ps1 planestate                              # is it on? (reads the icon)
   .\tools\ts.ps1 newboard
@@ -29,7 +30,7 @@ does not rediscover them each time.
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
     'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','shot',
-    'key','chord','fly','orbit','pan','rdrag','zoom','camera','cutbox','plane','planestate',
+    'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','cutbox','plane','planestate',
     'select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
@@ -357,6 +358,21 @@ switch ($Cmd) {
     Focus-TS
     Drag $X $Y $DX $DY ([TSIn]::RDOWN) ([TSIn]::RUP)
     "right-dragged $DX,$DY"
+  }
+  'elev'    {
+    # Ctrl + right-click drag controls elevation. Without it the working plane
+    # -- which is what an X+drag selection is cut at -- stays wherever it was
+    # last left, so a selection over open ground can come back completely
+    # empty: the box is in the air above the grass. Copy-out kept returning a
+    # 31-byte empty slab for exactly this reason.
+    Focus-TS
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200
+    [TSIn]::keybd_event(0x11,[byte][TSIn]::MapVirtualKey(0x11,0),0,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 200
+    Drag $X $Y $DX $DY ([TSIn]::RDOWN) ([TSIn]::RUP) 40 30
+    [TSIn]::keybd_event(0x11,[byte][TSIn]::MapVirtualKey(0x11,0),2,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 400
+    "elevation dragged $DY"
   }
   'zoom'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120; [TSIn]::mouse_event(0x800, 0, 0, ($Ticks*120), [IntPtr]::Zero); Start-Sleep -Milliseconds 400; "zoomed $Ticks" }
   'select'  {
