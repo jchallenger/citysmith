@@ -118,10 +118,14 @@ def _chunk_table(plan, stem: str) -> str:
         name = (f"{stem}.slab.txt" if single
                 else f"{stem}-{chunk.label}.slab.txt")
         span = f" ({len(chunk.covers)} cells)" if len(chunk.covers) > 1 else ""
+        # A building's whole shell is in exactly one structure file, so the
+        # count says what a paste that skips this file will leave as bare
+        # floors -- which is how a missing fifth paste was first noticed.
+        held = f", {chunk.buildings} buildings" if chunk.buildings else ""
         lines.append(
             f"  {chunk.region:>12}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
             f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets"
-            f"{span}  {name}"
+            f"{span}{held}  {name}"
         )
     for chunk in plan.skipped:
         lines.append(

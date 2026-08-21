@@ -422,6 +422,13 @@ class Builder:
         #: emitted it, and nothing about a finished placement can recover it.
         self.layer_of: list[str] = []
         self._layer = LANDSCAPE
+        #: Which building each placement belongs to, parallel to ``placements``
+        #: (empty for anything that is not part of one). Set by the per-building
+        #: passes through :attr:`group`. Chunking keeps a group together: a
+        #: shell split across two slabs is a building that arrives in halves
+        #: when one of them is not pasted, and the barracks did.
+        self.group_of: list[str] = []
+        self.group = ""
 
     @contextlib.contextmanager
     def layer(self, name: str):
@@ -449,6 +456,7 @@ class Builder:
     def add(self, placement: Placement, *, prop: bool = False) -> None:
         self.placements.append(placement)
         self.layer_of.append(self._layer)
+        self.group_of.append(self.group)
         if prop:
             self.stats.props += 1
             self.prop_ids.add(placement.asset_id)
@@ -623,13 +631,32 @@ class Builder:
             built.add((min(rows - 1, max(0, int((q.z - oz) // size))),
                        min(cols - 1, max(0, int((q.x - ox) // size)))))
 
+        # **A building goes into one chunk, whole.** Placements are assigned
+        # to grid cells by position, and a building that straddles a grid
+        # line had its shell cut along it: the barracks on Forest Church went
+        # 17 pieces into one structure file and 2 into the other. Every
+        # placement that belongs to a building is assigned by the building's
+        # low corner instead, so the whole shell -- walls, floors, roof, the
+        # sign on the door -- rides in the same slab.
+        group_of_moved: dict[int, str] = {}
+        anchors: dict[str, tuple[float, float]] = {}
+        for pl, g in zip(self.placements, self.group_of):
+            if not g:
+                continue
+            q = moved[id(pl)]
+            group_of_moved[id(q)] = g
+            ax, az = anchors.get(g, (q.x, q.z))
+            anchors[g] = (min(ax, q.x), min(az, q.z))
+        anchor_of = {pid: anchors[g] for pid, g in group_of_moved.items()}
+
         kept: list[SlabChunk] = []
         skipped: list[SlabChunk] = []
         for name, group in groups:
             buckets: dict[tuple[int, int], list[Placement]] = {}
             for p in group:
-                c = min(cols - 1, max(0, int((p.x - ox) // size)))
-                r = min(rows - 1, max(0, int((p.z - oz) // size)))
+                ax, az = anchor_of.get(id(p), (p.x, p.z))
+                c = min(cols - 1, max(0, int((ax - ox) // size)))
+                r = min(rows - 1, max(0, int((az - oz) // size)))
                 buckets.setdefault((r, c), []).append(p)
 
             cells: list[_Cell] = []
@@ -639,7 +666,7 @@ class Builder:
                     ox + c * size, oz + r * size,
                     min(ox + (c + 1) * size, ex), min(oz + (r + 1) * size, ez),
                     items,
-                ), max_assets))
+                ), max_assets, anchor_of))
             cells.sort(key=lambda cell: (cell.row, cell.col, cell.quad))
 
             made = [
@@ -653,6 +680,8 @@ class Builder:
                         and _is_open_country(
                             cell.items, terrain, self.prop_ids, grade, baseline)),
                     layer=name,
+                    buildings=len({group_of_moved[id(p)] for p in cell.items
+                                   if id(p) in group_of_moved}),
                 )
                 for cell in cells
             ]
@@ -858,6 +887,7 @@ def _fuse(run: list["SlabChunk"]) -> "SlabChunk":
         # the written files lose their layer while the skipped ones kept it.
         layer=first.layer,
         covers=covers,
+        buildings=sum(ch.buildings for ch in run),
     )
 
 
@@ -885,6 +915,10 @@ class SlabChunk:
     #: Grid cells this chunk covers. One cell normally; packing
     #: fuses many, and the map must still mark all of them.
     covers: tuple[tuple[int, int], ...] = ()
+    #: How many buildings have their shell in this chunk. A building is never
+    #: split across chunks, so the structure files' counts add up to the
+    #: town's, and a paste missing one file is diagnosable from the table.
+    buildings: int = 0
 
     @property
     def label(self) -> str:
@@ -1139,7 +1173,8 @@ def _is_open_country(
     return True
 
 
-def _subdivide(cell: _Cell, max_assets: int) -> list[_Cell]:
+def _subdivide(cell: _Cell, max_assets: int,
+               anchor_of: dict[int, tuple[float, float]] | None = None) -> list[_Cell]:
     """Halve a cell until each piece holds at most ``max_assets`` placements.
 
     Splitting is quadtree-style: both axes at once where both span more than a
@@ -1147,7 +1182,16 @@ def _subdivide(cell: _Cell, max_assets: int) -> list[_Cell]:
     is returned as-is even if it is still over budget -- there is nowhere left
     to cut, and the encoder refuses that slab with a clearer message than an
     endless subdivision would give.
+
+    ``anchor_of`` maps a placement (by ``id``) to the point it is sorted by --
+    its building's low corner -- so a building is never cut by the quadtree
+    either. Placements without one sort by their own position.
     """
+    anchor_of = anchor_of or {}
+
+    def at(p: Placement) -> tuple[float, float]:
+        return anchor_of.get(id(p), (p.x, p.z))
+
     out: list[_Cell] = []
     stack = [cell]
     while stack:
@@ -1166,8 +1210,8 @@ def _subdivide(cell: _Cell, max_assets: int) -> list[_Cell]:
                        + (_QUAD_X[xi] if len(xs) > 1 else ""))
                 items = [
                     p for p in cur.items
-                    if (len(xs) == 1 or (p.x < x1 if xi == 0 else p.x >= x0))
-                    and (len(zs) == 1 or (p.z < z1 if zi == 0 else p.z >= z0))
+                    if (len(xs) == 1 or (at(p)[0] < x1 if xi == 0 else at(p)[0] >= x0))
+                    and (len(zs) == 1 or (at(p)[1] < z1 if zi == 0 else at(p)[1] >= z0))
                 ]
                 if items:
                     stack.append(_Cell(
@@ -1787,6 +1831,7 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         by_building.setdefault(bid, set()).add(cell)
 
     for bid, cells in sorted(by_building.items()):
+        b.group = bid
         base_floors = storeys_of(tm, bid, ceiling)
         # From base_floors + 1: the building's own ceiling already fills the
         # gap below its top course, and laying another slab there put 36 decks
@@ -1962,6 +2007,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
     rise = side.size_y if side is not None else 1.0
 
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
+        b.group = tm.building[min(cells)[1]][min(cells)[0]]
         roof_y = base_y + fl * storey_h
 
         # One hip per rectangular wing, not one hip forced over the whole
@@ -2599,6 +2645,7 @@ def build_from_tilemap(
         }
 
         for bid, cells in tm.perimeter.items():
+            b.group = bid
             floors = storeys_of(tm, bid, storeys)
             civic = bid.split("-")[0] in CIVIC_KINDS
             if civic:
@@ -2666,6 +2713,7 @@ def build_from_tilemap(
         # to the underside of the roof. One slab per cell per storey above ground.
         if upper is not None:
             for bid, cells_xy in sorted(plan.items()):
+                b.group = bid
                 # Through the top storey, not up to it: the highest slab is the
                 # ceiling the roof seats on. Each sits in the gap *below* its
                 # storey's wall course, resting on the wall beneath.
@@ -2680,8 +2728,10 @@ def build_from_tilemap(
         if roof_asset is not None:
             _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
         _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
+        b.group = ""
         _lay_town_wall(b, tm, town_wall, top, wall_tiles)
 
+    b.group = ""
     _dress_districts(b, tm, grade=floor.size_y, taper=taper)
 
     return b
@@ -2971,6 +3021,7 @@ def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
     """
     placed = 0
     for bid, cells in sorted(tm.perimeter.items()):
+        b.group = bid
         category = TRADE_CLUTTER.get(bid.split("-")[0])
         if category is None:
             continue
@@ -3017,6 +3068,7 @@ def _build_porches(b: Builder, tm, grade: float,
         return 0
     built = 0
     for bid, doors in sorted(tm.doors.items()):
+        b.group = bid
         if bid.split("-")[0] not in PORCHED_KINDS or not doors:
             continue
         x, z, side = doors[0]
@@ -3052,6 +3104,7 @@ def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
         return
 
     for bid, doors in sorted(tm.doors.items()):
+        b.group = bid
         if bid.split("-")[0] not in SIGNED_KINDS or not doors:
             continue
         x, z, side = doors[0]
@@ -3118,6 +3171,7 @@ def _dress_districts(b: Builder, tm, grade: float,
     # landscape. This pass is the one place the two mix.
     with b.layer(STRUCTURE):
         _hang_signs(b, tm, scatter, grade, taper)
+        b.group = ""
     near_town = building_distance(tm)
     market = [b.palette.resolve("market_goods", v) for v in range(4)]
     market = [m for m in market if m is not None]
@@ -3264,6 +3318,7 @@ def _dress_districts(b: Builder, tm, grade: float,
 
     with b.layer(STRUCTURE):
         _stack_trade_goods(b, tm, scatter, rng, grade, taper)
+        b.group = ""
     # Last, so it can see everything already standing and not fight it.
     _dress_seams(b, tm, scatter, rng, grade, taper)
 

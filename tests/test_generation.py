@@ -892,6 +892,50 @@ def test_wall_towers_rise_above_the_curtain_in_the_same_block():
         assert abs(tops[c] - want) < 1e-6, f"tower at {c} is {tops[c]}, not {want}"
 
 
+def test_a_building_straddling_a_chunk_line_stays_in_one_chunk():
+    """Chunking by position cut a building's shell along the grid line: the
+    barracks on Forest Church went 17 pieces into one structure file and 2 into
+    the other, and a paste that misses a file leaves a bare floor with half a
+    house beside it. A building is assigned by its own low corner, whole."""
+    import collections
+    import math
+
+    from citysmith.build import STRUCTURE, build_from_tilemap, footprints, placed_bounds
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = TileMap.blank(48, 12)
+    # One 6x4 house across the x=24 grid line of a 24-tile chunk lattice.
+    for x in range(21, 27):
+        for z in range(4, 8):
+            tm.building[z][x] = "house-0001"
+            tm.surface[z][x] = FLOOR
+    tm.floors["house-0001"] = 2
+    _find_perimeters(tm, None)
+    _place_doors(tm, None)
+    b = build_from_tilemap(tm, palette, storeys=2, roofs=True)
+    plan = b.chunk_plan(max_assets=9000, chunk_tiles=24, pack=False)
+
+    cells = set(footprints(tm)["house-0001"])
+    byid = b.byid
+    where = collections.Counter()
+    for ch in plan.chunks:
+        if ch.layer != STRUCTURE:
+            continue
+        for p in ch.slab.placements:
+            if plan.is_marker(p) or p.asset_id in b.prop_ids:
+                continue
+            a = byid[p.asset_id]
+            x0, z0, x1, z1 = placed_bounds(a, p)
+            if (int(math.floor((x0 + x1) / 2)), int(math.floor((z0 + z1) / 2))) in cells:
+                where[ch.label] += 1
+    assert len(where) == 1, f"the shell is split across chunks: {dict(where)}"
+    assert sum(ch.buildings for ch in plan.chunks if ch.layer == STRUCTURE) == 1
+    assert all(ch.buildings == 0 for ch in plan.chunks if ch.layer != STRUCTURE)
+
+
 def test_a_plank_is_decked_over_running_water():
     """A plank used to be cobble at grade with a tile of air under it and no bed
     below. Now the river runs on under a deck laid by its top, flush with the
