@@ -164,6 +164,14 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
     for b in paved:
         sheltered |= {n for n in around(b) if n in border}
 
+    # **A sheltered block is not lowered either, not just not bitten.**
+    # Only land may fall away at the edge. A road and a river surface have to
+    # stay level: dropping the outer ring regardless put a half-tile step across
+    # the carriageway two tiles from the border, and a ledge straight across the
+    # river -- 142 of this map's water cells sat half a tile below the other
+    # 1,672, which is a waterfall running the width of an estuary. Water is in
+    # `paved` for exactly this reason: it is a surface, not ground.
+
     bite = {b for b in border - sheltered
             if (zlib.crc32(f"edge:{b[0]}:{b[1]}".encode()) >> 8) % 4 == 0}
 
@@ -189,7 +197,7 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
         break
 
     out: dict[tuple[int, int], float | None] = {}
-    for (bx, bz) in sorted(border):
+    for (bx, bz) in sorted(border - sheltered):
         # **The step belongs at the edge, and nowhere else.** Stepping per ring
         # gave terraces up to four deep; flattening them to one step instead
         # spread that single step across a falloff four to eight tiles wide,

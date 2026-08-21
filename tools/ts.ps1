@@ -25,7 +25,7 @@ does not rediscover them each time.
 #>
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
-    'focus','paste','click','drop','clear','move','newboard','shot',
+    'focus','paste','hold','commit','raise','lower','click','drop','clear','move','newboard','shot',
     'key','chord','fly','orbit','pan','rdrag','zoom','cutbox','select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
@@ -144,6 +144,36 @@ switch ($Cmd) {
     }
     "pasted $Slab at $X,$Y"
   }
+  'hold'    {
+    # Ctrl+V only: the slab arrives in hand at the cursor and is NOT committed.
+    # Paste is cursor-anchored *and snaps to whatever is under the cursor*, so
+    # once one chunk is down the next one hovering over that new terrain can
+    # snap a course higher -- which lands a whole chunk one step above its
+    # neighbours and reads as grass over grass. Look at the preview before
+    # committing; that is the whole point of splitting this from `paste`.
+    $txt = (Get-Content -Raw $Slab).Trim()
+    [System.Windows.Forms.Clipboard]::SetText($txt)
+    Focus-TS
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200
+    Send-Chord "ctrl+v"; Start-Sleep -Milliseconds 1800
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 400
+    "holding $Slab at $X,$Y -- not committed"
+  }
+  'commit'  { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "committed at $X,$Y" }
+  'raise'   {
+    # Shift+scroll moves what is in hand up or down a course, which is how a
+    # preview that snapped to the wrong height gets corrected before it lands.
+    Focus-TS
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 150
+    [TSIn]::keybd_event(0x10,[byte][TSIn]::MapVirtualKey(0x10,0),0,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 120
+    [TSIn]::mouse_event(0x800, 0, 0, ($Ticks*120), [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 200
+    [TSIn]::keybd_event(0x10,[byte][TSIn]::MapVirtualKey(0x10,0),2,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 300
+    "shifted $Ticks"
+  }
+  'lower'   { & $PSCommandPath raise -X $X -Y $Y -Ticks (-$Ticks) }
   'click'   { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "clicked $X,$Y" }
   'move'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200; "moved to $X,$Y" }
   'drop'    { Focus-TS; Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP) 40; "dropped" }

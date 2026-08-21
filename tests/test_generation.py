@@ -1298,3 +1298,31 @@ def test_no_road_runs_out_over_the_void():
                     f"bite at {(bx, bz)} strands "
                     f"{tm.surface[cz][cx]!r} at {(cx, cz)}"
                 )
+
+
+def test_only_land_falls_away_at_the_edge():
+    """A river surface and a road have to stay level; ground may not.
+
+    The taper lowers the outermost ring so the map does not end in a sheer
+    face. Applied to every surface it put a half-tile step across the
+    carriageway two tiles from the border, and a ledge straight across the
+    river -- a waterfall the width of an estuary, which is what "why is the
+    water stepped" turned out to be.
+    """
+    from citysmith import raster as R
+    from citysmith.build import edge_taper
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+
+    tm = rasterize(Layout.load("out/layout.json"))
+    taper = edge_taper(tm)
+
+    level = {R.WATER, R.STREET, R.PLAZA, R.LANE, R.PIER}
+    stepped = [
+        (x, z) for z in range(tm.depth) for x in range(tm.width)
+        if tm.surface[z][x] in level and taper.get((x, z), 0.0) != 0.0
+    ]
+    assert stepped == [], (
+        f"{len(stepped)} cell(s) that must stay level were tapered: "
+        f"{stepped[:5]}"
+    )

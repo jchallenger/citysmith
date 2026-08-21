@@ -131,6 +131,14 @@ actually matters, all confirmed in-game:
   `ts.ps1 key -Keys w -Hold 3.0`. Arrow keys are untested. The wheel only
   zooms, and zoom-out is capped well short of a 187-tile map, so `--crop` a
   window onto its own board is still the quick way to review one quarter.
+- **Look at the preview before committing.** `ts.ps1 hold` does the Ctrl+V and
+  stops there, leaving the slab in hand; `commit` lands it; `raise`/`lower`
+  (Shift+scroll) move it a course. The preview is also a *validity* display: a
+  held slab that intersects placed geometry renders as a pale translucent mesh
+  instead of solid tiles, which is a direct read on whether the height snapped
+  right. Pan so the paste point is at the centre of the client area (~955, 546)
+  first -- near the screen edge the cursor's ground projection is at a grazing
+  angle and the snap is harder to judge.
 - **Empty the hand after every paste** -- see the right-click tap above. A
   right-click with an empty hand opens the asset library over the board, so
   clear once, deliberately, rather than pre-emptively before each camera move.
