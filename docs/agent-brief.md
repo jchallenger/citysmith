@@ -90,7 +90,7 @@ vertical`) is the correction, and the held-slab preview is a validity display:
 solid = not intersecting, translucent mesh = intersecting. Chunks that share
 cells are *supposed* to intersect, so mesh is not automatically an error.
 
-## Open problem — copy-out driven synthetically (the one left)
+## Open problem 1 - copy-out driven synthetically
 
 Copy-out is the **only** way to read what actually landed on the board. A human
 does it fine; driven synthetically it fails.
@@ -109,6 +109,67 @@ sets the selection volume's height range.
 Until this works, a measurement can be obtained by asking the user to copy a
 region out and paste the base64 into chat â€” they have done this twice and it
 settled questions nothing else could.
+
+## Open problem 2 - the board still does not look right, and the file says it is
+
+**This is the live investigation. Do not start it by re-measuring the file.**
+
+The user reports, from close range in the town, that surfaces sit at different
+levels: grass appearing to stand above adjacent paving, building floors and the
+ground beside them reading as a step rather than one plane. It has been reported
+in some form for many revisions and has survived several fixes, each of which was
+a real bug but evidently not *this* bug.
+
+### What has been measured on the emitted geometry, and is clean
+
+Run these before doubting them, but do not expect them to find it — they have
+been run and they pass:
+
+| check | result |
+|---|---|
+| top height per surface class | ground, field, lane, pier, plaza, street **all 0.5** |
+| the exceptions | 718 ground + 144 field cells at 0.0 — the intended one-course border taper |
+| building floor vs adjacent ground | 1,179 boundary pairs, **every one flush** (0.0 step) |
+| two surfaces sharing a cell at one height | **0 cells** |
+| chunk bounding boxes | all five identical, `(0,0,0)`–`(188.51, 20.00, 183.04)` |
+| water | one level, bed stepped below it by design |
+
+So: the file does not contain the step the screenshots show. Either it is
+introduced at paste time, or it is not geometry at all.
+
+### The two live hypotheses
+
+1. **Paste still moves things.** The bounding-box fix made every chunk present
+   the same box, which is necessary but may not be sufficient. Note that a real
+   half-tile discrepancy *was* measured on a board once (3.5 relief against a
+   source maximum of 3.0) — that number is trustworthy and unexplained by
+   anything now in the code.
+2. **It is rendering.** TaleSpire's lighting produces hard boundaries that
+   rotate with the world and vanish at low angles. One such band was chased for
+   most of a session and turned out not to be geometry. Shadowed floor tiles
+   beside sunlit grass look exactly like a step in a screenshot.
+
+### How to tell them apart — and why copy-out is the priority
+
+Only one instrument distinguishes them: **copy the affected region off the board
+and compare it to the source slab.** If the copied relief matches the file, the
+geometry is right and the eye is being fooled. If it does not, the paste moved
+it and the difference names the offset.
+
+That is why the copy-out problem above is the top of the backlog rather than a
+convenience. Everything else here is opinion; that measurement is not.
+
+Failing that, the cheap discriminator is **angle**: a half-tile step is
+unmistakable from a low oblique and stays put as the camera orbits. A lighting
+boundary flattens out at low angles and can sit at a fixed screen orientation.
+Take both before concluding anything — this exact mistake has been made in both
+directions on this project.
+
+### What not to do
+
+- Do not "fix" it by nudging pastes until a screenshot looks right. That hides
+  whichever of the two causes it is and makes the next report harder to read.
+- Do not re-run the table above and report it as progress. It is already known.
 
 ## Known cosmetic defects (not blocking)
 
@@ -191,11 +252,14 @@ Non-obvious rules, all verified in game:
 
 ## Suggested next iterations
 
-1. Paste the **full** Forest Church map, both layers, and review it properly -
-   `review.ps1 flyby` plus a low pass, because the sample board only proves the
-   mechanism. Confirm nothing floats and the ground is continuous.
-2. Get copy-out working synthetically (the open problem above), then add a
-   `verify`-style board-vs-file check: paste, copy back, compare relief and cell
-   coverage against the source slabs. That closes the loop this project has been
-   missing from the start.
-3. Only then, cosmetics â€” the glazed facades read worst at play height.
+1. **Get copy-out working synthetically** (Open problem 1). It is the only
+   instrument that can tell "the file is wrong" from "the paste is wrong", and
+   Open problem 2 cannot be settled without it. Everything else is opinion.
+2. **Settle Open problem 2** with that instrument: copy the affected region,
+   compare relief against the source slab, and let the number decide.
+3. Then wire the comparison into `verify` as a standing board-vs-file check, so
+   a bad paste reports itself instead of waiting to be noticed in a screenshot.
+4. Only then, cosmetics. The glazed facades read worst at play height, and the
+   rampart reads as a maze of parallel runs from directly above — worth checking
+   whether that is a real shape problem or an artifact of cropping across a
+   stair-stepped diagonal.
