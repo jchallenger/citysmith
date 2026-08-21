@@ -131,9 +131,35 @@ actually matters, all confirmed in-game:
   `ts.ps1 key -Keys w -Hold 3.0`. Arrow keys are untested. The wheel only
   zooms, and zoom-out is capped well short of a 187-tile map, so `--crop` a
   window onto its own board is still the quick way to review one quarter.
+- **A paste rests on whatever is under the cursor.** It does not land at the
+  coordinates in the slab; it sits *on top of* the geometry it is hovering
+  over. Chunk 1 lands on bare board, and chunk 2 -- whose cursor cell chunk 1
+  now occupies -- comes to rest one grass-thickness higher. That is the half
+  tile: measured from a copy-out, the board carried a 3.5 relief where the
+  source's maximum possible is 3.0. Chunks that share cells are *supposed* to
+  interpenetrate, so the preview's translucent-mesh "intersecting" state is the
+  correct one for chunk 2 and the solid one is the fault. Ctrl+scroll down one
+  course puts it right before committing.
+- **The modifiers for a held object, from the game's own hint bar:**
+  `Ctrl`+scroll moves it **vertically**, `Shift`+scroll moves it **on the
+  plane**, `Alt`+scroll **rotates in place**. `raise`/`lower` were built on
+  Shift, which is the horizontal one -- so every "nudge it down a course" test
+  in a whole session was sliding the slab sideways and reading the result as
+  evidence about height. `ts.ps1 nudge -Mode vertical|plane|rotate`.
+- **The right-hand vertical track is a camera *height* slider, and it goes far
+  higher than the wheel.** Zoom-out is capped well short of a 187-tile map;
+  raising the camera is how a whole quarter fits one frame, which is what a
+  paste wants -- the chunk being placed and the chunk it must line up with both
+  on screen. `ts.ps1 camera -DY -300`. The handle moves with the height, so the
+  command scans the track column for it rather than assuming a position.
+- **Derive screen coordinates from the window, never hardcode them.** The
+  window gets moved and resized between sessions, and a stale rectangle does
+  not fail loudly -- it silently aims a click or a pixel probe at the wrong
+  thing. `ts.ps1 client` returns the client rect and centre; `grab.ps1` defaults
+  to it. This is how `planestate` came back reading the board instead of the
+  toolbar icon it was aimed at.
 - **Look at the preview before committing.** `ts.ps1 hold` does the Ctrl+V and
-  stops there, leaving the slab in hand; `commit` lands it; `raise`/`lower`
-  (Shift+scroll) move it a course. The preview is also a *validity* display: a
+  stops there, leaving the slab in hand; `commit` lands it. The preview is also a *validity* display: a
   held slab that intersects placed geometry renders as a pale translucent mesh
   instead of solid tiles, which is a direct read on whether the height snapped
   right. Pan so the paste point is at the centre of the client area (~955, 546)

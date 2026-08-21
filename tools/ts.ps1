@@ -17,6 +17,7 @@ does not rediscover them each time.
   .\tools\ts.ps1 fly    -Keys w -Hold 3.0                # long haul; WASD ramps
   .\tools\ts.ps1 clear                                   # empty the hand (right TAP)
   .\tools\ts.ps1 cutbox                                  # N: slice into a mass
+  .\tools\ts.ps1 camera -DY -260                         # raise the camera; wide view
   .\tools\ts.ps1 plane                                   # G: build plane on/off
   .\tools\ts.ps1 planestate                              # is it on? (reads the icon)
   .\tools\ts.ps1 newboard
@@ -27,18 +28,24 @@ does not rediscover them each time.
 #>
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
-    'focus','paste','hold','commit','raise','lower','click','drop','clear','move','newboard','shot',
-    'key','chord','fly','orbit','pan','rdrag','zoom','cutbox','plane','planestate',
+    'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','shot',
+    'key','chord','fly','orbit','pan','rdrag','zoom','camera','cutbox','plane','planestate',
     'select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
   [int]$X, [int]$Y, [int]$X2, [int]$Y2, [int]$DX, [int]$DY, [int]$Ticks = 0,
   [double]$Hold = 0.25,
+  [ValidateSet('vertical','plane','rotate')][string]$Mode = 'vertical',
   [switch]$Keep
 )
 
 $sig = @'
 using System;using System.Runtime.InteropServices;
+public struct TSRECT { public int L, T, R, B; }
+public class TSWin {
+  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out TSRECT r);
+  [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref System.Drawing.Point p);
+}
 public class TSIn {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
@@ -71,7 +78,8 @@ public class TSIn {
   }
 }
 '@
-Add-Type -TypeDefinition $sig -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition $sig -ReferencedAssemblies System.Drawing -ErrorAction SilentlyContinue
 Add-Type -AssemblyName System.Windows.Forms
 
 
@@ -89,6 +97,22 @@ function Send-Chord([string]$spec, [int]$ms = 150) {
   }
   [TSIn]::Chord([byte[]]$codes, $ms)
   Start-Sleep -Milliseconds 400
+}
+
+# Every screen coordinate in here is derived from TaleSpire's client rect, not
+# hardcoded. The window gets moved and resized between sessions; a stale
+# rectangle does not fail loudly, it silently aims a click or a pixel probe at
+# the wrong thing -- which is how `planestate` came back reading the board.
+function Get-Client {
+  $p = Get-TS
+  $pt = New-Object System.Drawing.Point 0,0
+  $c = New-Object TSRECT
+  [TSWin]::GetClientRect($p.MainWindowHandle, [ref]$c) | Out-Null
+  [TSWin]::ClientToScreen($p.MainWindowHandle, [ref]$pt) | Out-Null
+  [pscustomobject]@{
+    X = $pt.X; Y = $pt.Y; W = $c.R; H = $c.B
+    CX = $pt.X + [int]($c.R/2); CY = $pt.Y + [int]($c.B/2)
+  }
 }
 
 function Get-TS {
@@ -129,6 +153,7 @@ function Press([int]$px,[int]$py,[uint32]$down,[uint32]$up,[int]$ms = -1) {
 
 switch ($Cmd) {
   'focus'   { Focus-TS; "focused" }
+  'client'  { Get-Client }
   'setclip' { [System.Windows.Forms.Clipboard]::SetText($Text); "clipboard set ($($Text.Length) chars)" }
   'paste'   {
     $txt = (Get-Content -Raw $Slab).Trim()
@@ -169,20 +194,29 @@ switch ($Cmd) {
     "holding $Slab at $X,$Y -- not committed"
   }
   'commit'  { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "committed at $X,$Y" }
-  'raise'   {
-    # Shift+scroll moves what is in hand up or down a course, which is how a
-    # preview that snapped to the wrong height gets corrected before it lands.
+  'nudge'   {
+    # The three modifiers TaleSpire's own hint bar lists for a held object:
+    #
+    #   Ctrl  + scroll   move vertically
+    #   Shift + scroll   move on the plane
+    #   Alt   + scroll   rotate in place
+    #
+    # `raise`/`lower` were built on Shift, which is the *horizontal* one, so
+    # every "nudge it down a course" test in this session was sliding the slab
+    # sideways instead. Ctrl is the one that changes height.
     Focus-TS
+    $vk = switch ($Mode) { 'vertical' {0x11} 'plane' {0x10} 'rotate' {0x12} }
     [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 150
-    [TSIn]::keybd_event(0x10,[byte][TSIn]::MapVirtualKey(0x10,0),0,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 120
+    [TSIn]::keybd_event($vk,[byte][TSIn]::MapVirtualKey($vk,0),0,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 150
     [TSIn]::mouse_event(0x800, 0, 0, ($Ticks*120), [IntPtr]::Zero)
-    Start-Sleep -Milliseconds 200
-    [TSIn]::keybd_event(0x10,[byte][TSIn]::MapVirtualKey(0x10,0),2,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    [TSIn]::keybd_event($vk,[byte][TSIn]::MapVirtualKey($vk,0),2,[IntPtr]::Zero)
     Start-Sleep -Milliseconds 300
-    "shifted $Ticks"
+    "nudged $Mode by $Ticks"
   }
-  'lower'   { & $PSCommandPath raise -X $X -Y $Y -Ticks (-$Ticks) }
+  'raise'   { & $PSCommandPath nudge -X $X -Y $Y -Ticks $Ticks -Mode vertical }
+  'lower'   { & $PSCommandPath nudge -X $X -Y $Y -Ticks (-$Ticks) -Mode vertical }
   'click'   { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "clicked $X,$Y" }
   'move'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200; "moved to $X,$Y" }
   'drop'    { Focus-TS; Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP) 40; "dropped" }
@@ -212,6 +246,34 @@ switch ($Cmd) {
     Focus-TS
     Send-Chord $Keys ([int]($Hold*1000))
     "flew $Keys for $Hold s"
+  }
+  'camera'  {
+    # The vertical track down the right edge is a *camera height* slider, and
+    # it goes far higher than the wheel, whose zoom-out is capped well short of
+    # a 187-tile map. Raising it is how you get a whole quarter of the town in
+    # one frame -- which is what a paste wants, so the chunk being placed and
+    # the chunk it has to line up with are both on screen.
+    #
+    # The handle moves as the height changes, so it is found rather than
+    # assumed: scan the track column for the bright diamond.
+    Focus-TS
+    $cl = Get-Client
+    $tx = $cl.X + 1540
+    Add-Type -AssemblyName System.Drawing
+    $bmp = New-Object System.Drawing.Bitmap 9,700
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen(($tx - 4), ($cl.Y + 120), 0, 0, (New-Object System.Drawing.Size 9,700))
+    $bestY = -1; $best = -1
+    for ($y = 0; $y -lt 700; $y++) {
+      $sum = 0
+      for ($x = 0; $x -lt 9; $x++) { $c = $bmp.GetPixel($x,$y); $sum += $c.R + $c.G + $c.B }
+      if ($sum -gt $best) { $best = $sum; $bestY = $y }
+    }
+    $gfx.Dispose(); $bmp.Dispose()
+    if ($bestY -lt 0) { throw "could not find the camera slider handle" }
+    $hy = $cl.Y + 120 + $bestY
+    Drag $tx $hy 0 $DY ([TSIn]::LDOWN) ([TSIn]::LUP) 40 30
+    "camera slider dragged $DY from y=$hy"
   }
   'cutbox'  {
     # `N` toggles the cut box, which hides everything inside a region so you can
@@ -249,7 +311,8 @@ switch ($Cmd) {
     Add-Type -AssemblyName System.Drawing
     $bmp = New-Object System.Drawing.Bitmap 40,40
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen(908, 212, 0, 0, (New-Object System.Drawing.Size 40,40))
+    $cl = Get-Client
+    $gfx.CopyFromScreen($cl.X + 752, $cl.Y + 124, 0, 0, (New-Object System.Drawing.Size 40,40))
     $r = 0; $g = 0; $b = 0; $n = 0
     for ($y = 0; $y -lt 40; $y += 2) {
       for ($x = 0; $x -lt 40; $x += 2) {
@@ -263,7 +326,8 @@ switch ($Cmd) {
   }
   'newboard' {
     Focus-TS
-    Press 1493 111 ([TSIn]::LDOWN) ([TSIn]::LUP)
+    $cl = Get-Client
+    Press ($cl.X + 1332) ($cl.Y + 14) ([TSIn]::LDOWN) ([TSIn]::LUP)
     Start-Sleep -Seconds 2
     Send-Chord "b" 150                     # a fresh board opens out of build mode
     Start-Sleep -Milliseconds 600
