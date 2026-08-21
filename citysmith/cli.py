@@ -365,7 +365,8 @@ def cmd_build(args) -> int:
     from .raster import rasterize
     from .build import build_from_tilemap
     from .verify import (check_placements, chunk_anchors, enclosed_voids,
-                     tile_interpenetration, tilemap_svg, verify)
+                     floating_placements, tile_interpenetration, tilemap_svg,
+                     verify)
 
     layout = Layout.load(args.layout)
     tm = rasterize(layout, bridges=not args.no_bridges)
@@ -413,6 +414,8 @@ def cmd_build(args) -> int:
     # failing the build.
     for problem in tile_interpenetration(builder):
         report.add("warn", "tile seams", problem)
+    for problem in floating_placements(builder, tm):
+        report.add("fail", "floating geometry", problem)
 
     print(f"\n{plan.assets_emitted:,} assets in {len(written)} chunk(s)"
           + (f"; {len(plan.skipped)} open-country chunk(s) skipped "

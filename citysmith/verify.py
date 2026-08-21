@@ -19,6 +19,8 @@ legibility rather than engine constraints:
 
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass, field
 
 from .layout import TILE_FEET
@@ -699,3 +701,66 @@ def chunk_anchors(plan, byid) -> list[str]:
             "offset from each other"
         )
     return out
+
+def floating_placements(builder, tm) -> list[str]:
+    """Anything standing over a cell that has no ground in it at all.
+
+    Panning the map's own boundary turned up a shop sign hanging in mid-air off
+    the north edge and a pier running out over the void. Both are the same
+    fault: a pass placed something on a cell whose ground the edge fringe had
+    taken away, or beyond where ground was ever laid. Neither shows up in the
+    tile grid -- the grid still says "pier" -- so this reads the emitted
+    geometry and asks the only question that matters: is there anything
+    underneath it.
+
+    The test is deliberately the weakest one that catches it: not "is it
+    resting on something" but "is there ground in this cell at any height".
+    Buildings stand on their own floors and walls sit on wall blocks, so a
+    stricter test would spend its time arguing with the parts of the map that
+    are fine.
+    """
+    from .build import placed_bounds
+
+    byid = builder.byid
+
+    def covered(p):
+        asset = byid.get(p.asset_id)
+        if asset is None:
+            return []
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        return [(cx, cz)
+                for cx in range(int(math.floor(x0 + 1e-6)),
+                                int(math.ceil(x1 - 1e-6)))
+                for cz in range(int(math.floor(z0 + 1e-6)),
+                                int(math.ceil(z1 - 1e-6)))]
+
+    def is_ground(asset):
+        return (asset.size_y <= 0.75
+                and asset.size_x >= 0.9 and asset.size_z >= 0.9)
+
+    ground: set[tuple[int, int]] = set()
+    for p in builder.placements:
+        asset = byid.get(p.asset_id)
+        if asset is None or p.asset_id in builder.prop_ids or not is_ground(asset):
+            continue
+        ground.update(covered(p))
+
+    floating = []
+    for p in builder.placements:
+        asset = byid.get(p.asset_id)
+        if asset is None or is_ground(asset):
+            continue
+        cells = covered(p)
+        if cells and not any(c in ground for c in cells):
+            floating.append((p, asset))
+
+    if not floating:
+        return []
+    where = ", ".join(
+        f"{a.name} at ({p.x:.1f}, {p.y:.1f}, {p.z:.1f})" for p, a in floating[:3]
+    )
+    return [
+        f"{len(floating)} placement(s) stand over nothing ({where}) -- "
+        "left hanging where the edge fringe took the ground away, or beyond "
+        "where ground was ever laid"
+    ]

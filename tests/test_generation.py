@@ -1326,3 +1326,22 @@ def test_only_land_falls_away_at_the_edge():
         f"{len(stepped)} cell(s) that must stay level were tapered: "
         f"{stepped[:5]}"
     )
+
+
+def test_floating_geometry_is_caught():
+    """The check has to fail on something actually standing over nothing.
+
+    Written after it reported zero on a map where two things *looked* like they
+    were hanging in mid-air. Zero is only worth believing from a check that is
+    known to fire.
+    """
+    from citysmith.verify import floating_placements
+
+    b = _builder()
+    _ground_field(b, width=6, depth=6)
+    assert floating_placements(b, None) == [], "a plain field is not floating"
+
+    b.add(place_wall(WALL, 20, 20, "n", 0.5))          # far off the ground
+    problems = floating_placements(b, None)
+    assert problems, "a wall over bare board was not reported"
+    assert "stand over nothing" in problems[0]
