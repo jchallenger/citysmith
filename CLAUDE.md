@@ -171,6 +171,13 @@ actually matters, all confirmed in-game:
   paste wants -- the chunk being placed and the chunk it must line up with both
   on screen. `ts.ps1 camera -DY -300`. The handle moves with the height, so the
   command scans the track column for it rather than assuming a position.
+- **Read the camera back rather than tracking it in your head.** Every camera
+  command is a *relative* move; a session that only issues them ends up over the
+  void wondering where the map went. `ts.ps1 camerastate` reports the height
+  slider's handle position -- numeric and comparable between calls -- and saves
+  a crop of the compass rose, which gives bearing by where N points and pitch by
+  how squashed the circle is. Check it before concluding something is missing
+  from the board.
 - **Derive screen coordinates from the window, never hardcode them.** The
   window gets moved and resized between sessions, and a stale rectangle does
   not fail loudly -- it silently aims a click or a pixel probe at the wrong

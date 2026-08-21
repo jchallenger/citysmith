@@ -19,6 +19,7 @@ does not rediscover them each time.
   .\tools\ts.ps1 cutbox                                  # N: slice into a mass
   .\tools\ts.ps1 camera -DY -260                         # raise the camera; wide view
   .\tools\ts.ps1 elev   -X 900 -Y 450 -DY 200            # ctrl+right drag: elevation
+  .\tools\ts.ps1 camerastate                             # where is the camera looking?
   .\tools\ts.ps1 plane                                   # G: build plane on/off
   .\tools\ts.ps1 planestate                              # is it on? (reads the icon)
   .\tools\ts.ps1 newboard
@@ -30,7 +31,8 @@ does not rediscover them each time.
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
     'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','shot',
-    'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','cutbox','plane','planestate',
+    'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','camerastate',
+    'cutbox','plane','planestate',
     'select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
@@ -275,6 +277,37 @@ switch ($Cmd) {
     $hy = $cl.Y + 120 + $bestY
     Drag $tx $hy 0 $DY ([TSIn]::LDOWN) ([TSIn]::LUP) 40 30
     "camera slider dragged $DY from y=$hy"
+  }
+  'camerastate' {
+    # Every camera command here is a *relative* move, which is how a session
+    # ends up lost over the void wondering why the map vanished. This reads the
+    # two things the game does display: the height slider's handle position on
+    # its track, and the compass rose. The handle is numeric and comparable
+    # between calls; the compass is saved as a crop to be looked at, because
+    # the game draws the bearing rather than writing it down.
+    Focus-TS
+    $cl = Get-Client
+    Add-Type -AssemblyName System.Drawing
+
+    $tx = $cl.X + 1540
+    $bmp = New-Object System.Drawing.Bitmap 9,700
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    $gfx.CopyFromScreen(($tx - 4), ($cl.Y + 120), 0, 0, (New-Object System.Drawing.Size 9,700))
+    $bestY = -1; $best = -1
+    for ($y = 0; $y -lt 700; $y++) {
+      $sum = 0
+      for ($x = 0; $x -lt 9; $x++) { $c = $bmp.GetPixel($x,$y); $sum += $c.R + $c.G + $c.B }
+      if ($sum -gt $best) { $best = $sum; $bestY = $y }
+    }
+    $gfx.Dispose(); $bmp.Dispose()
+
+    # 0 at the top of the track (camera high) to 1 at the bottom (camera low).
+    $frac = [math]::Round($bestY / 700.0, 3)
+    $grab = Join-Path $PSScriptRoot "grab.ps1"
+    & $grab -Name "camstate-compass" -X ($cl.X + 490) -Y ($cl.Y + 660) -W 220 -H 190 | Out-Null
+    & $grab -Name "camstate-slider"  -X ($tx - 90)    -Y ($cl.Y + 120) -W 180 -H 700 | Out-Null
+    "camera height: handle at y=$bestY of 700 (frac $frac; 0=high, 1=low)"
+    "compass -> out/flyby/camstate-compass.jpg   slider -> out/flyby/camstate-slider.jpg"
   }
   'cutbox'  {
     # `N` toggles the cut box, which hides everything inside a region so you can
