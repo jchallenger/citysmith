@@ -131,15 +131,20 @@ actually matters, all confirmed in-game:
   `ts.ps1 key -Keys w -Hold 3.0`. Arrow keys are untested. The wheel only
   zooms, and zoom-out is capped well short of a 187-tile map, so `--crop` a
   window onto its own board is still the quick way to review one quarter.
-- **A paste rests on whatever is under the cursor.** It does not land at the
-  coordinates in the slab; it sits *on top of* the geometry it is hovering
-  over. Chunk 1 lands on bare board, and chunk 2 -- whose cursor cell chunk 1
-  now occupies -- comes to rest one grass-thickness higher. That is the half
-  tile: measured from a copy-out, the board carried a 3.5 relief where the
-  source's maximum possible is 3.0. Chunks that share cells are *supposed* to
-  interpenetrate, so the preview's translucent-mesh "intersecting" state is the
-  correct one for chunk 2 and the solid one is the fault. Ctrl+scroll down one
-  course puts it right before committing.
+- **A paste does not always land at the coordinates in the slab, and the exact
+  rule is NOT settled.** What is measured: a copy-out of a region-chunked board
+  carried a 3.5 relief where the source's maximum possible is 3.0, so half a
+  tile was introduced at paste time. The working theory was "the slab comes to
+  rest on whatever is under the cursor" -- which fits chunk 2 being lifted by
+  one grass-thickness after chunk 1 laid ground under the anchor.
+  **That theory does not survive the layered build.** The structure layer's own
+  lowest point is the registration marker at y=0, so resting-on-top would lift
+  every building by the full height of the terrain; instead it lands seated
+  flush, with no nudge. So something else is going on -- possibly the snap
+  resolves collisions rather than stacking, possibly it uses the grid. Do not
+  rely on the resting model; rely on the procedure below, which is verified.
+  Ctrl+scroll (`ts.ps1 nudge`) is the correction if a layer ever does land
+  wrong, and the preview's translucent-mesh state shows intersection.
 - **The modifiers for a held object, from the game's own hint bar:**
   `Ctrl`+scroll moves it **vertically**, `Shift`+scroll moves it **on the
   plane**, `Alt`+scroll **rotates in place**. `raise`/`lower` were built on
@@ -221,9 +226,15 @@ whatever the paste does. Region splitting still happens *within* a layer when
 it exceeds the byte cap; the pieces of one layer are the ones that share a
 registration marker and a single paste height.
 
-**Paste the landscape first**, onto bare board: that sets the height everything
-else is measured from. `PASTE_HELP` says so and the chunk table is grouped in
-paste order.
+**Paste the landscape first**, onto bare board, then the structures over it.
+`PASTE_HELP` says so and the chunk table is grouped in paste order.
+
+**Verified end to end on Forest Church:** three landscape chunks onto a fresh
+board, then two structure chunks straight over them -- no vertical nudging, no
+per-chunk correction. The ground came out as one continuous sheet with no seam
+anywhere, and the buildings seated flush, wall bases on the grass and doorways
+at ground level. That is the first assembly this project has produced that did
+not need a correction, and it is the argument for the split.
 
 It also makes the build loop usable: re-paste the structure layer over the
 landscape already down, instead of re-laying 20,000 grass tiles to look at a
