@@ -689,6 +689,26 @@ def test_enclosed_voids_reports_a_hole_in_the_middle():
     assert enclosed_voids(plan) == []
 
 
+def test_enclosed_voids_sees_every_cell_a_packed_chunk_covers():
+    """Packing fuses a ring of eight cells into one chunk named for its first
+    cell. A barrier built from names alone is one cell wide, so the flood
+    walked through the other seven and the hole in the middle went unreported
+    on every packed plan -- the metric was reading the plan's labels, not its
+    coverage."""
+    from citysmith.build import ChunkPlan, SlabChunk
+    from citysmith.slab import Slab
+    from citysmith.verify import enclosed_voids
+
+    ring = [(r, c) for r in range(3) for c in range(3) if (r, c) != (1, 1)]
+    fused = SlabChunk(row=0, col=0, quad="+7", x0=0, z0=0, x1=3, z1=3,
+                      slab=Slab([place_tile(GROUND, c, r, 0.0) for r, c in ring]),
+                      covers=tuple(ring))
+    hole = SlabChunk(row=1, col=1, quad="", x0=1, z0=1, x1=2, z1=2,
+                     slab=Slab([place_tile(GROUND, 1, 1, 0.0)]), open_country=True)
+    plan = ChunkPlan([fused], [hole], 3, 3, 1, (0, 0))
+    assert enclosed_voids(plan), "a packed ring still encloses its centre"
+
+
 def test_roof_rings_follow_the_real_shape_not_the_bounding_box():
     """An L-shaped terrace slopes to its own edges.
 

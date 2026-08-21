@@ -639,8 +639,17 @@ def enclosed_voids(plan) -> list[str]:
     encloses punches a rectangular hole into the middle of the map. Skipping
     is supposed to trim inward from the edge only; this is the check that says
     so, measured on the plan that will actually be written.
+
+    The barrier is every grid cell a written chunk *covers*, not the one cell
+    it is named for. Packing fuses a run of cells into one chunk that keeps
+    the first cell's row and column, so a plan of five slabs over 64 cells
+    used to present five barrier cells -- the flood walked straight through
+    the other 59 and this check could never report a hole on a packed plan.
     """
-    kept = {(ch.row, ch.col) for ch in plan.chunks}
+    def cells(ch):
+        return ch.covers or ((ch.row, ch.col),)
+
+    kept = {cell for ch in plan.chunks for cell in cells(ch)}
     reachable: set[tuple[int, int]] = set()
     stack = [(r, c) for r in range(plan.rows) for c in (0, plan.cols - 1)]
     stack += [(r, c) for c in range(plan.cols) for r in (0, plan.rows - 1)]
@@ -653,7 +662,8 @@ def enclosed_voids(plan) -> list[str]:
         reachable.add((r, c))
         stack += [(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)]
 
-    holes = [ch for ch in plan.skipped if (ch.row, ch.col) not in reachable]
+    holes = [ch for ch in plan.skipped
+             if any(cell not in reachable for cell in cells(ch))]
     if not holes:
         return []
     where = ", ".join(f"r{ch.row:02d}c{ch.col:02d}" for ch in holes[:4])
