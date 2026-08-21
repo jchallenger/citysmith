@@ -603,6 +603,22 @@ class Builder:
         else:
             groups = [("", list(slab.placements))]
 
+        # **Which grid cells anything is built on, across every layer.**
+        #
+        # Open country means "nowhere anyone plays", and before the layer split
+        # a chunk could answer that by looking at its own contents: a building
+        # in the cell disqualified it. Layered, a landscape chunk under a town
+        # holds nothing but grass -- the building is in the other layer -- so it
+        # reads as open country and gets dropped, and the buildings above it are
+        # left standing on nothing. A 40x40 crop lost half its ground that way.
+        built: set[tuple[int, int]] = set()
+        for pl, lay in tagged:
+            if lay != STRUCTURE:
+                continue
+            q = moved[id(pl)]
+            built.add((min(rows - 1, max(0, int((q.z - oz) // size))),
+                       min(cols - 1, max(0, int((q.x - ox) // size)))))
+
         kept: list[SlabChunk] = []
         skipped: list[SlabChunk] = []
         for name, group in groups:
@@ -628,8 +644,10 @@ class Builder:
                     x0=cell.x0 - dx, z0=cell.z0 - dz,
                     x1=cell.x1 - dx, z1=cell.z1 - dz,
                     slab=Slab(cell.items),
-                    open_country=_is_open_country(
-                        cell.items, terrain, self.prop_ids, grade, baseline),
+                    open_country=(
+                        (cell.row, cell.col) not in built
+                        and _is_open_country(
+                            cell.items, terrain, self.prop_ids, grade, baseline)),
                     layer=name,
                 )
                 for cell in cells
@@ -661,21 +679,42 @@ class Builder:
             kept.extend(layer_kept)
             skipped.extend(layer_skipped)
 
+        anchors: tuple[Placement, ...] = ()
         if register and len(kept) > 1:
+            # **Two markers, not one: a shared corner is not a shared box.**
+            #
+            # Every chunk used to carry a marker at the map's low corner, which
+            # made all their minima agree. Their *maxima* did not, and by a
+            # long way -- the landscape layer tops out around y=7 (a pine) and
+            # the structure layer around y=20 (a roof). Pasted at one cursor
+            # cell they landed at different heights, which is how a whole layer
+            # of roofs ended up lying in the grass with trees growing through
+            # them.
+            #
+            # Pinning both corners makes every chunk present the *identical*
+            # bounding box, so whatever rule the paste uses to seat a slab, it
+            # has nothing left to disagree about. Two stray tiles per chunk,
+            # both at map corners, both deletable afterwards.
             marker = self.palette.resolve("ground") or self.palette.resolve("floor")
-            anchor = Placement(
-                marker.id if marker is not None
-                else min(slab.placements, key=lambda p: (p.y, p.z, p.x)).asset_id,
-                0.0, 0.0, 0.0, 0,
-            )
+            marker_id = (marker.id if marker is not None
+                         else min(slab.placements, key=lambda p: (p.y, p.z, p.x)).asset_id)
+            sx, sy, sz = (marker.size_x, marker.size_y, marker.size_z) if marker else (1.0, 1.0, 1.0)
+            _, (hx, hy, hz) = volume_bounds(slab, self.byid)
+            lo = Placement(marker_id, 0.0, 0.0, 0.0, 0)
+            # Placed so the marker's own far face lands on the map's, since a
+            # tile's stored coordinate is its min corner.
+            hi = Placement(marker_id, hx - sx, hy - sy, hz - sz, 0)
             for piece in kept:
-                piece.slab.add(anchor)
-            self.stats.registration_markers = len(kept)
+                piece.slab.add(lo)
+                piece.slab.add(hi)
+            self.stats.registration_markers = 2 * len(kept)
+            anchors = (lo, hi)
 
         self.stats.slabs = len(kept)
         self.stats.chunks_skipped = len(skipped)
         self.stats.assets_skipped = sum(ch.count for ch in skipped)
-        return ChunkPlan(kept, skipped, rows, cols, size, (ox - dx, oz - dz))
+        return ChunkPlan(kept, skipped, rows, cols, size,
+                         (ox - dx, oz - dz), anchors)
 
     def _grade_terrain(
         self, placements: list[Placement]
@@ -849,6 +888,20 @@ class ChunkPlan:
     cols: int
     tile_size: int
     origin: tuple[int, int]
+    #: The synthetic tiles added to pin every chunk to the same bounding box --
+    #: one at each corner of the map. Callers that want the *map* rather than
+    #: the registration scaffolding filter these out; see :meth:`is_marker`.
+    anchors: tuple[Placement, ...] = ()
+
+    def is_marker(self, p: Placement) -> bool:
+        """True for a registration marker rather than a piece of the map.
+
+        Compared by *identity*: the same two objects are appended to every
+        chunk, so this is exact. Matching on asset and position instead would
+        also swallow a real tile that happens to sit on a map corner, which is
+        precisely what the far marker is placed against.
+        """
+        return any(p is a for a in self.anchors)
 
     @property
     def slabs(self) -> list[Slab]:

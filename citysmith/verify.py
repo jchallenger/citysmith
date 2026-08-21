@@ -687,8 +687,19 @@ def chunk_anchors(plan, byid) -> list[str]:
         stored.setdefault((round(sx, 3), round(sy, 3), round(sz, 3)), []).append(ch.label)
         volume.setdefault((round(vx, 3), round(vy, 3), round(vz, 3)), []).append(ch.label)
 
+    # The *far* corner matters as much as the near one. Chunks that share only
+    # their minimum still present different boxes -- the landscape layer topped
+    # out around y=7 and the structure layer around y=20 -- and pasted at one
+    # cursor cell they landed at different heights, which put a layer of roofs
+    # in the grass with trees growing through them.
+    far: dict[tuple[float, float, float], list[str]] = {}
+    for ch in plan.chunks:
+        _, (fx, fy, fz) = volume_bounds(ch.slab, byid)
+        far.setdefault((round(fx, 2), round(fy, 2), round(fz, 2)), []).append(ch.label)
+
     out = []
-    for what, corners in (("stored coordinate", stored), ("occupied volume", volume)):
+    for what, corners in (("stored coordinate", stored), ("occupied volume", volume),
+                          ("far corner", far)):
         if len(corners) == 1:
             continue
         odd = sorted(corners.items(), key=lambda kv: len(kv[1]))

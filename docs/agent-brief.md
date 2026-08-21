@@ -43,6 +43,10 @@ Verified working, do not re-litigate:
 - Chunks are split **by layer first, region second** — `landscape` and
   `structure` (see `CLAUDE.md`, "Chunking"). This removed terrain-meets-terrain
   seams structurally: all ground is one body, so it cannot disagree with itself.
+- Open-country trimming is judged **across layers**. Layering broke the old
+  test: a landscape chunk under a town holds nothing but grass, so it read as
+  empty and got dropped, leaving buildings on nothing. A 40x40 crop lost half
+  its ground that way before it was caught.
 - Rampart mass is `md_stairblock_01`, a plain solid cube, verified solid from
   four sides, overhead, and in section with the cut box.
 - Parapet is `Castle Ruins Crenellation - Small` on the outward *edge* of the
@@ -53,43 +57,38 @@ Verified working, do not re-litigate:
   only land falls away.
 - 137 tests pass. They assert invariants, not exact output.
 
-## Open problem 1 — paste height across layers (BLOCKING)
+## Paste height - FIXED, but understand why before changing it
 
-**This is the thing to fix first.** Everything else is cosmetic by comparison.
+**A shared corner is not a shared box, and the paste uses the box.**
 
-Symptom, current board: paste the landscape layer onto a fresh board, then the
-structure layer over it, and the structures land at the wrong height. On the last
-run the roofs lay at ground level with trees growing through them and one
-building hung in mid-air.
+Every chunk used to carry one registration marker, at the map's low corner, so
+all their *minima* agreed. Their maxima did not, by a long way: the landscape
+layer topped out around y=7 (a pine) and the structure layer around y=20 (a
+roof). Pasted at the same cursor cell they seated at different heights - which
+is how a whole layer of roofs ended up lying in the grass with trees growing
+through them, and, at region-chunk scale, how a copy-out measured a 3.5 tile
+relief where the source's maximum possible was 3.0.
 
-What is known:
+The fix is **two markers per chunk**, one at each corner of the whole map, so
+every chunk presents an identical bounding box and the paste has nothing left to
+disagree about. `verify.chunk_anchors` now checks the far corner as well as the
+near one, and `test_every_chunk_presents_the_same_bounding_box` guards it.
 
-- A copy-out of a region-chunked board carried a **3.5 tile relief** where the
-  source's maximum possible is **3.0** — so half a tile was introduced *at paste
-  time*, not in the file. That measurement is solid.
-- The explanation is not. "A slab comes to rest on whatever is under the cursor"
-  fits some evidence and is refuted by others (the structure layer's own lowest
-  point is a registration marker at y=0, so resting-on-top would lift buildings
-  by the whole terrain height — sometimes it does not).
-- `Ctrl` + scroll moves a held slab **vertically** before committing
-  (`ts.ps1 nudge -Mode vertical`). `Ctrl` + right-drag moves the working plane
-  (`ts.ps1 elev`). The user's guidance: set elevation deliberately with Ctrl
-  before committing rather than trusting the snap.
-- The held-slab preview is a **validity display**: solid = not intersecting,
-  translucent mesh = intersecting. Chunks that share cells are *supposed* to
-  intersect, so for a layer that overlaps existing geometry the mesh state may
-  be the correct one.
+Verified: all five chunks of Forest Church report `(0,0,0)` to
+`(188.51, 20.00, 183.04)`, and a 40x40 sample board pastes landscape-then-
+structure with everything seated on ground.
 
-Approaches worth trying, roughly in order:
+**The cost, which is visible:** two grass tiles float in mid-air at the map's far
+corner - the high markers. They are synthetic, they are the price of
+deterministic placement, and they can be deleted after pasting. Do not remove
+them from the generator without replacing the guarantee.
 
-1. Make the height explicit rather than inferred. Determine empirically how many
-   `nudge` ticks equal one tile, then compute the required offset per layer from
-   the slab's own coordinates and apply it before every commit. A driver that
-   *sets* the height beats one that hopes the snap is right.
-2. Consider a generator-side datum: e.g. every layer carries a full-height
-   registration column at the map's low corner, so all layers present the same
-   vertical extent to the snap and cannot be resolved differently.
-3. Verify with copy-out, not with eyes (see below).
+**Do not trust the old "a slab rests on whatever is under the cursor" model.** It
+fit some evidence and was refuted by other evidence; the box explanation covers
+both. If a layer ever does land wrong, `Ctrl`+scroll (`ts.ps1 nudge -Mode
+vertical`) is the correction, and the held-slab preview is a validity display:
+solid = not intersecting, translucent mesh = intersecting. Chunks that share
+cells are *supposed* to intersect, so mesh is not automatically an error.
 
 ## Open problem 2 — copy-out driven synthetically
 
@@ -192,9 +191,10 @@ Non-obvious rules, all verified in game:
 
 ## Suggested next iterations
 
-1. Fix paste height across layers (Open problem 1). Nothing else is worth doing
-   until a board assembles correctly twice in a row.
-2. Get copy-out working synthetically (Open problem 2), then add a
+1. Paste the **full** Forest Church map, both layers, and review it properly -
+   `review.ps1 flyby` plus a low pass, because the sample board only proves the
+   mechanism. Confirm nothing floats and the ground is continuous.
+2. Get copy-out working synthetically (the open problem above), then add a
    `verify`-style board-vs-file check: paste, copy back, compare relief and cell
    coverage against the source slabs. That closes the loop this project has been
    missing from the start.

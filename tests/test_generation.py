@@ -540,7 +540,7 @@ def test_packing_preserves_every_placement_and_one_origin():
         return sorted(
             (p.asset_id, round(p.x, 2), round(p.y, 2), round(p.z, 2), p.rot)
             for c in plan.chunks for p in c.slab.placements
-            if (p.x, p.y, p.z) != (0.0, 0.0, 0.0)
+            if not plan.is_marker(p)
         )
 
     assert bag(packed) == bag(loose), "packing changed the placements"
@@ -1375,7 +1375,7 @@ def test_a_chunk_holds_one_layer_and_terrain_is_all_in_one_of_them():
     for chunk in plan.chunks:
         if chunk.layer != LANDSCAPE:
             stray = [p for p in chunk.slab.placements
-                     if p.asset_id in ground and (p.x, p.y, p.z) != (0.0, 0.0, 0.0)]
+                     if p.asset_id in ground and not plan.is_marker(p)]
             assert stray == [], f"{chunk.label} carries terrain"
 
 
@@ -1404,3 +1404,57 @@ def test_an_unlayered_plan_still_works():
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False, by_layer=False)
     assert {c.layer for c in plan.chunks} == {""}
     assert [c.label for c in plan.chunks] == [c.region for c in plan.chunks]
+
+
+def test_ground_under_a_building_is_never_skipped_as_open_country():
+    """Layering broke the old open-country test and this is the repair.
+
+    Open country means "nowhere anyone plays", and a chunk used to answer that
+    from its own contents -- a building in the cell disqualified it. Once the
+    layers are separate, a landscape chunk under a town holds nothing but grass,
+    reads as empty, and gets dropped, leaving the buildings above standing on
+    nothing. A 40x40 crop lost half its ground exactly this way.
+    """
+    from citysmith.build import LANDSCAPE, STRUCTURE
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 12, 12)
+    # One building, in the middle chunk of a 3x3 grid, and nothing else.
+    with b.layer(STRUCTURE):
+        for tx, tz in ((5, 5), (6, 5), (5, 6), (6, 6)):
+            b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    ground_regions = {c.region for c in plan.chunks if c.layer == LANDSCAPE}
+    assert "r01c01" in ground_regions, (
+        "the ground under the building was trimmed as open country; "
+        f"kept {sorted(ground_regions)}"
+    )
+
+
+def test_every_chunk_presents_the_same_bounding_box():
+    """A shared corner is not a shared box, and the paste uses the box.
+
+    Chunks used to share only their minimum. Their maxima did not agree -- the
+    landscape layer topped out around y=7 and the structure layer around y=20 --
+    and pasted at one cursor cell they seated at different heights. That is how
+    a whole layer of roofs ended up lying in the grass.
+    """
+    from citysmith.build import LANDSCAPE, STRUCTURE, volume_bounds
+    from citysmith.verify import chunk_anchors
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 12, 12)
+    with b.layer(STRUCTURE):
+        # Tall, so the two layers would disagree about the far corner.
+        for level in range(6):
+            b.add(place_wall(WALL, 5, 5, "n", 0.5 + level * 2.0))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    boxes = {tuple(round(v, 2) for corner in volume_bounds(c.slab, b.byid)
+                   for v in corner)
+             for c in plan.chunks}
+    assert len(boxes) == 1, f"chunks present {len(boxes)} different boxes"
+    assert chunk_anchors(plan, b.byid) == []
