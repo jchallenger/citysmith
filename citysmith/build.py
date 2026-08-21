@@ -527,10 +527,14 @@ class Builder:
         scale, cannot silently produce a slab TaleSpire refuses to paste.
 
         **Open country.** A chunk holding nothing but ground at grade and
-        scatter dressing is not somewhere anyone plays, so it is dropped rather
-        than encoded, and counted in :class:`BuildStats`. If *every* chunk is
-        open country they are all kept instead -- the map is all terrain, and
-        skipping everything would emit nothing at all.
+        scatter dressing is not somewhere anyone plays, so the map can do
+        without it. It is trimmed inward from the edge only, and -- because an
+        unwritten chunk is bare board, not grass -- it is dropped only when no
+        kept chunk of its layer has room to carry it (see
+        :func:`_absorb_open_country`); what is actually dropped is counted in
+        :class:`BuildStats`. If *every* chunk is open country they are all kept
+        instead -- the map is all terrain, and skipping everything would emit
+        nothing at all.
 
         **Registration.** TaleSpire anchors a pasted slab by its own bounding
         box, not by the absolute coordinates inside it -- copying a placed slab
@@ -675,6 +679,10 @@ class Builder:
             # a partial paste still lands as a contiguous piece of town.
             if pack:
                 layer_kept = _pack_chunks(layer_kept, max_assets, cols)
+                # Packing leaves room in the last slab of a layer, and the
+                # trimmed fringe rides in it rather than being written off.
+                layer_kept, layer_skipped = _absorb_open_country(
+                    layer_kept, layer_skipped, rows, cols, max_assets)
 
             kept.extend(layer_kept)
             skipped.extend(layer_skipped)
@@ -759,6 +767,27 @@ class _Cell:
 _REGISTRATION_MARGIN = 64
 
 
+def _within_cap(slab: Slab) -> bool:
+    """True when ``slab`` encodes under the cap with room left for its markers.
+
+    Decode to count the bytes rather than scaling the base64 length by 3/4:
+    padding makes that estimate optimistic, and it was optimistic by exactly
+    three bytes on a chunk that then failed to encode. The whole point of
+    measuring instead of counting assets is defeated by measuring
+    approximately.
+
+    Registration markers are added to every chunk *after* packing, so the slab
+    measured here is short of the one that will actually be written. Leaving
+    no room for them put a chunk three bytes over the limit and failed the
+    export outright.
+    """
+    try:
+        size = len(base64.b64decode(encode(slab)))
+    except SlabError:
+        return False
+    return size <= MAX_COMPRESSED_BYTES - _REGISTRATION_MARGIN
+
+
 def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list["SlabChunk"]:
     """Merge adjacent chunks up to the slab limit so fewer slabs are pasted.
 
@@ -781,20 +810,7 @@ def _pack_chunks(chunks: list["SlabChunk"], max_assets: int, cols: int) -> list[
         return (row, -col if row % 2 else col)   # serpentine
 
     def fits(run: list["SlabChunk"]) -> bool:
-        # Decode to count the bytes rather than scaling the base64 length by
-        # 3/4: padding makes that estimate optimistic, and it was optimistic
-        # by exactly three bytes on a chunk that then failed to encode. The
-        # whole point of measuring instead of counting assets is defeated by
-        # measuring approximately.
-        try:
-            size = len(base64.b64decode(encode(_fuse(run).slab)))
-        except SlabError:
-            return False
-        # Registration markers are added to every chunk *after* packing, so
-        # the run measured here is one placement short of the slab that will
-        # actually be written. Leaving no room for it put a chunk three bytes
-        # over the limit and failed the export outright.
-        return size <= MAX_COMPRESSED_BYTES - _REGISTRATION_MARGIN
+        return _within_cap(_fuse(run).slab)
 
     ordered = sorted(chunks, key=key)
     out: list["SlabChunk"] = []
@@ -821,10 +837,13 @@ def _fuse(run: list["SlabChunk"]) -> "SlabChunk":
     z0 = min(ch.z0 for ch in run); z1 = max(ch.z1 for ch in run)
     first = run[0]
     # quad suffixes the label, so "+3" reads as "starts here, spans 4 chunks".
+    # Counted from the cells covered rather than the run, because a run can
+    # hold a chunk that is already a fusion -- absorbing open country adds one
+    # cell at a time to a packed slab, and "+1" would then be a lie.
     covers = tuple(c for ch in run for c in (ch.covers or ((ch.row, ch.col),)))
     return SlabChunk(
         row=first.row, col=first.col,
-        quad=f"+{len(run) - 1}",
+        quad=f"+{len(covers) - 1}",
         x0=x0, z0=z0, x1=x1, z1=z1, slab=Slab(placements), open_country=False,
         # A run only ever holds chunks from one layer -- packing runs inside a
         # layer -- so the layer carries through. Dropping it here is what made
@@ -934,6 +953,10 @@ def _trim_open_country(
     encloses is kept, however empty it is -- a green between two districts
     costs a few hundred assets and reads as a park; the hole where it was
     reads as a bug.
+
+    Trimmed is not yet dropped. Once the survivors are packed,
+    :func:`_absorb_open_country` carries as much of the fringe as the packed
+    slabs have room for, and only the remainder is written off.
     """
     # A cell over budget is subdivided into quadrants, so one (row, col) can
     # hold several chunks. It only conducts the flood if *every* piece of it
@@ -966,6 +989,109 @@ def _trim_open_country(
     kept = [ch for ch in made if (ch.row, ch.col) not in outside]
     skipped = [ch for ch in made if (ch.row, ch.col) in outside]
     return kept, skipped
+
+
+def _absorb_open_country(
+    kept: list["SlabChunk"], skipped: list["SlabChunk"],
+    rows: int, cols: int, max_assets: int,
+) -> tuple[list["SlabChunk"], list["SlabChunk"]]:
+    """Carry trimmed open country in the kept chunks that have room for it.
+
+    Trimming says what the map could do without; it does not say the bytes
+    were needed. On Forest Church it dropped ten edge chunks -- 1,618 assets
+    of plain grass and trees -- while the kept landscape chunk beside them
+    held 5.8 KB of a 30 KB budget. An unwritten chunk is not grass but bare
+    board, so the south-west of that map was a hard-edged notch of nothing,
+    saved for the sake of bytes nobody needed. So each trimmed chunk is fused
+    into a kept chunk of its own layer when one can take it -- measured the
+    way packing measures, by encoding -- and dropped only when none can. Its
+    own layer, because the layers are pasted separately and the ground goes
+    down first; grass in a structure slab would arrive a paste late.
+
+    Two rules keep this from undoing what the trim guarantees. Chunks are
+    taken **from the inside out** -- deepest into the map first, by flood
+    distance from the grid's edge -- so that when the room runs out, what is
+    still dropped is the outermost ring and the map merely ends sooner
+    instead of notching inward. And a chunk is taken only if the ones left
+    behind still reach the edge without it: a skipped chunk the written map
+    surrounds is exactly the rectangular hole the trim exists to prevent.
+
+    A host that touches the chunk is preferred, so a subset paste still lands
+    as one piece; otherwise the smallest kept chunk will do, since every
+    chunk of a layer shares the registration box and lands where it belongs
+    whichever file carries it.
+    """
+    if not kept or not skipped:
+        return kept, skipped
+
+    def cells(ch: "SlabChunk") -> tuple[tuple[int, int], ...]:
+        return ch.covers or ((ch.row, ch.col),)
+
+    def neighbours(cell: tuple[int, int]) -> tuple[tuple[int, int], ...]:
+        r, c = cell
+        return ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1))
+
+    def reach(blocked: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
+        """Flood in from outside the grid over every cell nobody has written.
+
+        Breadth-first, so the value is a distance: how deep into the map a
+        cell sits, counted in cells of open country from the edge.
+        """
+        depth: dict[tuple[int, int], int] = {}
+        queue: collections.deque = collections.deque()
+        for r in range(rows):
+            for c in range(cols):
+                if ((r in (0, rows - 1) or c in (0, cols - 1))
+                        and (r, c) not in blocked):
+                    depth[(r, c)] = 0
+                    queue.append((r, c))
+        while queue:
+            cell = queue.popleft()
+            for nxt in neighbours(cell):
+                nr, nc = nxt
+                if (0 <= nr < rows and 0 <= nc < cols
+                        and nxt not in blocked and nxt not in depth):
+                    depth[nxt] = depth[cell] + 1
+                    queue.append(nxt)
+        return depth
+
+    def touches(ch: "SlabChunk", host: "SlabChunk") -> bool:
+        around = {n for cell in cells(ch) for n in neighbours(cell)}
+        return any(cell in around for cell in cells(host))
+
+    kept = list(kept)
+    covered = {cell for ch in kept for cell in cells(ch)}
+    depth = reach(covered)
+    # Cells the trimmed chunks occupy, counted because a subdivided cell can
+    # hold several of them, and one is not gone until all of them are.
+    pending = collections.Counter((ch.row, ch.col) for ch in skipped)
+
+    still: list[SlabChunk] = []
+    order = sorted(skipped, key=lambda ch: (-depth.get((ch.row, ch.col), 0),
+                                            ch.row, ch.col, ch.quad))
+    for ch in order:
+        cell = (ch.row, ch.col)
+        left = {c for c, n in pending.items() if n - (c == cell) > 0}
+        reached = reach(covered | {cell})
+        if any(c not in reached for c in left):
+            still.append(ch)            # taking it would strand what stays
+            continue
+        hosts = sorted(range(len(kept)),
+                       key=lambda i: (not touches(ch, kept[i]), kept[i].count))
+        for i in hosts:
+            host = kept[i]
+            if host.count + ch.count > max_assets:
+                continue
+            fused = _fuse([host, ch])
+            if _within_cap(fused.slab):
+                kept[i] = fused
+                covered.add(cell)
+                pending[cell] -= 1
+                break
+        else:
+            still.append(ch)
+    still.sort(key=lambda ch: (ch.row, ch.col, ch.quad))
+    return kept, still
 
 
 def _is_open_country(

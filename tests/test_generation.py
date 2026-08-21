@@ -386,7 +386,7 @@ def test_chunk_labels_name_the_row_and_column():
     b = _builder()
     _ground_field(b)
     b.add(place_wall(WALL, 6, 6, "n", 0.5))
-    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
 
     labels = [c.region for c in plan.chunks]
     assert len(labels) == len(set(labels))
@@ -425,13 +425,25 @@ def test_chunking_loses_and_duplicates_nothing():
 
 
 def test_open_country_chunks_are_skipped():
-    """A chunk of grass and ferns is not somewhere anyone plays."""
+    """A chunk of grass and ferns is not somewhere anyone plays.
+
+    So it is the one thing the build may leave out -- and does, once no kept
+    chunk has room to carry it, which a cap with nothing to spare beyond the
+    registration markers guarantees.
+    """
+    from citysmith import build as build_mod
+
     b = _builder()
     _ground_field(b)
     b.add(place_centered(FERN, 1.5, 1.5, 0.5, 0), prop=True)
     b.add(place_wall(WALL, 6, 6, "n", 0.5))       # one built thing, far corner
 
-    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    original = build_mod.MAX_COMPRESSED_BYTES
+    try:
+        build_mod.MAX_COMPRESSED_BYTES = build_mod._REGISTRATION_MARGIN
+        plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    finally:
+        build_mod.MAX_COMPRESSED_BYTES = original
     assert [c.region for c in plan.chunks] == ["r01c01"]
     assert len(plan.skipped) == 3
     assert plan.assets_skipped == 48 + 1          # three grass quarters + fern
@@ -572,14 +584,88 @@ def test_enclosed_open_country_is_kept():
 
 
 def test_open_country_is_still_trimmed_from_the_edges():
-    """Enclosure is the only thing that protects a chunk, not emptiness."""
+    """Enclosure is the only thing that protects a chunk, not emptiness.
+
+    Trimmed open country rides along in a kept chunk when one has room (the
+    next test), so the room is taken away here: a byte cap with nothing to
+    spare beyond the registration markers, which no passenger can meet.
+    """
+    from citysmith import build as build_mod
+
     b = _builder()
     _ground_field(b, 12, 12)
     b.add(place_wall(WALL, 1, 1, "n", 0.5))
 
-    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    original = build_mod.MAX_COMPRESSED_BYTES
+    try:
+        build_mod.MAX_COMPRESSED_BYTES = build_mod._REGISTRATION_MARGIN
+        plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    finally:
+        build_mod.MAX_COMPRESSED_BYTES = original
     assert [c.region for c in plan.chunks] == ["r00c00"]
     assert len(plan.skipped) == 8
+
+
+def test_open_country_rides_in_a_kept_chunk_that_has_room():
+    """Trimming says what the map can do without, not that the bytes were needed.
+
+    An unwritten chunk is bare board, not grass. Forest Church dropped ten
+    edge chunks -- 1,618 assets of plain grass and trees -- while the kept
+    landscape chunk beside them was a fifth full, so the south-west of the
+    map was a hard-edged notch of nothing. Open country is dropped only when
+    no kept chunk of its layer can carry it, and carrying it costs no paste.
+    """
+    b = _builder()
+    _ground_field(b, 12, 12)
+    b.add(place_wall(WALL, 1, 1, "n", 0.5))
+    everything = _multiset(b.placements)
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
+    assert plan.skipped == [], [c.label for c in plan.skipped]
+    assert len(plan.chunks) == 1, "carrying the fringe must not cost a paste"
+    chunk = plan.chunks[0]
+    written = _multiset(p for p in chunk.slab.placements if not plan.is_marker(p))
+    assert written == everything
+    assert set(chunk.covers) == {(r, c) for r in range(3) for c in range(3)}
+    assert (chunk.x0, chunk.z0, chunk.x1, chunk.z1) == (0, 0, 12, 12)
+
+
+def _stranded(plan):
+    """Skipped chunks the written chunks enclose, judged on every cell covered."""
+    covered = {cell for c in plan.chunks
+               for cell in (c.covers or ((c.row, c.col),))}
+    seen = set()
+    stack = [(r, c) for r in range(plan.rows) for c in (0, plan.cols - 1)]
+    stack += [(r, c) for c in range(plan.cols) for r in (0, plan.rows - 1)]
+    while stack:
+        r, c = stack.pop()
+        if ((r, c) in seen or (r, c) in covered
+                or not (0 <= r < plan.rows and 0 <= c < plan.cols)):
+            continue
+        seen.add((r, c))
+        stack += [(r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)]
+    return [c.region for c in plan.skipped if (c.row, c.col) not in seen]
+
+
+def test_open_country_is_absorbed_from_the_inside_out():
+    """When only part of the fringe fits, the innermost chunks go first.
+
+    Whatever is still dropped once the room runs out has to be the outermost
+    ring -- the map ends a little sooner -- and never a cell the written
+    chunks now surround, which is the rectangular hole the trim exists to
+    prevent.
+    """
+    b = _builder()
+    _ground_field(b, 20, 20)
+    b.add(place_wall(WALL, 1, 1, "n", 0.5))
+
+    # Room for exactly one 16-tile chunk beside the 17 placements kept.
+    plan = b.chunk_plan(max_assets=17 + 16, chunk_tiles=4)
+    assert (plan.rows, plan.cols) == (5, 5)
+    assert len(plan.chunks) == 1
+    assert set(plan.chunks[0].covers) == {(0, 0), (2, 2)}, "the centre is deepest"
+    assert len(plan.skipped) == 23
+    assert _stranded(plan) == []
 
 
 def test_enclosed_voids_reports_a_hole_in_the_middle():
