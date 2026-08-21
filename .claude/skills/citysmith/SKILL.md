@@ -84,7 +84,7 @@ Run all three before reporting a build as good.
 ```bash
 python -m pytest -q
 ```
-84 tests. `tests/fixtures/*.slab` are genuine TaleSpire slabs and are the codec's
+146 tests. `tests/fixtures/*.slab` are genuine TaleSpire slabs and are the codec's
 ground truth: decode → encode reproduces the original *binary* byte for byte (the
 base64 differs, because .NET's deflate and zlib's differ — that is expected).
 

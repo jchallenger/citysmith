@@ -14,11 +14,17 @@ the two passes that catch that, written down so they run the same way twice.
   flyby a pasted map, toured at play height and from above
         .\tools\review.ps1 flyby -Name rev33
 
+  paste a whole build onto a fresh board: every out\<Stem>-landscape-*
+        chunk, then every out\<Stem>-structure-* chunk, each held, committed
+        and cleared at the client centre without the camera moving
+        .\tools\review.ps1 paste -Name final -Stem forest
+
 Shots land in out\flyby\<Name>-<view>.jpg.
 #>
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('360','flyby')][string]$Recipe,
+  [Parameter(Mandatory=$true)][ValidateSet('360','flyby','paste')][string]$Recipe,
   [Parameter(Mandatory=$true)][string]$Name,
+  [string]$Stem = "forest",
   [string[]]$Slab,
   [int]$X = 700, [int]$Y = 600,
   [int]$ZoomOut = 6
@@ -106,5 +112,37 @@ switch ($Recipe) {
     Shot "07-turned"
 
     "flyby -> out\flyby\$Name-*.jpg"
+  }
+
+  'paste' {
+    # The whole map, the way PASTE_HELP says: landscape first, then the
+    # structures, all at one cursor cell, camera untouched between pastes.
+    # The anchor is derived from the window rather than written down, and a
+    # shot is taken with each chunk in hand and again after it lands, so a
+    # paste that snapped wrong can be found afterwards without re-running it.
+    $cl = & $ts client
+    $cx = $cl.CX; $cy = $cl.CY
+    TS newboard
+    Start-Sleep -Seconds 3
+    $plane = & $ts planestate
+    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+    $out = Join-Path $PSScriptRoot "..\out"
+    $chunks = @(Get-ChildItem (Join-Path $out "$Stem-landscape-*.slab.txt")) +
+              @(Get-ChildItem (Join-Path $out "$Stem-structure-*.slab.txt"))
+    if (-not $chunks) { throw "no out\$Stem-*.slab.txt chunks to paste" }
+    $i = 0
+    foreach ($c in $chunks) {
+      $i++
+      TS hold -Slab $c.FullName -X $cx -Y $cy
+      Start-Sleep -Seconds 3
+      Shot ("{0:d2}-hold" -f $i)
+      TS commit -X $cx -Y $cy
+      Start-Sleep -Seconds 4
+      TS clear -X $cx -Y $cy
+      Start-Sleep -Seconds 2
+      Shot ("{0:d2}-down" -f $i)
+      "$i : $($c.Name)"
+    }
+    "pasted $i chunk(s) of $Stem at $cx,$cy -> out\flyby\$Name-NN-{hold,down}.jpg"
   }
 }

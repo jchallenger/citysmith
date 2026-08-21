@@ -145,6 +145,37 @@ actually matters, all confirmed in-game:
   rely on the resting model; rely on the procedure below, which is verified.
   Ctrl+scroll (`ts.ps1 nudge`) is the correction if a layer ever does land
   wrong, and the preview's translucent-mesh state shows intersection.
+  **The reported "grass standing above paving" was looked for at close range
+  and not found (2026-08-21).** A 40x40 crop of the town centre pasted as
+  landscape then structure, walked round with `review.ps1 360` and zoomed at
+  native pixels from eye level, shows grass, gravel lane and cobble meeting
+  flush at every junction; every floor tile in the build tops out at 0.5 and
+  every one has a roof over it. The dark "pads" that read as raised floor in
+  the screenshots are cobble lying in a building's shadow beside sunlit grass
+  -- a hard lighting boundary, not a step. That is hypothesis 2 of the brief
+  and it is now the working conclusion.
+  **Chunks with identical boxes do seat identically -- measured.** A 32x32
+  crop cut into four 16x16 landscape chunks (`--chunk-tiles 16
+  --max-assets 420 --keep-open-country`) plus its structure chunk, pasted in
+  order at one cursor cell and walked round with `review.ps1 360`, is one
+  continuous sheet of grass across every junction, from four faces, overhead
+  and in section. The line that looked like a chunk seam on an earlier
+  three-chunk crop was the river: its south bank runs along the same row, and
+  from the south at a grazing angle a channel reads as a dark strip with the
+  far bank's soil face above it -- a foreshortened river and a half-tile step
+  are the same picture until you come round the side. The rule for a
+  suspected seam is therefore: look from the side *and* check whether a
+  watercourse or a road edge runs along that row before believing it.
+  **The full-width band in every high overview is distance fog, not a seam.**
+  With the camera slider near the top and the wheel zoomed out, a razor-sharp
+  horizontal line crosses the whole frame with greyer ground beyond it. It
+  sits at the same screen height whatever is under it (town, fields, the
+  river), moves up the frame when the camera pitches down, never tilts when
+  the camera yaws, and dragging the point under it to the centre and lowering
+  the camera finds ordinary ground there with no line on it. It was mistaken
+  for the z=48 chunk boundary twice in one session. Overviews are for
+  composition; any judgement about a step needs the camera below the slider's
+  midpoint.
 - **The modifiers for a held object, from the game's own hint bar:**
   `Ctrl`+scroll moves it **vertically**, `Shift`+scroll moves it **on the
   plane**, `Alt`+scroll **rotates in place**. `raise`/`lower` were built on
@@ -165,6 +196,19 @@ actually matters, all confirmed in-game:
   game limitation. Copy-out matters because it is the *only* way to read what
   actually landed on the board rather than what was written to the file, and
   that distinction has been the crux of a whole session.
+  **What the 2026-08-21 session added:** the selection returns *structure* and
+  never *terrain*. Over a 40x40 crop it came back with three wall pieces (a
+  corner and two panels, origins at y=0.5); with the working plane raised a
+  little (`elev -DY 30`) it came back with one course of thatch roof pieces
+  and nothing else; raised further, empty; lowered in steps of 30 px and of
+  300 px it alternated between walls and empty, never once including a grass
+  or cobble tile, whose origins are at y=0. So the selection behaves like a
+  thin horizontal *slice* at the plane's height rather than a volume from the
+  ground up, and the plane could not be driven down to the turf. The hint bar
+  goes blank while a selection is active, so it does not name the binding.
+  `M` (bottom right, a ruler icon) is still unidentified. Until this works,
+  the fallbacks are the user copying a region by hand, and the angle test
+  below.
 - **The right-hand vertical track is a camera *height* slider, and it goes far
   higher than the wheel.** Zoom-out is capped well short of a 187-tile map;
   raising the camera is how a whole quarter fits one frame, which is what a
@@ -251,6 +295,17 @@ roof change.
 `SlabChunk.region` is `r02c03` (the grid cell) -- two chunks in different layers
 cover the same region, and the map table wants to say so.
 
+**Open country at the edge rides along instead of being dropped.** Trimming
+used to discard every edge chunk that held nothing but grass and trees: ten of
+them on Forest Church, 1,618 assets, which on the board is not grass but bare
+board -- a hard-edged notch in the south-west a quarter of the map wide. An
+unpasted chunk is *nothing*. `_absorb_open_country` now fuses each trimmed
+chunk into a kept chunk of the same layer that has room under the byte cap
+(grid-adjacent first, then smallest), taking them inside-out so whatever still
+has to be dropped is the outermost ring and never an enclosed hole. Forest
+Church writes all 64 grid cells in the same five slabs; the largest went from
+29,772 to 30,210 bytes against the 30,720 cap, so there is little slack left.
+
 ## Asset geometry rules (learned the hard way, in this order)
 
 Three separate defects on the same board all came from assuming an asset's
@@ -332,6 +387,20 @@ shape instead of reading it. The rules that fall out:
   misread once. `review.ps1 360` turns it off again; anything driving it by hand
   has to as well.
 
+- **A 4x4 tower piece is a quarter of an 8x8 tower.** `md_tower_wall_01`
+  measures 4.0 x 2.0 x 4.0 and is not a ring course: stacked, it is a quarter
+  shell, and `md_tower_floor_01` / `md_tower_crenelations_01` are fan-shaped
+  quadrants. Four of each, rotated, make a drum eight tiles across -- a 40 ft
+  keep on a 20 ft rampart, in a lighter stone than the rampart block. That is
+  why the mural towers are square bastions of `city_wall_core`, two courses
+  above the curtain, paved and battlemented with the wall's own pieces.
+  `tools/tower_probe.py` is the probe, and it lays the bridge-deck candidates
+  across one channel on the same board: the harbour deck tiles (1.0 tall,
+  laid by their top so the underside rests on the water) read as a timber
+  pier from every angle; a thin floor on dock legs floated, and a stone
+  causeway read as a fortification. `bridge_deck` is pinned to
+  `Harbor Middle 06`.
+
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**
 
@@ -353,6 +422,15 @@ fine while the board was visibly broken:
    at y=0 and *some* at z=0, so its minimum read as the origin and it was the
    only chunk that never got a marker -- while its pines overhung that corner
    by a tile.
+6. `enclosed_voids` built its barrier from each written chunk's `(row, col)`.
+   Packing fuses a run of cells into one chunk named for its first cell, so a
+   five-slab plan over 64 cells presented five barrier cells and the flood
+   walked through the other 59: on a packed plan the check could never fire.
+   It reads `covers` now.
+7. The off-grid canary had a standing exception nobody had run it against: the
+   far registration marker hugged a pine canopy's fractional overhang at
+   x=187.51. It is rounded out to the half-tile lattice; the canary prints 0
+   on every chunk again, and it should be run on every chunk, every build.
 
 `verify.check_placements` and `verify.enclosed_voids` measure emitted boxes and
 the written chunk plan respectively. **New checks go there, not into the
@@ -381,6 +459,13 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
   nothing wires it onto a second board per building.
 - A tapered map edge. The border ring still ends on a hard straight cut, so
   the map reads as a cropped rectangle from outside (finding 8).
-- Gate furniture. The gate is a tunnel through the rampart with the wall
-  carried over it, but there is no arch dressing, no doors and no gatehouse
-  towers flanking the opening.
+- Gate doors. The gate has its towers now -- square bastions on both jambs,
+  and on every corner of the ring (`pick_wall_towers`; the raster records the
+  ring's vertices in `TileMap.wall_corners`) -- and three tiles of headroom
+  under the lintel. What it does not have is a portcullis or an arch, and the
+  reason is the data: MFCG puts Forest Church's only gate *on a vertex* of the
+  ring, where the road ends, so the raster's disc clearing removes the corner
+  and the opening faces north-west across a 45-degree stair-step. A flat
+  4-wide panel (`Door - Portcullis double`, pinned and unused in the palette)
+  has no straight jamb-to-jamb line to hang on. A gate cut through a straight
+  run of wall would take one; nothing builds it yet.

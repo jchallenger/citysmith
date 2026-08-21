@@ -184,7 +184,7 @@ a bad model response gives you a boring city, never a broken one.
 python -m pytest -q
 ```
 
-84 tests. The slab codec is tested against real TaleSpire slabs in
+146 tests. The slab codec is tested against real TaleSpire slabs in
 `tests/fixtures/` — decoding and re-encoding reproduces the original binary byte
 for byte. Generator tests assert invariants (no overlapping buildings, no
 unreachable rooms, walls resting on floors) rather than exact output, so the

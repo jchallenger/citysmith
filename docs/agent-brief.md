@@ -55,7 +55,27 @@ Verified working, do not re-litigate:
   The old grass bed under translucent water was "a second layer of land".
 - Edge taper drops the outermost ring only, and never touches water or paving â€”
   only land falls away.
-- 137 tests pass. They assert invariants, not exact output.
+- **The wall has towers** (2026-08-21): square bastions of the rampart's own
+  block, two courses above the curtain, paved and battlemented on all four
+  lips, one pair flanking the gate and one on every corner of the ring
+  (`pick_wall_towers`; the raster records ring vertices in
+  `TileMap.wall_corners`). The gate has three tiles of headroom. Reviewed from
+  four sides, overhead and inside the precinct on a 32x30 crop: it reads as a
+  gatehouse. The kit's round-tower pieces were probed and rejected -- they are
+  quadrants of an 8-tile drum in a different stone (`tools/tower_probe.py`).
+- **The planks are bridges** (2026-08-21): the river runs on under the
+  crossing, a harbour deck tile a full tile thick sits flush with the bank
+  with its underside on the water, and rope rails stand on every side that
+  faces open water (`bridge_deck`, `bridge_rail`, `_lay_bridges`). Reviewed on
+  a 48x40 crop from all angles.
+- **No chunk of grass is dropped any more.** Edge open country is fused into a
+  kept chunk of the same layer that has room under the byte cap, inside-out,
+  so Forest Church writes all 64 grid cells in the same five slabs. The
+  south-west quarter used to paste as bare board.
+- `verify.enclosed_voids` reads chunk coverage, not chunk names; the far
+  registration marker sits on the half-tile lattice, so the off-grid canary
+  prints 0 on every chunk with no exception to remember.
+- 146 tests pass. They assert invariants, not exact output.
 
 ## Paste height - FIXED, but understand why before changing it
 
@@ -110,9 +130,22 @@ Until this works, a measurement can be obtained by asking the user to copy a
 region out and paste the base64 into chat â€” they have done this twice and it
 settled questions nothing else could.
 
+**Measured 2026-08-21, on a 40x40 crop:** the selection does return content,
+and it is always *structure*, never *terrain*. At the plane's resting height
+it copied three wall pieces (origins y=0.5). Raised 30 px (`elev -DY 30`) it
+copied one course of roof pieces and nothing else; raised further, empty;
+lowered in steps of 30 px and 300 px it alternated between walls and empty.
+Not once did a grass or cobble tile (origin y=0) come back. The selection
+therefore behaves like a thin horizontal slice at the working plane's height,
+and the plane could not be driven down to turf level synthetically. The hint
+bar goes blank while a selection is active. Still untried: `M` (the ruler icon
+bottom right), and holding `X` *after* the drag begins rather than before.
+
 ## Open problem 2 - the board still does not look right, and the file says it is
 
-**This is the live investigation. Do not start it by re-measuring the file.**
+**Status 2026-08-21: resolved as lighting, with chunk seating measured flush --
+see "What the 2026-08-21 session found" below. The history is kept because
+the reasoning is the reusable part.**
 
 The user reports, from close range in the town, that surfaces sit at different
 levels: grass appearing to stand above adjacent paving, building floors and the
@@ -122,16 +155,16 @@ a real bug but evidently not *this* bug.
 
 ### What has been measured on the emitted geometry, and is clean
 
-Run these before doubting them, but do not expect them to find it — they have
+Run these before doubting them, but do not expect them to find it ï¿½ they have
 been run and they pass:
 
 | check | result |
 |---|---|
 | top height per surface class | ground, field, lane, pier, plaza, street **all 0.5** |
-| the exceptions | 718 ground + 144 field cells at 0.0 — the intended one-course border taper |
+| the exceptions | 718 ground + 144 field cells at 0.0 ï¿½ the intended one-course border taper |
 | building floor vs adjacent ground | 1,179 boundary pairs, **every one flush** (0.0 step) |
 | two surfaces sharing a cell at one height | **0 cells** |
-| chunk bounding boxes | all five identical, `(0,0,0)`–`(188.51, 20.00, 183.04)` |
+| chunk bounding boxes | all five identical, `(0,0,0)`ï¿½`(188.51, 20.00, 183.04)` |
 | water | one level, bed stepped below it by design |
 
 So: the file does not contain the step the screenshots show. Either it is
@@ -142,14 +175,14 @@ introduced at paste time, or it is not geometry at all.
 1. **Paste still moves things.** The bounding-box fix made every chunk present
    the same box, which is necessary but may not be sufficient. Note that a real
    half-tile discrepancy *was* measured on a board once (3.5 relief against a
-   source maximum of 3.0) — that number is trustworthy and unexplained by
+   source maximum of 3.0) ï¿½ that number is trustworthy and unexplained by
    anything now in the code.
 2. **It is rendering.** TaleSpire's lighting produces hard boundaries that
    rotate with the world and vanish at low angles. One such band was chased for
    most of a session and turned out not to be geometry. Shadowed floor tiles
    beside sunlit grass look exactly like a step in a screenshot.
 
-### How to tell them apart — and why copy-out is the priority
+### How to tell them apart ï¿½ and why copy-out is the priority
 
 Only one instrument distinguishes them: **copy the affected region off the board
 and compare it to the source slab.** If the copied relief matches the file, the
@@ -162,8 +195,45 @@ convenience. Everything else here is opinion; that measurement is not.
 Failing that, the cheap discriminator is **angle**: a half-tile step is
 unmistakable from a low oblique and stays put as the camera orbits. A lighting
 boundary flattens out at low angles and can sit at a fixed screen orientation.
-Take both before concluding anything — this exact mistake has been made in both
+Take both before concluding anything ï¿½ this exact mistake has been made in both
 directions on this project.
+
+### What the 2026-08-21 session found
+
+Hypothesis 2, on three independent measurements, with hypothesis 1 refuted
+for layered chunks:
+
+- **Close range, native pixels.** A 40x40 crop of the town centre pasted as
+  landscape then structure and walked round with `review.ps1 360`: grass,
+  gravel lane and cobble meet flush at every junction from eye level. Every
+  floor tile in the build tops out at 0.5 and every one has a roof over it.
+  The dark "pads" that read as raised floor are cobble in a building's shadow
+  beside sunlit grass -- a hard lighting boundary that moves with the sun,
+  not a step.
+- **Chunk seating, measured.** A 32x32 crop cut into four 16x16 landscape
+  chunks plus its structure chunk, pasted in a known order at one cursor cell,
+  is one continuous sheet across every junction from four faces, overhead and
+  in section. Chunks that present the identical bounding box seat identically.
+- **A false positive, worth knowing the shape of.** A three-chunk crop showed
+  a dark line with a soil face along its row boundary from one face and from
+  no other. It was the river: its south bank runs along that row, and a
+  channel seen from the south at a grazing angle is a dark strip with the far
+  bank's face above it. The files had nothing off grade except the border
+  ring. A foreshortened watercourse and a half-tile step are the same picture
+  until the camera comes round the side.
+
+- **A second false positive: distance fog.** Every high overview of the
+  full map shows a razor-sharp horizontal line across the whole frame with
+  greyer ground beyond. It is at the same screen height over town, fields and
+  river alike, climbs the frame when the camera pitches down, never tilts on a
+  yaw, and the ground under it is unremarkable once the camera is brought
+  down to it. It is TaleSpire's fog onset, and it sits roughly where the
+  z=48 chunk boundary would be from the default paste position -- which is
+  why it was believed twice.
+
+The generator's ground is one height (`grade`) everywhere except the outer
+border ring; `tools/`-free check: build the map, filter landscape ground tiles
+whose top is not `grade`, and the only rows that come back are 0 and the last.
 
 ### What not to do
 
@@ -176,12 +246,25 @@ directions on this project.
 - **Rampart scale.** Four cells thick, ~25 ft tall against two-storey cottages;
   forms dark canyons. Height is now a named parameter, `TOWN_WALL_TILES`. This
   is a taste call â€” surface it to the user rather than deciding it.
-- **215 tile seams** (`verify` warns, does not fail). Mostly the doubled
-  crenellation where a stair-step faces out two ways. The alternative is a gap
-  at every step corner.
+- **265 tile seams** (`verify` warns, does not fail), 114 unique pairs. 70 are
+  two merlons meeting at a corner cell -- the wall's stair-steps and now the
+  four corners of every tower; 20 are two rope rails meeting at a corner of a
+  diagonal plank. All are 0.5x0.5 in plan and read as a post. The alternative
+  is a gap at every corner. The other 24 are pre-existing door/wall overlaps.
+- **No portcullis or gate doors.** Forest Church's only gate sits on a vertex
+  of the ring where the road ends, so the opening is a missing corner facing
+  north-west across a 45-degree stair-step, and a flat 4-wide panel has no
+  straight line to hang on. `city_gate` / `city_gate_arch` stay pinned and
+  unused. A gate cut through a straight run would take one.
 - **Glazed facades.** Tall buildings carry a dark panel in every wall bay and
   read as modern curtain wall rather than shuttered upper storeys.
 - **Map edge** is a hard straight cut into the void from outside.
+- **Fused chunk labels can collide.** With a tiny `--max-assets` (150 on a
+  32x32 crop) the quadtree subdivides cells and `_pack_chunks` then fuses
+  quadrants from *different* regions into runs that are all named for the same
+  first cell -- three chunks called `r00c00+1`, each overwriting the last file.
+  Harmless at the default budget, real at small ones; the label should come
+  from `covers`, not from the first cell plus a count.
 - **Interiors** are unbuilt. `floorplan.py` has the room geometry; nothing wires
   it to a second board per building. Deliberately parked.
 
@@ -224,7 +307,7 @@ Non-obvious rules, all verified in game:
   it reads as a rectangular hole in the terrain.
 - **Read the camera back, do not track it in your head.** Every camera command
   is a *relative* move, and a session that only issues them ends up over the
-  void wondering where the map went — this happened repeatedly. `camerastate`
+  void wondering where the map went ï¿½ this happened repeatedly. `camerastate`
   reports the height slider's handle position (numeric, comparable between
   calls) and saves a crop of the compass rose, which shows bearing by where N
   points and pitch by how squashed the circle is. Check it before concluding
@@ -252,14 +335,19 @@ Non-obvious rules, all verified in game:
 
 ## Suggested next iterations
 
-1. **Get copy-out working synthetically** (Open problem 1). It is the only
-   instrument that can tell "the file is wrong" from "the paste is wrong", and
-   Open problem 2 cannot be settled without it. Everything else is opinion.
-2. **Settle Open problem 2** with that instrument: copy the affected region,
-   compare relief against the source slab, and let the number decide.
-3. Then wire the comparison into `verify` as a standing board-vs-file check, so
+1. **Get copy-out working synthetically** (Open problem 1). It is still the
+   only instrument that can tell "the file is wrong" from "the paste is
+   wrong". The slice finding above narrows it: the thing to drive is the
+   working plane's height relative to the turf, or whatever `M` does.
+2. Then wire the comparison into `verify` as a standing board-vs-file check, so
    a bad paste reports itself instead of waiting to be noticed in a screenshot.
+3. **Gate doors for straight-run gates.** Detect a gate whose passage crosses
+   a straight stretch of wall, and hang `Door - Portcullis double` (4 wide,
+   3.75 tall -- the top 0.75 buries in the lintel, which is invisible) across
+   the jamb-to-jamb line. Forest Church's corner gate will never take one.
 4. Only then, cosmetics. The glazed facades read worst at play height, and the
-   rampart reads as a maze of parallel runs from directly above — worth checking
+   rampart reads as a maze of parallel runs from directly above -- worth checking
    whether that is a real shape problem or an artifact of cropping across a
-   stair-stepped diagonal.
+   stair-stepped diagonal. Two taste calls are the user's, not the agent's:
+   `TOWN_WALL_TILES` (6.0, a 30 ft wall against two-storey cottages) and the
+   facade panels.
