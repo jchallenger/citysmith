@@ -388,10 +388,10 @@ def test_chunk_labels_name_the_row_and_column():
     b.add(place_wall(WALL, 6, 6, "n", 0.5))
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
 
-    labels = [c.label for c in plan.chunks]
+    labels = [c.region for c in plan.chunks]
     assert len(labels) == len(set(labels))
     assert "r01c01" in labels
-    by_label = {c.label: c for c in plan.chunks}
+    by_label = {c.region: c for c in plan.chunks}
     assert (by_label["r01c01"].x0, by_label["r01c01"].z0) == (4, 4)
 
 
@@ -432,7 +432,7 @@ def test_open_country_chunks_are_skipped():
     b.add(place_wall(WALL, 6, 6, "n", 0.5))       # one built thing, far corner
 
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4)
-    assert [c.label for c in plan.chunks] == ["r01c01"]
+    assert [c.region for c in plan.chunks] == ["r01c01"]
     assert len(plan.skipped) == 3
     assert plan.assets_skipped == 48 + 1          # three grass quarters + fern
     assert b.stats.chunks_skipped == 3
@@ -455,7 +455,7 @@ def test_sunken_ground_is_not_open_country():
     b.add(place_wall(WALL, 6, 6, "n", 0.5))
 
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
-    assert "r00c00" in {c.label for c in plan.chunks}
+    assert "r00c00" in {c.region for c in plan.chunks}
 
 
 def test_oversized_chunks_subdivide_until_they_fit():
@@ -567,7 +567,7 @@ def test_enclosed_open_country_is_kept():
 
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
     assert (plan.rows, plan.cols) == (3, 3)
-    assert "r01c01" in [c.label for c in plan.chunks]
+    assert "r01c01" in [c.region for c in plan.chunks]
     assert plan.skipped == []
 
 
@@ -578,7 +578,7 @@ def test_open_country_is_still_trimmed_from_the_edges():
     b.add(place_wall(WALL, 1, 1, "n", 0.5))
 
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
-    assert [c.label for c in plan.chunks] == ["r00c00"]
+    assert [c.region for c in plan.chunks] == ["r00c00"]
     assert len(plan.skipped) == 8
 
 
@@ -776,7 +776,7 @@ def test_tapered_ground_is_still_open_country():
     b.add(place_wall(WALL, 6, 6, "n", 0.5))    # one built thing, far corner
 
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
-    assert [c.label for c in plan.chunks] == ["r01c01"]
+    assert [c.region for c in plan.chunks] == ["r01c01"]
     assert len(plan.skipped) == 3, "tapered border chunks must still be skippable"
 
 
@@ -795,7 +795,7 @@ def test_ground_off_its_baseline_still_disqualifies_a_chunk():
     b.add(place_wall(WALL, 6, 6, "n", 0.5))
 
     plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
-    assert "r00c00" in [c.label for c in plan.chunks]
+    assert "r00c00" in [c.region for c in plan.chunks]
 
 
 def test_edge_taper_never_leaves_the_outermost_block_at_grade():
@@ -1345,3 +1345,62 @@ def test_floating_geometry_is_caught():
     problems = floating_placements(b, None)
     assert problems, "a wall over bare board was not reported"
     assert "stand over nothing" in problems[0]
+
+
+def test_a_chunk_holds_one_layer_and_terrain_is_all_in_one_of_them():
+    """Splitting by layer is what removes the terrain-meets-terrain seam.
+
+    Region splitting alone means every chunk after the first is pasted over
+    ground the previous one laid, and a paste comes to rest on whatever is
+    under the cursor -- so chunks can land at different heights and the join
+    shows as a step in open grass. If all the ground is one layer it cannot
+    disagree with itself, whatever the paste does.
+    """
+    from citysmith.build import LANDSCAPE, LAYERS, STRUCTURE
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 12, 12)
+    with b.layer(STRUCTURE):
+        for tz in (1, 5, 9):
+            for tx in (1, 5, 9):
+                b.add(place_wall(WALL, tx, tz, "n", 0.5))
+
+    assert len(b.layer_of) == len(b.placements)
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert {c.layer for c in plan.chunks} == set(LAYERS)
+
+    ground = {p.asset_id for p in b.placements if p.asset_id == GROUND.id}
+    for chunk in plan.chunks:
+        if chunk.layer != LANDSCAPE:
+            stray = [p for p in chunk.slab.placements
+                     if p.asset_id in ground and (p.x, p.y, p.z) != (0.0, 0.0, 0.0)]
+            assert stray == [], f"{chunk.label} carries terrain"
+
+
+def test_layered_chunks_still_share_one_origin():
+    """The layers are pasted at the same anchor, so they must still register."""
+    from citysmith.build import LANDSCAPE, STRUCTURE, volume_bounds
+    from citysmith.verify import chunk_anchors
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 12, 12)
+    with b.layer(STRUCTURE):
+        b.add(place_wall(WALL, 5, 5, "n", 0.5))
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    corners = {tuple(round(v, 3) for v in volume_bounds(c.slab, b.byid)[0])
+               for c in plan.chunks}
+    assert corners == {(0.0, 0.0, 0.0)}
+    assert chunk_anchors(plan, b.byid) == []
+
+
+def test_an_unlayered_plan_still_works():
+    """`by_layer=False` keeps the old single-body behaviour for probes."""
+    b = _builder()
+    _ground_field(b, 8, 8)
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False, by_layer=False)
+    assert {c.layer for c in plan.chunks} == {""}
+    assert [c.label for c in plan.chunks] == [c.region for c in plan.chunks]

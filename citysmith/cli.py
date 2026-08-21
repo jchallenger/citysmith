@@ -107,12 +107,19 @@ def _chunk_table(plan, stem: str) -> str:
     lines.append("")
 
     single = len(plan.chunks) == 1
+    last_layer = None
     for chunk in plan.chunks:
+        # Grouped by layer, and in paste order: the landscape goes down first,
+        # onto bare board, and everything else stands on it.
+        if chunk.layer != last_layer:
+            last_layer = chunk.layer
+            if chunk.layer:
+                lines.append(f"  [{chunk.layer}]")
         name = (f"{stem}.slab.txt" if single
                 else f"{stem}-{chunk.label}.slab.txt")
         span = f" ({len(chunk.covers)} cells)" if len(chunk.covers) > 1 else ""
         lines.append(
-            f"  {chunk.label:>12}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
+            f"  {chunk.region:>12}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
             f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets"
             f"{span}  {name}"
         )
@@ -127,12 +134,17 @@ def _chunk_table(plan, stem: str) -> str:
 
 #: How to paste a chunked map. Every chunk carries a registration marker at the
 #: whole map's corner, so they share one bounding box and one anchor point.
-PASTE_HELP = (
-    "Every chunk shares one origin (a registration marker at the map's corner),\n"
-    "so paste each file at the SAME anchor point, in any order. Do not move the\n"
-    "camera between pastes. You can paste a subset -- each chunk lands in its own\n"
-    "region regardless of which others you paste."
-)
+PASTE_HELP = """Every chunk shares one origin (a registration marker at the map's corner),
+so paste each file at the SAME anchor point. Do not move the camera between
+pastes.
+
+PASTE THE LANDSCAPE LAYER FIRST, then the structures. A paste comes to rest on
+whatever is under the cursor, so the first slab onto bare board sets the height
+everything else is measured from. Within a layer the order does not matter and
+a subset is fine -- each chunk lands in its own region.
+
+Re-pasting one layer over a board that already has the other is the fast way to
+review a change: a new roof does not need 20,000 grass tiles laid again."""
 
 
 # -- commands -----------------------------------------------------------------

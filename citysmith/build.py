@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import contextlib
 import math
 import random
 import zlib
@@ -50,6 +51,30 @@ ROT_N, ROT_E, ROT_S, ROT_W = 0, 6, 12, 18
 
 SIDES = ("n", "e", "s", "w")
 _SIDE_ROT = {"n": ROT_N, "e": ROT_E, "s": ROT_S, "w": ROT_W}
+
+#: What a placement *is*, for splitting a map into pasteable layers.
+#:
+#: Splitting by region alone was the original design and it has one structural
+#: problem: every chunk after the first is pasted over ground the previous one
+#: laid, and a paste comes to rest on whatever is under the cursor. So each
+#: chunk can land at its own height, and a whole quarter of the map sits a
+#: course above its neighbour with nothing wrong in the file. Terrain meeting
+#: terrain at a seam is where that shows, and it is the one thing a reviewer
+#: actually notices.
+#:
+#: Splitting by layer removes that seam entirely: all the ground is one body,
+#: pasted once onto bare board, so it cannot disagree with itself. Region
+#: splitting still happens *within* a layer when it exceeds the byte cap, but
+#: the pieces of one layer are the ones sharing a registration marker and a
+#: single paste height.
+#:
+#: It also makes the build loop usable. Changing a roof no longer means
+#: re-laying 11,000 grass tiles to look at it -- paste the structure layer over
+#: the landscape that is already down.
+LANDSCAPE = "landscape"
+STRUCTURE = "structure"
+LAYERS = (LANDSCAPE, STRUCTURE)
+
 
 #: Chunk edge in tiles. 24 tiles is 120 ft -- roughly a city block, so a chunk
 #: reads as somewhere ("the quarter east of the bridge") and open country
@@ -392,6 +417,27 @@ class Builder:
         #: channel is a feature and must keep disqualifying its chunk.
         self.ground_baseline: dict[tuple[int, int], float] = {}
         self._byid: dict[str, Asset] | None = None
+        #: Which layer each placement belongs to, parallel to ``placements``.
+        #: Recorded at ``add`` time because it is a property of the *pass* that
+        #: emitted it, and nothing about a finished placement can recover it.
+        self.layer_of: list[str] = []
+        self._layer = LANDSCAPE
+
+    @contextlib.contextmanager
+    def layer(self, name: str):
+        """Tag everything added inside the block as belonging to ``name``.
+
+        Set around whole passes rather than threaded through every call: a
+        pass knows what it is building, and an individual ``place_tile`` does
+        not.
+        """
+        if name not in LAYERS:
+            raise ValueError(f"unknown layer {name!r}; expected one of {LAYERS}")
+        was, self._layer = self._layer, name
+        try:
+            yield
+        finally:
+            self._layer = was
 
     @property
     def byid(self) -> dict[str, Asset]:
@@ -402,6 +448,7 @@ class Builder:
 
     def add(self, placement: Placement, *, prop: bool = False) -> None:
         self.placements.append(placement)
+        self.layer_of.append(self._layer)
         if prop:
             self.stats.props += 1
             self.prop_ids.add(placement.asset_id)
@@ -456,7 +503,7 @@ class Builder:
     def chunk_plan(self, max_assets: int = 4000, *, register: bool = True,
                    chunk_tiles: int = DEFAULT_CHUNK_TILES,
                    skip_open_country: bool = True,
-                   pack: bool = True) -> "ChunkPlan":
+                   pack: bool = True, by_layer: bool = True) -> "ChunkPlan":
         """Cut the map into a 2D grid of pasteable chunks.
 
         **The grid.** Chunks are square tile regions ``chunk_tiles`` on a side,
@@ -533,54 +580,86 @@ class Builder:
         cols = max(1, math.ceil((ex - ox) / size))
         rows = max(1, math.ceil((ez - oz) / size))
 
-        buckets: dict[tuple[int, int], list[Placement]] = {}
-        for p in slab.placements:
-            c = min(cols - 1, max(0, int((p.x - ox) // size)))
-            r = min(rows - 1, max(0, int((p.z - oz) // size)))
-            buckets.setdefault((r, c), []).append(p)
-
-        cells: list[_Cell] = []
-        for (r, c), items in sorted(buckets.items()):
-            cells.extend(_subdivide(_Cell(
-                r, c, "",
-                ox + c * size, oz + r * size,
-                min(ox + (c + 1) * size, ex), min(oz + (r + 1) * size, ez),
-                items,
-            ), max_assets))
-        cells.sort(key=lambda cell: (cell.row, cell.col, cell.quad))
-
         terrain, grade = self._grade_terrain(slab.placements)
         # Placements were translated to whole tiles above; the baseline was
         # recorded in the untranslated frame, so move it to match.
         idx, idz = int(round(dx)), int(round(dz))
         baseline = {(kx + idx, kz + idz): v + dy
                     for (kx, kz), v in self.ground_baseline.items()}
-        made = [
-            SlabChunk(
-                row=cell.row, col=cell.col, quad=cell.quad,
-                x0=cell.x0 - dx, z0=cell.z0 - dz,
-                x1=cell.x1 - dx, z1=cell.z1 - dz,
-                slab=Slab(cell.items),
-                open_country=_is_open_country(
-                    cell.items, terrain, self.prop_ids, grade, baseline),
-            )
-            for cell in cells
-        ]
 
-        kept, skipped = _trim_open_country(made, rows, cols)
-        if not skip_open_country or not kept:
-            kept, skipped = made, []
+        # **Layer first, region second.** The grid, the origin and the whole-tile
+        # shift are computed once over the whole map above, so every layer is cut
+        # on the same lattice and shares a registration marker; only the
+        # *contents* are partitioned. That is what makes the pieces of one layer
+        # the ones that have to agree with each other.
+        tagged = list(zip(self.placements, self.layer_of))
+        moved = {id(a): b for a, b in zip(self.placements, slab.placements)}
+        if by_layer:
+            groups = [
+                (name, [moved[id(pl)] for pl, lay in tagged if lay == name])
+                for name in LAYERS
+            ]
+            groups = [(n, ps) for n, ps in groups if ps]
+        else:
+            groups = [("", list(slab.placements))]
 
-        # Detection wants small chunks; pasting wants few. Those pull opposite
-        # ways -- at 8 tiles this map skips 15% of its assets but emits 139
-        # files, at 32 tiles it emits 15 files and skips 2%. So detect fine,
-        # then pack the survivors back up to the per-slab budget: the skipping
-        # is decided at chunk resolution, the paste count at budget resolution.
-        # Packing walks the grid boustrophedon (row-major, alternate rows
-        # reversed) so consecutive chunks in a slab are physically adjacent and
-        # a partial paste still lands as a contiguous piece of town.
-        if pack:
-            kept = _pack_chunks(kept, max_assets, cols)
+        kept: list[SlabChunk] = []
+        skipped: list[SlabChunk] = []
+        for name, group in groups:
+            buckets: dict[tuple[int, int], list[Placement]] = {}
+            for p in group:
+                c = min(cols - 1, max(0, int((p.x - ox) // size)))
+                r = min(rows - 1, max(0, int((p.z - oz) // size)))
+                buckets.setdefault((r, c), []).append(p)
+
+            cells: list[_Cell] = []
+            for (r, c), items in sorted(buckets.items()):
+                cells.extend(_subdivide(_Cell(
+                    r, c, "",
+                    ox + c * size, oz + r * size,
+                    min(ox + (c + 1) * size, ex), min(oz + (r + 1) * size, ez),
+                    items,
+                ), max_assets))
+            cells.sort(key=lambda cell: (cell.row, cell.col, cell.quad))
+
+            made = [
+                SlabChunk(
+                    row=cell.row, col=cell.col, quad=cell.quad,
+                    x0=cell.x0 - dx, z0=cell.z0 - dz,
+                    x1=cell.x1 - dx, z1=cell.z1 - dz,
+                    slab=Slab(cell.items),
+                    open_country=_is_open_country(
+                        cell.items, terrain, self.prop_ids, grade, baseline),
+                    layer=name,
+                )
+                for cell in cells
+            ]
+
+            # Open country is a *landscape* judgement -- a region of nothing but
+            # grass and trees. The structure layer is empty over open country by
+            # construction, so there is nothing there to skip and no flood to
+            # run; trimming it would only ever drop real building chunks whose
+            # neighbours happen to be sparse.
+            if name == STRUCTURE:
+                layer_kept, layer_skipped = made, []
+            else:
+                layer_kept, layer_skipped = _trim_open_country(made, rows, cols)
+                if not skip_open_country or not layer_kept:
+                    layer_kept, layer_skipped = made, []
+
+            # Detection wants small chunks; pasting wants few. Those pull opposite
+            # ways -- at 8 tiles this map skips 15% of its assets but emits 139
+            # files, at 32 tiles it emits 15 files and skips 2%. So detect fine,
+            # then pack the survivors back up to the per-slab budget: the skipping
+            # is decided at chunk resolution, the paste count at budget resolution.
+            # Packing walks the grid boustrophedon (row-major, alternate rows
+            # reversed) so consecutive chunks in a slab are physically adjacent and
+            # a partial paste still lands as a contiguous piece of town.
+            if pack:
+                layer_kept = _pack_chunks(layer_kept, max_assets, cols)
+
+            kept.extend(layer_kept)
+            skipped.extend(layer_skipped)
 
         if register and len(kept) > 1:
             marker = self.palette.resolve("ground") or self.palette.resolve("floor")
@@ -708,6 +787,10 @@ def _fuse(run: list["SlabChunk"]) -> "SlabChunk":
         row=first.row, col=first.col,
         quad=f"+{len(run) - 1}",
         x0=x0, z0=z0, x1=x1, z1=z1, slab=Slab(placements), open_country=False,
+        # A run only ever holds chunks from one layer -- packing runs inside a
+        # layer -- so the layer carries through. Dropping it here is what made
+        # the written files lose their layer while the skipped ones kept it.
+        layer=first.layer,
         covers=covers,
     )
 
@@ -730,13 +813,25 @@ class SlabChunk:
     z1: int
     slab: Slab
     open_country: bool = False
+    #: Which layer this chunk belongs to -- see :data:`LAYERS`. Empty when the
+    #: plan was built unlayered.
+    layer: str = ""
     #: Grid cells this chunk covers. One cell normally; packing
     #: fuses many, and the map must still mark all of them.
     covers: tuple[tuple[int, int], ...] = ()
 
     @property
     def label(self) -> str:
-        """Region name, e.g. ``r02c03`` -- or ``r02c03ne`` once subdivided."""
+        """Layer and region, e.g. ``landscape-r02c03`` -- the filename stem."""
+        return f"{self.layer}-{self.region}" if self.layer else self.region
+
+    @property
+    def region(self) -> str:
+        """Grid cell only, e.g. ``r02c03`` -- or ``r02c03ne`` once subdivided.
+
+        Separate from :attr:`label` because two chunks in different layers cover
+        the *same* region, and the map table wants to say so.
+        """
         return f"r{self.row:02d}c{self.col:02d}{self.quad}"
 
     @property
@@ -2055,8 +2150,9 @@ def build_from_tilemap(
         R.FLOOR: "floor",
     }
     taper = edge_taper(tm)
-    _lay_terrain(b, tm, surface_roles, grade=floor.size_y, taper=taper)
-    _lay_quays(b, tm, grade=floor.size_y, taper=taper)
+    with b.layer(LANDSCAPE):
+        _lay_terrain(b, tm, surface_roles, grade=floor.size_y, taper=taper)
+        _lay_quays(b, tm, grade=floor.size_y, taper=taper)
 
     top = floor.size_y
     # A storey is a wall *plus the floor above it*. They were the same height
@@ -2075,134 +2171,137 @@ def build_from_tilemap(
     deck = upper.size_y if upper is not None else 0.0
     storey_h = ext_wall.size_y + deck
 
-    # Building shells: perimeter only -- interiors are their own boards.
-    #
-    # Height comes from the building's own storey count, not a single figure
-    # applied to the whole town. A village is mostly single-storey cottages
-    # with a couple of two-storey inns; giving every structure the same wall
-    # made the first board look like a field of towers. ``storeys`` is now a
-    # ceiling for the tallest building rather than the height of every one.
-    # Every doorway, not just the first: large buildings get a second
-    # entrance and reading only index 0 silently dropped them.
-    doors = {cell for cells in tm.doors.values() for cell in cells}
+    # The shell, the roof and the circuit are one layer: a building is a
+    # thing you stand *on* the ground, not part of it.
+    with b.layer(STRUCTURE):
+        # Building shells: perimeter only -- interiors are their own boards.
+        #
+        # Height comes from the building's own storey count, not a single figure
+        # applied to the whole town. A village is mostly single-storey cottages
+        # with a couple of two-storey inns; giving every structure the same wall
+        # made the first board look like a field of towers. ``storeys`` is now a
+        # ceiling for the tallest building rather than the height of every one.
+        # Every doorway, not just the first: large buildings get a second
+        # entrance and reading only index 0 silently dropped them.
+        doors = {cell for cells in tm.doors.values() for cell in cells}
 
-    # Civic buildings are built in dressed stone with arched openings and a
-    # fancier door, so importance reads off the architecture rather than off
-    # storey count alone. Everything else is a common house: plastered wall,
-    # timber-framed window, peasant door -- with the wall variant dealt per
-    # building so a row of cottages is not one repeated texture.
-    window = palette.resolve("wall_window")
-    civic_wall = palette.resolve("wall_civic")
-    civic_window = palette.resolve("wall_window_civic")
-    civic_door = palette.resolve("door_civic")
-    wall_variants = [palette.resolve("wall", v) or ext_wall for v in range(3)]
+        # Civic buildings are built in dressed stone with arched openings and a
+        # fancier door, so importance reads off the architecture rather than off
+        # storey count alone. Everything else is a common house: plastered wall,
+        # timber-framed window, peasant door -- with the wall variant dealt per
+        # building so a row of cottages is not one repeated texture.
+        window = palette.resolve("wall_window")
+        civic_wall = palette.resolve("wall_civic")
+        civic_window = palette.resolve("wall_window_civic")
+        civic_door = palette.resolve("door_civic")
+        wall_variants = [palette.resolve("wall", v) or ext_wall for v in range(3)]
 
-    # Outside corners are full-cell pieces, dealt per building on the same
-    # variant index as the wall so a cottage's corners match its own walls.
-    # A corner that is not exactly one cell square, or not the same height as
-    # the wall it stacks beside, is rejected rather than placed: the first
-    # would overhang its neighbours and drag the whole board off the tile grid,
-    # the second would break the floor line at every storey above the ground.
-    def _usable_corner(asset):
-        if asset is None:
-            return None
-        if (asset.size_x, asset.size_z) != (1.0, 1.0):
-            return None
-        if abs(asset.size_y - ext_wall.size_y) > 1e-6:
-            return None
-        return asset
+        # Outside corners are full-cell pieces, dealt per building on the same
+        # variant index as the wall so a cottage's corners match its own walls.
+        # A corner that is not exactly one cell square, or not the same height as
+        # the wall it stacks beside, is rejected rather than placed: the first
+        # would overhang its neighbours and drag the whole board off the tile grid,
+        # the second would break the floor line at every storey above the ground.
+        def _usable_corner(asset):
+            if asset is None:
+                return None
+            if (asset.size_x, asset.size_z) != (1.0, 1.0):
+                return None
+            if abs(asset.size_y - ext_wall.size_y) > 1e-6:
+                return None
+            return asset
 
-    corner_variants = [_usable_corner(palette.resolve("wall_corner", v)) for v in range(3)]
-    civic_corner = _usable_corner(palette.resolve("wall_corner_civic"))
+        corner_variants = [_usable_corner(palette.resolve("wall_corner", v)) for v in range(3)]
+        civic_corner = _usable_corner(palette.resolve("wall_corner_civic"))
 
-    plan = footprints(tm)
-    corner_ok = {
-        bid: _corners_affordable(cells) for bid, cells in plan.items()
-    }
+        plan = footprints(tm)
+        corner_ok = {
+            bid: _corners_affordable(cells) for bid, cells in plan.items()
+        }
 
-    for bid, cells in tm.perimeter.items():
-        floors = storeys_of(tm, bid, storeys)
-        civic = bid.split("-")[0] in CIVIC_KINDS
-        if civic:
-            # Fall back to the common-house piece per slot: a style with no
-            # civic kit (cyberpunk has none) otherwise gets entry=None, and the
-            # door branch below silently lays a solid wall across the doorway
-            # -- a temple with no way in, while verify still reports it
-            # enterable because verify reads the tilemap, not the placements.
-            face = civic_wall or ext_wall
-            glass, entry = civic_window or window, civic_door or door_asset
-            nook = civic_corner
-        else:
-            variant = zlib.crc32(bid.encode()) % len(wall_variants)
-            face = wall_variants[variant]
-            glass, entry = window, door_asset
-            nook = corner_variants[variant]
-        if not corner_ok.get(bid, True):
-            nook = None   # too small to spend cells on corners
+        for bid, cells in tm.perimeter.items():
+            floors = storeys_of(tm, bid, storeys)
+            civic = bid.split("-")[0] in CIVIC_KINDS
+            if civic:
+                # Fall back to the common-house piece per slot: a style with no
+                # civic kit (cyberpunk has none) otherwise gets entry=None, and the
+                # door branch below silently lays a solid wall across the doorway
+                # -- a temple with no way in, while verify still reports it
+                # enterable because verify reads the tilemap, not the placements.
+                face = civic_wall or ext_wall
+                glass, entry = civic_window or window, civic_door or door_asset
+                nook = civic_corner
+            else:
+                variant = zlib.crc32(bid.encode()) % len(wall_variants)
+                face = wall_variants[variant]
+                glass, entry = window, door_asset
+                nook = corner_variants[variant]
+            if not corner_ok.get(bid, True):
+                nook = None   # too small to spend cells on corners
 
-        # Group the building's exposed edges by cell. A cell with two adjacent
-        # sides exposed is an outside corner, and placing a wall along each of
-        # them puts two wall ends in the same square -- the doubled geometry
-        # that showed on a third of our ground-course cells, and that the
-        # hand-built community slabs never contain. One full-cell corner piece
-        # replaces the pair. dict preserves the raster's cell order, so
-        # placements come out in the order they did before.
-        sides_at: dict[tuple[int, int], set[str]] = {}
-        for x, z, side in cells:
-            sides_at.setdefault((x, z), set()).add(side)
+            # Group the building's exposed edges by cell. A cell with two adjacent
+            # sides exposed is an outside corner, and placing a wall along each of
+            # them puts two wall ends in the same square -- the doubled geometry
+            # that showed on a third of our ground-course cells, and that the
+            # hand-built community slabs never contain. One full-cell corner piece
+            # replaces the pair. dict preserves the raster's cell order, so
+            # placements come out in the order they did before.
+            sides_at: dict[tuple[int, int], set[str]] = {}
+            for x, z, side in cells:
+                sides_at.setdefault((x, z), set()).add(side)
 
-        own = plan.get(bid, set())
-        for (x, z), exposed in sides_at.items():
-            corner = CORNER_BY_SIDES.get(frozenset(exposed))
-            # Same reflex problem as the roof: at the elbow of an L the wall
-            # turns into the building, so a full-cell outside corner there
-            # looks wrong and eats a floor tile the plan needs.
-            if corner is not None and _is_reflex(
-                    {c: 0 for c in own}, x, z, tuple(sorted(exposed))):
-                corner = None
-            # A door has to keep a segment of its own, so a corner cell
-            # carrying one falls back to per-side walls for the ground course
-            # only; the storeys above it still get the corner piece.
-            door_cell = any((x, z, s) in doors for s in exposed)
-            for level in range(floors):
-                y = top + level * storey_h
-                if corner is not None and nook is not None and not (level == 0 and door_cell):
-                    b.add(place_tile(nook, x, z, y, WALL_CORNER_ROT[corner]))
-                    continue
-                for side in sorted(exposed):
-                    if level == 0 and (x, z, side) in doors and entry is not None:
-                        b.add(place_wall(entry, x, z, side, y))
+            own = plan.get(bid, set())
+            for (x, z), exposed in sides_at.items():
+                corner = CORNER_BY_SIDES.get(frozenset(exposed))
+                # Same reflex problem as the roof: at the elbow of an L the wall
+                # turns into the building, so a full-cell outside corner there
+                # looks wrong and eats a floor tile the plan needs.
+                if corner is not None and _is_reflex(
+                        {c: 0 for c in own}, x, z, tuple(sorted(exposed))):
+                    corner = None
+                # A door has to keep a segment of its own, so a corner cell
+                # carrying one falls back to per-side walls for the ground course
+                # only; the storeys above it still get the corner piece.
+                door_cell = any((x, z, s) in doors for s in exposed)
+                for level in range(floors):
+                    y = top + level * storey_h
+                    if corner is not None and nook is not None and not (level == 0 and door_cell):
+                        b.add(place_tile(nook, x, z, y, WALL_CORNER_ROT[corner]))
                         continue
-                    # Windows break the blank masonry that made every facade
-                    # read as a fortification. Roughly every third segment,
-                    # chosen by a stable hash so rebuilds are identical; ground
-                    # floors get fewer (privacy, and doors already break those
-                    # runs). zlib.crc32, not hash(): str hashes are salted per
-                    # process, so hash() would re-deal windows every rebuild.
-                    key = zlib.crc32(f"{bid}:{x}:{z}:{level}:{side}".encode())
-                    seg = glass is not None and key % (4 if level == 0 else 3) == 0
-                    b.add(place_wall(glass if seg else face, x, z, side, y))
+                    for side in sorted(exposed):
+                        if level == 0 and (x, z, side) in doors and entry is not None:
+                            b.add(place_wall(entry, x, z, side, y))
+                            continue
+                        # Windows break the blank masonry that made every facade
+                        # read as a fortification. Roughly every third segment,
+                        # chosen by a stable hash so rebuilds are identical; ground
+                        # floors get fewer (privacy, and doors already break those
+                        # runs). zlib.crc32, not hash(): str hashes are salted per
+                        # process, so hash() would re-deal windows every rebuild.
+                        key = zlib.crc32(f"{bid}:{x}:{z}:{level}:{side}".encode())
+                        seg = glass is not None and key % (4 if level == 0 else 3) == 0
+                        b.add(place_wall(glass if seg else face, x, z, side, y))
 
-    # Upper-storey floors. Without these a multi-storey building is a hollow
-    # box, and now that facades carry windows you can see straight through one
-    # to the underside of the roof. One slab per cell per storey above ground.
-    if upper is not None:
-        for bid, cells_xy in sorted(plan.items()):
-            # Through the top storey, not up to it: the highest slab is the
-            # ceiling the roof seats on. Each sits in the gap *below* its
-            # storey's wall course, resting on the wall beneath.
-            for level in range(1, storeys_of(tm, bid, storeys) + 1):
-                y = top + level * storey_h - deck
-                for x, z in sorted(cells_xy):
-                    b.add(place_tile(upper, x, z, y))
+        # Upper-storey floors. Without these a multi-storey building is a hollow
+        # box, and now that facades carry windows you can see straight through one
+        # to the underside of the roof. One slab per cell per storey above ground.
+        if upper is not None:
+            for bid, cells_xy in sorted(plan.items()):
+                # Through the top storey, not up to it: the highest slab is the
+                # ceiling the roof seats on. Each sits in the gap *below* its
+                # storey's wall course, resting on the wall beneath.
+                for level in range(1, storeys_of(tm, bid, storeys) + 1):
+                    y = top + level * storey_h - deck
+                    for x, z in sorted(cells_xy):
+                        b.add(place_tile(upper, x, z, y))
 
-    _build_porches(b, tm, floor.size_y, taper, storey_h)
-    towers = pick_towers(tm, storeys)
-    if roof_asset is not None:
-        _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
-    _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
-
-    _lay_town_wall(b, tm, town_wall, top, wall_tiles)
+    with b.layer(STRUCTURE):
+        _build_porches(b, tm, floor.size_y, taper, storey_h)
+        towers = pick_towers(tm, storeys)
+        if roof_asset is not None:
+            _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
+        _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
+        _lay_town_wall(b, tm, town_wall, top, wall_tiles)
 
     _dress_districts(b, tm, grade=floor.size_y, taper=taper)
 
@@ -2635,7 +2734,11 @@ def _dress_districts(b: Builder, tm, grade: float,
         return not any((cx - sx) ** 2 + (cz - sz) ** 2 < (r + 1.0) ** 2
                        for sx, sz in felled)
 
-    _hang_signs(b, tm, scatter, grade, taper)
+    # Signs hang off a building and the goods are stacked against one, so they
+    # belong with the structures; the trees, verges and seam dressing below are
+    # landscape. This pass is the one place the two mix.
+    with b.layer(STRUCTURE):
+        _hang_signs(b, tm, scatter, grade, taper)
     near_town = building_distance(tm)
     market = [b.palette.resolve("market_goods", v) for v in range(4)]
     market = [m for m in market if m is not None]
@@ -2780,7 +2883,8 @@ def _dress_districts(b: Builder, tm, grade: float,
                     pick = cart if rng.random() < 0.4 and cart else barrels
                     scatter.one(pick, x + 0.5, z + 0.5, here, rng.randrange(24))
 
-    _stack_trade_goods(b, tm, scatter, rng, grade, taper)
+    with b.layer(STRUCTURE):
+        _stack_trade_goods(b, tm, scatter, rng, grade, taper)
     # Last, so it can see everything already standing and not fight it.
     _dress_seams(b, tm, scatter, rng, grade, taper)
 

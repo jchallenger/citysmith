@@ -201,6 +201,38 @@ actually matters, all confirmed in-game:
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
   `Shift`+scroll raise/lower.
 
+## Chunking: layer first, region second
+
+A map is split into **layers** before it is split into regions.
+`build.LAYERS` is `landscape` (terrain, water, quays, trees, verges, seam
+dressing) and `structure` (building shells, upper floors, porches, roofs,
+towers, the town wall, and the signs and goods that hang off a building).
+`Builder.layer()` tags a whole pass; the tag is recorded per placement at
+`add` time, because a pass knows what it is building and an individual
+`place_tile` does not.
+
+**Why, structurally.** A paste comes to rest on whatever is under the cursor.
+With region-only splitting, every chunk after the first is pasted over ground
+the previous one laid, so each can land at its own height -- a whole quarter of
+the map sitting a course above its neighbour with nothing wrong in the file.
+The join shows as a step in open grass, which is the one thing a reviewer
+notices. Put all the ground in one layer and it cannot disagree with itself,
+whatever the paste does. Region splitting still happens *within* a layer when
+it exceeds the byte cap; the pieces of one layer are the ones that share a
+registration marker and a single paste height.
+
+**Paste the landscape first**, onto bare board: that sets the height everything
+else is measured from. `PASTE_HELP` says so and the chunk table is grouped in
+paste order.
+
+It also makes the build loop usable: re-paste the structure layer over the
+landscape already down, instead of re-laying 20,000 grass tiles to look at a
+roof change.
+
+`SlabChunk.label` is `landscape-r02c03` (the filename stem) and
+`SlabChunk.region` is `r02c03` (the grid cell) -- two chunks in different layers
+cover the same region, and the map table wants to say so.
+
 ## Asset geometry rules (learned the hard way, in this order)
 
 Three separate defects on the same board all came from assuming an asset's
