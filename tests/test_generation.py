@@ -780,6 +780,142 @@ def test_gatehouse_never_raises_the_passage_itself():
     assert gates.isdisjoint(_gatehouse_cells(mass, gates))
 
 
+def _walled_tilemap():
+    """A square ring three cells thick with a two-wide gate through its north side."""
+    from citysmith.raster import STREET, TileMap
+
+    tm = TileMap.blank(26, 26)
+    for x in range(4, 22):
+        for z in range(4, 22):
+            if not (7 <= x < 19 and 7 <= z < 19):
+                tm.wall[z][x] = True
+    for x in (12, 13):
+        for z in range(4, 7):
+            tm.wall[z][x] = False
+            tm.gates.add((x, z))
+            tm.surface[z][x] = STREET
+    tm.wall_corners = [(4, 4), (21, 4), (21, 21), (4, 21)]
+    return tm
+
+
+def _wall_mass(tm):
+    return {(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x]} | set(tm.gates)
+
+
+def test_wall_towers_flank_the_gate_and_stand_at_the_corners():
+    """One tower on each jamb of the gate, one on each corner of the ring.
+
+    Without them the circuit was one unbroken band and the gate read as
+    damage. A tower never stands in the passage it guards, never in the
+    street, and never on top of another.
+    """
+    from citysmith.build import WALL_TOWER_TILES, _gatehouse_cells, pick_wall_towers
+
+    tm = _walled_tilemap()
+    mass = _wall_mass(tm)
+    towers = pick_wall_towers(tm, mass, set(tm.gates))
+    cells = [c for t in towers for c in t]
+
+    assert len(towers) == 6, "two for the gate, four for the corners"
+    assert all(len(t) == WALL_TOWER_TILES ** 2 for t in towers)
+    assert len(cells) == len(set(cells)), "towers never overlap"
+    assert not any(c in tm.gates for c in cells), "a tower never blocks its own gate"
+
+    ring = _gatehouse_cells(mass, set(tm.gates))
+    west = {c for c in ring if c[0] < 12}
+    east = {c for c in ring if c[0] > 13}
+    assert any(t & west for t in towers) and any(t & east for t in towers), (
+        "the gate is flanked on both sides")
+    for cx, cz in tm.wall_corners:
+        assert any(abs(x - cx) < WALL_TOWER_TILES and abs(z - cz) < WALL_TOWER_TILES
+                   for x, z in cells), f"no tower at corner {(cx, cz)}"
+
+
+def test_wall_towers_rise_above_the_curtain_in_the_same_block():
+    """A tower is the rampart's own block, two courses higher, and no cell of
+    the circuit is built twice -- a tower replaces the wall under it rather
+    than being stacked through it."""
+    import collections
+    import math
+
+    from citysmith.build import (
+        TOWN_WALL_TILES, WALL_TOWER_RISE, build_from_tilemap, pick_wall_towers,
+    )
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = _walled_tilemap()
+    b = build_from_tilemap(tm, palette, storeys=2, roofs=False)
+    core = palette.require("city_wall_core")
+    mass = _wall_mass(tm)
+    tower_cells = {c for t in pick_wall_towers(tm, mass, set(tm.gates)) for c in t}
+    assert tower_cells
+
+    tops: dict[tuple[int, int], float] = {}
+    columns = collections.Counter()
+    for p in b.placements:
+        if p.asset_id != core.id:
+            continue
+        cell = (int(math.floor(p.x + 1e-6)), int(math.floor(p.z + 1e-6)))
+        tops[cell] = max(tops.get(cell, 0.0), p.y + core.size_y)
+        columns[(cell, round(p.y, 3))] += 1
+    assert max(columns.values()) == 1, "no block is laid twice in one place"
+
+    grade = palette.require("floor").size_y
+    wall_top = grade + max(1, round(TOWN_WALL_TILES / core.size_y)) * core.size_y
+    for c in mass - tower_cells - set(tm.gates):
+        assert abs(tops[c] - wall_top) < 1e-6, f"curtain at {c} is {tops[c]}, not {wall_top}"
+    for c in tower_cells:
+        want = wall_top + WALL_TOWER_RISE * core.size_y
+        assert abs(tops[c] - want) < 1e-6, f"tower at {c} is {tops[c]}, not {want}"
+
+
+def test_a_plank_is_decked_over_running_water():
+    """A plank used to be cobble at grade with a tile of air under it and no bed
+    below. Now the river runs on under a deck laid by its top, flush with the
+    bank, railed on every side that faces open water."""
+    import collections
+    import math
+
+    from citysmith.build import build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import PIER, WATER, TileMap
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = TileMap.blank(12, 12)
+    for x in range(12):
+        for z in (5, 6, 7):
+            tm.surface[z][x] = WATER
+    for z in (5, 6, 7):
+        tm.surface[z][5] = PIER
+    b = build_from_tilemap(tm, palette, storeys=1, roofs=False)
+
+    deck = palette.require("bridge_deck")
+    rail = palette.require("bridge_rail")
+    water = palette.require("water")
+    street = palette.require("street")
+    grade = palette.require("floor").size_y
+
+    by_cell = collections.defaultdict(list)
+    for p in b.placements:
+        by_cell[(int(math.floor(p.x + 1e-6)), int(math.floor(p.z + 1e-6)))].append(p)
+    for z in (5, 6, 7):
+        here = by_cell[(5, z)]
+        decks = [p for p in here if p.asset_id == deck.id]
+        assert len(decks) == 1
+        assert abs(decks[0].y + deck.size_y - grade) < 1e-6, "the deck's top is the bank's top"
+        assert not any(p.asset_id == street.id for p in here), "no cobble over the channel"
+        waters = [p for p in here if p.asset_id == water.id]
+        assert waters, "the river runs on under the deck"
+        assert max(p.y + water.size_y for p in waters) <= decks[0].y + 1e-6, (
+            "the deck rests on the water rather than cutting through it")
+    rails = [p for p in b.placements if p.asset_id == rail.id]
+    assert len(rails) == 6, "one rail each side of every deck cell, none at the banks"
+
+
 # -- scatter ------------------------------------------------------------------
 
 TRUNK = Asset(id="1" * 8 + "-1111-2222-3333-444444444444", name="trunk", kind="prop",
@@ -1544,3 +1680,28 @@ def test_every_chunk_presents_the_same_bounding_box():
              for c in plan.chunks}
     assert len(boxes) == 1, f"chunks present {len(boxes)} different boxes"
     assert chunk_anchors(plan, b.byid) == []
+
+
+def test_registration_markers_sit_on_the_half_tile_grid():
+    """The far marker hugs the map's far face, and that face is wherever some
+    canopy's collider happens to end -- x=187.51 on Forest Church, the one
+    non-prop tile on the board that failed the off-grid canary. It is rounded
+    out to the lattice instead, so the canary has no known exception.
+    """
+    from citysmith.build import LANDSCAPE, volume_bounds
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 12, 12)
+        # A prop overhanging the far corner by a fraction of a tile.
+        b.add(place_centered(CROWN, 11.7, 11.7, 0.5, 0), prop=True)
+
+    plan = b.chunk_plan(max_assets=1000, chunk_tiles=4, pack=False)
+    assert len(plan.anchors) == 2
+    for marker in plan.anchors:
+        assert all(abs(v * 2 - round(v * 2)) < 1e-9 for v in (marker.x, marker.z)), (
+            f"marker at ({marker.x}, {marker.z}) is off the half-tile grid")
+    boxes = {tuple(round(v, 2) for corner in volume_bounds(c.slab, b.byid)
+                   for v in corner)
+             for c in plan.chunks}
+    assert len(boxes) == 1, "rounding out must not make the chunks disagree"

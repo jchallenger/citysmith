@@ -110,6 +110,10 @@ class TileMap:
     floors: dict[str, int] = field(default_factory=dict)
     #: Bridges added to reconnect districts split by water: (x0, z0, x1, z1).
     bridges: list[tuple[int, int, int, int]] = field(default_factory=list)
+    #: The vertices of each wall ring, as cells. A rasterised wall is a band of
+    #: cells with no memory of where the polygon turned, and a turn is where a
+    #: mural tower goes; the builder cannot recover that from the band.
+    wall_corners: list[tuple[int, int]] = field(default_factory=list)
 
     @classmethod
     def blank(cls, width: int, depth: int, name: str = "") -> "TileMap":
@@ -159,6 +163,10 @@ class TileMap:
         out.bridges = [
             (a - x0, b - z0, c - x0, d - z0) for a, b, c, d in self.bridges
             if x0 <= a < x0 + width and z0 <= b < z0 + depth
+        ]
+        out.wall_corners = [
+            (x - x0, z - z0) for x, z in self.wall_corners
+            if x0 <= x < x0 + width and z0 <= z < z0 + depth
         ]
         # Storey counts must survive the crop, or every building in a staged
         # test comes out single-storey -- which silently defeats the point of
@@ -924,6 +932,13 @@ def _rasterize_walls(tm: TileMap, layout: Layout, shift, width: int, depth: int)
     for ring in layout.walls:
         for x, z in _stroke_line(shift(ring), thickness, width, depth):
             tm.wall[z][x] = True
+        # Remember where the ring turns. MFCG closes a ring by repeating its
+        # first vertex, and a vertex the clip pushed off the map is no place
+        # for a tower, so both are dropped here rather than downstream.
+        for vx, vz in shift(ring):
+            cell = (int(round(vx)), int(round(vz)))
+            if tm.inside(*cell) and cell not in tm.wall_corners:
+                tm.wall_corners.append(cell)
 
     # Carve gates. A gate is where the through-route crosses the wall, so it is
     # opened to the main-street standard rather than to a single cell or to

@@ -41,6 +41,7 @@ WALL_COURSE_ROLES = ("wall_corner", "wall_corner_civic")
 #: in a 1-wide wall and dragged an entire board half a tile off the grid.
 CELL_ROLES = (
     "floor", "floor_upper", "ground", "street", "water", "gravel", "roof",
+    "bridge_deck",
 ) + WALL_COURSE_ROLES
 
 #: Roles laid across a 2x2 block of cells.
@@ -387,6 +388,25 @@ MEDIEVAL = Style(
                         "Bush - Medium", "bush_thorns_01"), **_MED),
         ],
         "quay_rail": [
+            _tile(name="Harbor Fence 02", **_MED),
+            _tile(name="Desert fence low", **_MED),
+        ],
+        # The deck of a plank bridge: a harbour tile a whole tile thick, laid
+        # by its top so the planking meets the bank flush and the underside
+        # rests on the water a tile below. `tools/tower_probe.py` put six
+        # candidates across one channel -- three harbour decks, a thin floor
+        # on dock legs, a 2x1 plank and a stone causeway -- and the harbour
+        # decks were the ones that read as a timber pier from every angle,
+        # with their own beams showing down to the waterline; the thin floor
+        # floated, and the causeway read as a fortification.
+        "bridge_deck": [
+            _tile(name="Harbor Middle 06", **_MED),
+            _tile(name="Harbor Float 01", **_MED),
+            _tile(name="Harbor Extention 02", **_MED),
+        ],
+        # Rope on posts, the same piece as the quay, so a bridge and the
+        # quay it leaves from are one piece of carpentry.
+        "bridge_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),
         ],

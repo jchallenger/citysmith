@@ -710,7 +710,15 @@ class Builder:
             _, (hx, hy, hz) = volume_bounds(slab, self.byid)
             lo = Placement(marker_id, 0.0, 0.0, 0.0, 0)
             # Placed so the marker's own far face lands on the map's, since a
-            # tile's stored coordinate is its min corner.
+            # tile's stored coordinate is its min corner -- rounded *out* to
+            # the half-tile lattice. The far face of the map is wherever some
+            # pine canopy's 2.55-tile collider happens to end, which put the
+            # marker at x=187.51: the one non-prop tile on the board off the
+            # grid the off-grid canary exists to guard. It cannot shift the
+            # paste (the anchor is the low corner), but a check with a known
+            # exception is a check nobody runs. Every chunk still gets the
+            # identical box, which is all the marker is for.
+            hx, hz = (math.ceil(hx * 2) / 2, math.ceil(hz * 2) / 2)
             hi = Placement(marker_id, hx - sx, hy - sy, hz - sz, 0)
             for piece in kept:
                 piece.slab.add(lo)
@@ -1514,14 +1522,17 @@ def water_depth(tm) -> dict[tuple[int, int], int]:
     """
     from . import raster as R
 
+    # A plank crossing is water with a deck over it: the river runs on
+    # underneath, so for the bed it is part of the channel, not a bank.
+    wet = (R.WATER, R.PIER)
     depth: dict[tuple[int, int], int] = {}
     frontier: list[tuple[int, int]] = []
     for z in range(tm.depth):
         for x in range(tm.width):
-            if tm.surface[z][x] != R.WATER:
+            if tm.surface[z][x] not in wet:
                 continue
             if any(not (0 <= x + dx < tm.width and 0 <= z + dz < tm.depth)
-                   or tm.surface[z + dz][x + dx] != R.WATER
+                   or tm.surface[z + dz][x + dx] not in wet
                    for dx, dz in NEIGHBOURS):
                 depth[(x, z)] = 1
                 frontier.append((x, z))
@@ -1535,7 +1546,7 @@ def water_depth(tm) -> dict[tuple[int, int], int]:
                 n = (x + dx, z + dz)
                 if not (0 <= n[0] < tm.width and 0 <= n[1] < tm.depth):
                     continue
-                if tm.surface[n[1]][n[0]] != R.WATER or n in depth:
+                if tm.surface[n[1]][n[0]] not in wet or n in depth:
                     continue
                 depth[n] = step
                 nxt.append(n)
@@ -1682,7 +1693,13 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
             if drop is None:
                 continue                    # ragged fringe: nothing laid here
             here = grade - drop
-            if s == R.WATER:
+            if s in (R.WATER, R.PIER):
+                # A plank cell is bedded and filled like the water either side
+                # of it, so the channel runs unbroken under the crossing; the
+                # deck itself goes on afterwards (see ``_lay_bridges``). It
+                # used to be laid as cobble at grade -- a quarter-tile slab
+                # with a tile of air under it and no bed below.
+                #
                 # Water sits below grade so it reads as a channel a creature
                 # can be pulled into, not a hole punched through the board.
                 # The bed and its water fall with the land, so a river does
@@ -1848,6 +1865,47 @@ def _lay_quays(b: Builder, tm, grade: float,
                     b.add(place_wall(rail, x, z, side, grade - drop))
 
 
+def _lay_bridges(b: Builder, tm, grade: float,
+                 taper: dict[tuple[int, int], float | None]) -> int:
+    """Deck and rail the planks MFCG draws across the river.
+
+    A plank cell used to be laid as cobble at grade: a quarter-tile slab with
+    a full tile of air beneath it, because the waterline sits a tile below the
+    bank, and nothing under that -- the bed stopped either side of it. From
+    the bank it was a paper-thin strip hanging over the channel. The river now
+    runs on beneath the crossing (``_lay_terrain`` beds and fills plank cells
+    as water) and the deck is a harbour tile a whole tile thick laid *by its
+    top*, so its planking meets the bank flush and its underside rests on the
+    water. Rails stand on every side that faces open water: a plank here is a
+    bridge, not a mooring, and a bridge has a parapet.
+
+    Returns the number of deck cells laid.
+    """
+    from . import raster as R
+
+    deck_role = "bridge_deck" if b.palette.resolve("bridge_deck") is not None else "street"
+    rail = b.palette.resolve("bridge_rail") or b.palette.resolve("quay_rail")
+    laid = 0
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] != R.PIER:
+                continue
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+            here = grade - drop
+            b.surface(deck_role, x, z, here)
+            laid += 1
+            if rail is None:
+                continue
+            for side, dx, dz in SIDE_OFFSETS:
+                nx, nz = x + dx, z + dz
+                if (0 <= nx < tm.width and 0 <= nz < tm.depth
+                        and tm.surface[nz][nx] == R.WATER):
+                    b.add(place_wall(rail, x, z, side, here))
+    return laid
+
+
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                skip: set[tuple[int, int]] | None = None) -> None:
     """Roof each block as concentric rings, the way hand-builders do.
@@ -1939,10 +1997,12 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                     b.add(place_tile(piece, x, z, y, rot))
 
 
-#: Headroom to leave under a gate lintel, in tiles. Two tiles is 10 ft -- a
-#: loaded cart with a rider on top clears it, which is the traffic the main
-#: streets were widened for in the first place.
-GATE_HEADROOM_TILES = 2.0
+#: Headroom to leave under a gate lintel, in tiles. Two tiles (10 ft) was the
+#: minimum a loaded cart with a rider on top clears, and it looked like it:
+#: a 25 ft-wide mouth 10 ft high reads as a culvert, not a gate. Three tiles
+#: is 15 ft -- the proportion of a real town gate -- and still leaves three
+#: courses of wall carried over the opening.
+GATE_HEADROOM_TILES = 3.0
 
 #: Extra courses on the wall flanking a gate. Without them the curtain runs
 #: over the opening at its ordinary height and nothing on the board says a
@@ -1971,6 +2031,113 @@ def _corners_affordable(cells: set[tuple[int, int]]) -> bool:
 #: circuit by a quarter without anyone asking for it. The height is the
 #: decision; the course count is derived from whatever block the palette gives.
 TOWN_WALL_TILES = 6.0
+
+#: A mural tower's footprint, in tiles a side, and how many courses it stands
+#: above the curtain. Four cells is the rampart's own thickness, so a tower
+#: set on the wall line protrudes a little either side instead of swelling
+#: into a keep; two courses is enough to read as a tower from across the map
+#: without dwarfing the houses it guards.
+#:
+#: The towers are square and built from the rampart's own block on purpose.
+#: The kit's round-tower pieces (``md_tower_*``) are *quadrants* of an
+#: eight-tile drum -- `tools/tower_probe.py` stacked them and got quarter
+#: shells and fan-shaped floors -- and a 40 ft drum on a 20 ft rampart is a
+#: castle, not a town wall. Their stone does not match the block either.
+WALL_TOWER_TILES = 4
+WALL_TOWER_RISE = 2
+
+
+def _components8(cells: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
+    """Split cells into 8-connected groups, in a stable order."""
+    left = set(cells)
+    out: list[set[tuple[int, int]]] = []
+    for start in sorted(cells):
+        if start not in left:
+            continue
+        group: set[tuple[int, int]] = set()
+        stack = [start]
+        while stack:
+            c = stack.pop()
+            if c not in left:
+                continue
+            left.discard(c)
+            group.add(c)
+            stack += [(c[0] + dx, c[1] + dz)
+                      for dx in (-1, 0, 1) for dz in (-1, 0, 1)
+                      if (dx or dz) and (c[0] + dx, c[1] + dz) in left]
+        out.append(group)
+    return out
+
+
+def pick_wall_towers(tm, mass: set[tuple[int, int]], gates: set[tuple[int, int]],
+                     size: int = WALL_TOWER_TILES) -> list[frozenset[tuple[int, int]]]:
+    """Square footprints for the circuit's towers: a pair flanking every gate,
+    one on every corner of the ring.
+
+    A gate's towers stand on its *jambs* -- the wall cells either side of the
+    opening, which ``_gatehouse_cells`` finds and the passage splits in two.
+    A corner's tower stands on the wall cell nearest the ring's vertex, which
+    the raster records in ``tm.wall_corners`` because the band of cells has
+    no memory of where the polygon turned. A vertex inside a gate's reach is
+    the gate itself (MFCG puts the road through the corner here) and gets no
+    third tower.
+
+    A footprint is the ``size``-square box that covers the most wall while
+    touching its seed, never a gate cell, a building, or anything paved or
+    wet -- a tower may stand on open ground beside the wall, not in the
+    street it guards -- and never another tower. A seed with no such box
+    simply gets none.
+    """
+    from . import raster as R
+
+    blocked = {R.STREET, R.LANE, R.PLAZA, R.FLOOR, R.WATER, R.PIER, R.VOID}
+
+    def usable(cell: tuple[int, int]) -> bool:
+        x, z = cell
+        if not (0 <= x < tm.width and 0 <= z < tm.depth):
+            return False
+        if cell in gates or tm.building[z][x]:
+            return False
+        return tm.wall[z][x] or tm.surface[z][x] not in blocked
+
+    seeds: list[set[tuple[int, int]]] = []
+    for jamb in _components8(_gatehouse_cells(mass, gates)):
+        seeds.append(jamb)
+    reach = {(gx + dx, gz + dz) for gx, gz in gates
+             for dx in range(-size, size + 1) for dz in range(-size, size + 1)}
+    wall_only = mass - gates
+    for cx, cz in getattr(tm, "wall_corners", ()):
+        if not wall_only:
+            break
+        nearest = min(wall_only, key=lambda c: ((c[0] - cx) ** 2 + (c[1] - cz) ** 2, c))
+        if nearest in reach:
+            continue
+        seeds.append({nearest})
+
+    towers: list[frozenset[tuple[int, int]]] = []
+    taken: set[tuple[int, int]] = set()
+    for seed in seeds:
+        xs = [c[0] for c in seed]
+        zs = [c[1] for c in seed]
+        scx = sum(xs) / len(xs)
+        scz = sum(zs) / len(zs)
+        best: tuple[tuple[int, float], frozenset[tuple[int, int]]] | None = None
+        for x0 in range(min(xs) - size + 1, max(xs) + 1):
+            for z0 in range(min(zs) - size + 1, max(zs) + 1):
+                box = frozenset((x, z) for x in range(x0, x0 + size)
+                                for z in range(z0, z0 + size))
+                if not box.isdisjoint(taken) or not (box & seed):
+                    continue
+                if not all(usable(c) for c in box):
+                    continue
+                off = (x0 + size / 2 - scx) ** 2 + (z0 + size / 2 - scz) ** 2
+                score = (len(box & mass), -off)
+                if best is None or score > best[0]:
+                    best = (score, box)
+        if best is not None:
+            towers.append(best[1])
+            taken |= best[1]
+    return towers
 
 
 def _lay_town_wall(b: Builder, tm, facing, top: float,
@@ -2005,6 +2172,13 @@ def _lay_town_wall(b: Builder, tm, facing, top: float,
     is a stair-stepped diagonal, those teeth pointed in every direction at
     once and the rampart read as a comb. The cells behind the parapet are
     paved instead, which is what makes the top of the wall a wall-walk.
+
+    **The towers.** A pair on the jambs of every gate and one on every corner
+    of the ring (:func:`pick_wall_towers`), built from the same block two
+    courses higher, paved and battlemented on all four sides. Without them
+    the circuit was one unbroken band, and the gate -- which MFCG puts at a
+    corner of this ring, so the opening is a missing corner rather than a
+    tunnel -- read as damage. Flanked, it reads as an entrance.
     """
     core = b.palette.resolve("city_wall_core") or facing
     cap_asset = b.palette.resolve("city_wall_cap")
@@ -2018,37 +2192,61 @@ def _lay_town_wall(b: Builder, tm, facing, top: float,
     # Gate cells are *not* flagged in ``tm.wall`` -- the raster clears the flag
     # where a street crosses. They are still part of the mass, or the lintel
     # has nowhere to sit and the breach stays open.
+    gates = set(tm.gates)
     mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
-            if tm.wall[z][x]} | set(tm.gates)
-    outside = _outside_the_wall(tm, mass)
-    towers = _gatehouse_cells(mass, set(tm.gates))
+            if tm.wall[z][x]} | gates
+    towers = pick_wall_towers(tm, mass, gates)
+    tower_cells = {c for t in towers for c in t}
+    # The towers count as circuit when deciding what is outside it. A flood
+    # that ran through a tower's footprint would put a merlon on every wall
+    # cell facing it, buried against the tower's flank.
+    outside = _outside_the_wall(tm, mass | tower_cells)
 
-    for (x, z) in sorted(mass):
-        gate = (x, z) in tm.gates
-        if gate and lintel_from is None:
-            continue
-        courses = wall_height + (GATEHOUSE_RISE if (x, z) in towers else 0)
-        shows = [s for s, dx, dz in SIDE_OFFSETS if (x + dx, z + dz) not in mass]
-        for level in range(lintel_from if gate else 0, courses):
-            y = top + level * course
-            b.add(place_tile(core, x, z, y))
+    # A gate nothing could flank -- a crop that cut its jambs off, a ring too
+    # cramped for a footprint -- keeps the old rise on its jamb cells, so the
+    # opening still reads as an entrance rather than as damage.
+    ring = _gatehouse_cells(mass, gates)
+    if any(t & ring for t in towers):
+        ring = set()
 
-        crown = top + courses * course
-        looks_out = [s for s, dx, dz in SIDE_OFFSETS
-                     if (x + dx, z + dz) in outside]
-        if looks_out and cap_asset is not None:
+    def crown_cell(x: int, z: int, crown: float, lips: list[str]) -> None:
+        """Pave the top of a cell and stand a battlement on each lip."""
+        if lips and cap_asset is not None:
             if is_curtain_piece(cap_asset) and walk is not None:
                 # A parapet stands on the lip, not in place of the walk: pave
                 # the cell first and stand the battlement on its outer edge.
                 # A cell at a step of the stair looks out on two sides, and
                 # both get one -- that is what closes the corner.
                 b.add(place_tile(walk, x, z, crown))
-                for side in looks_out:
+                for side in lips:
                     b.add(place_wall(cap_asset, x, z, side, crown + walk.size_y))
             else:
                 b.add(place_tile(cap_asset, x, z, crown))
         elif walk is not None:
             b.add(place_tile(walk, x, z, crown))
+
+    for (x, z) in sorted(mass - tower_cells):
+        gate = (x, z) in gates
+        if gate and lintel_from is None:
+            continue
+        courses = wall_height + (GATEHOUSE_RISE if (x, z) in ring else 0)
+        for level in range(lintel_from if gate else 0, courses):
+            b.add(place_tile(core, x, z, top + level * course))
+        crown_cell(x, z, top + courses * course,
+                   [s for s, dx, dz in SIDE_OFFSETS if (x + dx, z + dz) in outside])
+
+    # The towers: the same block and the same parapet, two courses higher.
+    # Above the curtain a tower is exposed on all four faces, so every side
+    # not shared with the rest of its footprint is a lip and gets a merlon;
+    # the curtain's own walk runs into the tower's flank below.
+    courses = wall_height + WALL_TOWER_RISE
+    for footprint in towers:
+        for (x, z) in sorted(footprint):
+            for level in range(courses):
+                b.add(place_tile(core, x, z, top + level * course))
+            crown_cell(x, z, top + courses * course,
+                       [s for s, dx, dz in SIDE_OFFSETS
+                        if (x + dx, z + dz) not in footprint])
 
 
 def _gatehouse_cells(mass: set[tuple[int, int]],
@@ -2325,13 +2523,15 @@ def build_from_tilemap(
         # A lane is trodden earth, not laid cobble -- that is the whole point
         # of distinguishing it from the street it opens off.
         R.LANE: "lane",
-        R.PIER: "street",
+        # R.PIER is deliberately absent: a plank is water with a deck on it,
+        # and both halves are laid by name rather than as a surface.
         R.FLOOR: "floor",
     }
     taper = edge_taper(tm)
     with b.layer(LANDSCAPE):
         _lay_terrain(b, tm, surface_roles, grade=floor.size_y, taper=taper)
         _lay_quays(b, tm, grade=floor.size_y, taper=taper)
+        _lay_bridges(b, tm, grade=floor.size_y, taper=taper)
 
     top = floor.size_y
     # A storey is a wall *plus the floor above it*. They were the same height
