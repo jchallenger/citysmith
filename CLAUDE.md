@@ -295,6 +295,28 @@ roof change.
 `SlabChunk.region` is `r02c03` (the grid cell) -- two chunks in different layers
 cover the same region, and the map table wants to say so.
 
+**A building's shell is never split across chunks.** Floors are landscape;
+walls, upper floors, roof, porch, sign and goods are structure, and the
+structure layer is two files on Forest Church. A paste that misses one leaves
+every house in it as a bare floor -- a dark framed pad with a crate on it,
+beside neighbours that are fine -- which is exactly what was reported as
+"buildings missing the mark". Every per-building pass tags its placements
+with the building id (`Builder.group`), and `chunk_plan` assigns a tagged
+placement by its building's low corner, in the grid bucket and in the
+quadtree alike, so one file holds the whole shell. The chunk table prints
+`N buildings` per structure file so a missing paste is diagnosable from a
+screenshot: the pad's house is in whichever file did not land.
+
+**Probe with the palette the build used.** `cli build` constructs
+`Palette.named(catalog, style, seed)`; under seed 33 both `floor` and
+`floor_upper` resolve to `Rural Floor 01` (a framed four-leaf tile), while an
+unseeded `Palette(catalog, MEDIEVAL)` resolves them to `Tavern Floor 01` and
+`Rural Floor 02` (plank floors). Every probe and placement query run with the
+unseeded palette was identifying the wrong tiles, and the board was read as
+"floor pads where the file has none" for an hour. A size-coded probe -- pads
+of 1x1, 2x2, ... per candidate, so the order cannot be misread, laid by the
+palette's own `require` -- is the form that finally settled it.
+
 **Open country at the edge rides along instead of being dropped.** Trimming
 used to discard every edge chunk that held nothing but grass and trees: ten of
 them on Forest Church, 1,618 assets, which on the board is not grass but bare

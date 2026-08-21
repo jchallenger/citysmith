@@ -75,6 +75,13 @@ Verified working, do not re-litigate:
 - `verify.enclosed_voids` reads chunk coverage, not chunk names; the far
   registration marker sits on the half-tile lattice, so the off-grid canary
   prints 0 on every chunk with no exception to remember.
+- **A building is never split across chunks**, and the chunk table says how
+  many buildings each structure file carries (41 + 10 on Forest Church). The
+  symptom that led here: the user's board showed a building floor with
+  nothing on it. Floors are landscape, shells are structure, and the second
+  structure file had not landed on their board -- eight houses' shells are in
+  it. If a board ever shows a dark framed pad with no walls, count the pastes
+  before reading anything else.
 - 146 tests pass. They assert invariants, not exact output.
 
 ## Paste height - FIXED, but understand why before changing it
