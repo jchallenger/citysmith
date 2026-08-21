@@ -251,19 +251,16 @@ switch ($Cmd) {
   }
   'zoom'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120; [TSIn]::mouse_event(0x800, 0, 0, ($Ticks*120), [IntPtr]::Zero); Start-Sleep -Milliseconds 400; "zoomed $Ticks" }
   'select'  {
+    # X + left drag marks a region. The drag has to be slow for the same reason
+    # every other drag does -- this one was still the fast version written
+    # before that was understood, which is why it selected nothing.
     Focus-TS
-    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120
-    [TSIn]::keybd_event(0x58,[byte][TSIn]::MapVirtualKey(0x58,0),0,[IntPtr]::Zero); Start-Sleep -Milliseconds 60
-    [TSIn]::mouse_event([TSIn]::LDOWN,0,0,0,[IntPtr]::Zero)
-    $steps = 20
-    for ($i=1; $i -le $steps; $i++) {
-      [TSIn]::Move($X + [int](($X2-$X)*$i/$steps), $Y + [int](($Y2-$Y)*$i/$steps))
-      Start-Sleep -Milliseconds 20
-    }
-    Start-Sleep -Milliseconds 150
-    [TSIn]::mouse_event([TSIn]::LUP,0,0,0,[IntPtr]::Zero)
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200
+    [TSIn]::keybd_event(0x58,[byte][TSIn]::MapVirtualKey(0x58,0),0,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    Drag $X $Y ($X2-$X) ($Y2-$Y) ([TSIn]::LDOWN) ([TSIn]::LUP)
     [TSIn]::keybd_event(0x58,[byte][TSIn]::MapVirtualKey(0x58,0),2,[IntPtr]::Zero)
-    Start-Sleep -Milliseconds 400
+    Start-Sleep -Milliseconds 500
     "selected $X,$Y -> $X2,$Y2"
   }
   'copyout' {
