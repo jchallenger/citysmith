@@ -90,7 +90,7 @@ vertical`) is the correction, and the held-slab preview is a validity display:
 solid = not intersecting, translucent mesh = intersecting. Chunks that share
 cells are *supposed* to intersect, so mesh is not automatically an error.
 
-## Open problem 2 â€” copy-out driven synthetically
+## Open problem — copy-out driven synthetically (the one left)
 
 Copy-out is the **only** way to read what actually landed on the board. A human
 does it fine; driven synthetically it fails.
