@@ -325,6 +325,22 @@ quadtree alike, so one file holds the whole shell. The chunk table prints
 `N buildings` per structure file so a missing paste is diagnosable from a
 screenshot: the pad's house is in whichever file did not land.
 
+**One slab per building, when a paste has to be verifiable.** `build
+--per-building` cuts the structure layer by building rather than by region:
+one slab each, named for the building (`pb-structure-house-0005`), plus one
+called `rampart` for the town wall, its towers and anything no building owns.
+Forest Church becomes 55 slabs (3 landscape + 51 buildings + rampart) instead
+of 5. Every slab still carries the map's two markers, so they all go down at
+the same cursor cell -- and a building that lands wrong is re-pasted alone
+while the rest of the town is untouched. The default remains a few large
+chunks; this is the mode for checking, and `review.ps1 buildings` drives it.
+
+Because the shell and the floor then live in different slabs, "the walls sit
+on the floor" becomes a claim about two pastes agreeing.
+`verify.shells_rest_on_their_floors` measures the lowest wall course of every
+building against the top of the floor in the cell under it and **fails** the
+build on any mismatch, buried or hovering.
+
 **Probe with the palette the build used.** `cli build` constructs
 `Palette.named(catalog, style, seed)`; under seed 33 both `floor` and
 `floor_upper` resolve to `Rural Floor 01` (a framed four-leaf tile), while an

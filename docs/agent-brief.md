@@ -75,6 +75,14 @@ Verified working, do not re-litigate:
 - `verify.enclosed_voids` reads chunk coverage, not chunk names; the far
   registration marker sits on the half-tile lattice, so the off-grid canary
   prints 0 on every chunk with no exception to remember.
+- **`build --per-building` emits one slab per building** (55 on Forest Church:
+  3 landscape + 51 buildings + the rampart), all sharing the map's markers so
+  they paste at one cursor cell. Use it whenever a paste has to be checked: a
+  chunk of forty-one buildings lands or fails as one thing and nothing in the
+  result says which building went wrong, which is exactly what made one
+  suspect shell unfalsifiable for a whole session. `review.ps1 buildings`
+  drives it; `verify.shells_rest_on_their_floors` fails the build if any
+  shell does not start on the top of its own floor.
 - **A building is never split across chunks**, and the chunk table says how
   many buildings each structure file carries (41 + 10 on Forest Church). The
   symptom that led here: the user's board showed a building floor with
