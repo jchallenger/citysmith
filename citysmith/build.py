@@ -764,7 +764,18 @@ class Builder:
             # but a shared *datum*: one marker at its own region corner, at
             # the map's lowest point, so the piece lands where the grid says
             # and every piece measures its heights from the same floor.
-            marker = self.palette.resolve("ground") or self.palette.resolve("floor")
+            # **The pin is deliberately something you can see.** A tiled chunk
+            # is lined up by eye against its neighbour, and open country is
+            # self-similar -- grass against grass, with a tree here and there,
+            # gives the eye nothing to register on, so a seam a tile out looks
+            # exactly like a seam that is right. A stone block standing half a
+            # tile proud of the turf at each chunk's own corner turns that into
+            # a lattice: place the piece so its pip is one region from its
+            # neighbour's and the join is exact. They are one tile each and
+            # come out with a marquee once the map is assembled.
+            marker = (self.palette.resolve("city_wall_core")
+                      or self.palette.resolve("ground")
+                      or self.palette.resolve("floor"))
             marker_id = (marker.id if marker is not None
                          else min(slab.placements, key=lambda p: (p.y, p.z, p.x)).asset_id)
             pins: list[Placement] = []

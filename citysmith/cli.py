@@ -432,6 +432,13 @@ def cmd_build(args) -> int:
         skip_open_country=not args.keep_open_country,
         per_building=args.per_building,
         by_layer=not args.by_region,
+        # Tiling does not pack. Packing fuses a run of neighbours into one
+        # chunk, which is right when every chunk is pasted at one shared
+        # anchor and wrong when they are laid out side by side: the fused
+        # piece is an L or a bar rather than a square, so the cursor step
+        # from one paste to the next stops being one region. Uniform squares
+        # are what make the step a constant.
+        pack=not args.by_region,
     )
     try:
         written = _write_chunks(plan.chunks, out_dir, args.stem)

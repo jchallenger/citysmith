@@ -347,6 +347,27 @@ a shared **datum** -- one marker per chunk at the map's global floor, so a
 chunk with a deep riverbed still measures from the same level.
 `verify.chunk_datum` fails the build if any tiled chunk does not reach y=0.
 
+**What is measured about placing them (2026-08-22), and what is not:**
+
+- **At one screen Y, the cursor step is exact and linear.** Two 24-tile pads
+  pasted at the same screen Y and a measured step apart abut perfectly, with
+  no gap and no overlap. Calibrate the step by pasting one pad and measuring
+  its width in pixels: `out/calib24.slab.txt` is a 24x24 cobble pad with its
+  NW corner blocked so the corner is unambiguous. Scale seen so far: ~30
+  px/tile four wheel-zooms out from a fresh board, ~19 with the camera raised,
+  ~16.7 at the top of the height slider.
+- **Across screen Y it is not.** The camera keeps some perspective even
+  pitched straight down, so a step that is exact at one screen height is a
+  tile or two out at another -- two pads 720 px apart vertically came out
+  ~57 px apart horizontally. **That is what "a few tiles to the South East"
+  was.** Paste a whole *row* at one screen Y, then move.
+- **Panning is not 1:1.** A right-drag of 462 px moved the world 245 px, about
+  53%, so a pan cannot be used as a measured step. Pan roughly, then re-align
+  the first chunk of the new row against its neighbour with the preview and
+  step the rest of the row exactly.
+- **Chunks are fixed-size squares in this mode** (`pack` is off), so the step
+  is one constant per axis and neighbours complete each other's edges.
+
 Sideways they are lined up **by eye against the grid, with the slab held**:
 `ts.ps1 hold`, look, `ts.ps1 move` to nudge, then `commit`. That is what the
 preview is for. Exact pinning is impossible anyway -- a pine on the map edge
