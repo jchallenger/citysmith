@@ -325,6 +325,38 @@ quadtree alike, so one file holds the whole shell. The chunk table prints
 `N buildings` per structure file so a missing paste is diagnosable from a
 screenshot: the pad's house is in whichever file did not land.
 
+## Tiling: the anchor is a ray-hit, so never paste over anything
+
+**SETTLED 2026-08-22, from a copy-out the user took off the board.** Matched
+against the source files: the landscape layer landed **320 of 320 placements
+exactly right**; the structure layer landed **+1.5 in y and a tile out in z**.
+1.5 is exactly the height of the terrain surface under the cursor at the
+anchor. The paste anchors on the cursor's ray-hit against *existing
+geometry* -- so a layer pasted over another inherits its height, and on a
+tilted camera its sideways slide too. That is what "every building floating
+above and shifted from its target" was.
+
+The layer split (landscape, then structure over it) *guarantees* that second
+paste lands on the first. It solved terrain seams and created this instead.
+
+**`build --by-region` is the answer**: cut by region with every layer
+together, so the chunks tile the map without overlapping and each is pasted
+onto ground nothing has been laid on yet. Nothing to inherit, so every chunk
+rests on the board at the same height. What they need is not a shared box but
+a shared **datum** -- one marker per chunk at the map's global floor, so a
+chunk with a deep riverbed still measures from the same level.
+`verify.chunk_datum` fails the build if any tiled chunk does not reach y=0.
+
+Sideways they are lined up **by eye against the grid, with the slab held**:
+`ts.ps1 hold`, look, `ts.ps1 move` to nudge, then `commit`. That is what the
+preview is for. Exact pinning is impossible anyway -- a pine on the map edge
+overhangs the map, so the outermost chunks' geometry genuinely starts before
+their own region.
+
+Verified in game on a 48x48 sample in four regions: two chunks tiled side by
+side sit on one level plane, no step at the join, buildings on their own
+terrain, from four faces.
+
 **One slab per building, when a paste has to be verifiable.** `build
 --per-building` cuts the structure layer by building rather than by region:
 one slab each, named for the building (`pb-structure-house-0005`), plus one
