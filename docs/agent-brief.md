@@ -78,10 +78,11 @@ Verified working, do not re-litigate:
 - **A building is never split across chunks**, and the chunk table says how
   many buildings each structure file carries (41 + 10 on Forest Church). The
   symptom that led here: the user's board showed a building floor with
-  nothing on it. Floors are landscape, shells are structure, and the second
-  structure file had not landed on their board -- eight houses' shells are in
-  it. If a board ever shows a dark framed pad with no walls, count the pastes
-  before reading anything else.
+  nothing on it. The first reading was a missing structure file; the measured
+  cause was the anchor slide above, which leaves a strip of floor beside every
+  house. If a board shows a dark framed pad beside a house: pitch the camera
+  vertical and re-paste the structure files; if a whole footprint is bare,
+  count the pastes.
 - 146 tests pass. They assert invariants, not exact output.
 
 ## Paste height - FIXED, but understand why before changing it
@@ -112,7 +113,20 @@ them from the generator without replacing the guarantee.
 
 **Do not trust the old "a slab rests on whatever is under the cursor" model.** It
 fit some evidence and was refuted by other evidence; the box explanation covers
-both. If a layer ever does land wrong, `Ctrl`+scroll (`ts.ps1 nudge -Mode
+both.
+
+**What the cursor does do (settled 2026-08-21): it anchors the slab on its
+ground hit point, and that point slides sideways.** The ray from the camera
+through the cursor stops at the first thing it meets -- the bare board for the
+first paste, the grass top or a stump or a pine for every later one -- and
+with the camera pitched, a higher hit moves the point toward the camera by
+(height x cot(pitch)). Each later chunk therefore lands a cell or two short
+of the one before. Measured on a 36x30 crop with identical camera routes:
+structure alone sits on its floors; structure over landscape lands two cells
+toward the camera, a strip of every floor showing beyond each house; structure
+pasted with the camera vertical sits on its floors again. `review.ps1` now
+pitches straight down for every paste (`Paste-Stack`). This was the reported
+"buildings missing the mark". If a layer ever does land wrong, `Ctrl`+scroll (`ts.ps1 nudge -Mode
 vertical`) is the correction, and the held-slab preview is a validity display:
 solid = not intersecting, translucent mesh = intersecting. Chunks that share
 cells are *supposed* to intersect, so mesh is not automatically an error.

@@ -91,6 +91,21 @@ actually matters, all confirmed in-game:
 - **Paste is cursor-anchored, not coordinate-anchored.** The slab arrives in
   hand at the cursor, snapped to the global grid, and *stays in hand* afterwards
   as a repeat stamp — so one paste can be committed many times.
+  **The anchor is the cursor's ground *hit point*, and it slides (SETTLED
+  2026-08-21).** The point is wherever the cursor's ray first meets something:
+  the bare board for the first paste, the top of the grass -- or a stump, or a
+  pine -- for every paste after. With the camera pitched, a higher hit slides
+  the point toward the camera by (height x cot(pitch)), so a chunk pasted over
+  an earlier one lands a cell or two short of it. Measured three ways on one
+  36x30 crop with identical camera routes: the structure chunk alone sits on
+  its floors; pasted over the landscape it lands about two cells toward the
+  camera, with a strip of every floor showing on the far side; pasted with the
+  camera straight down it sits on its floors again. This, not a missing file,
+  is the "dark pad beside a house" that was reported as buildings missing the
+  mark. **Every paste in `review.ps1` is now made looking straight down**
+  (`Paste-Stack`, `$PITCH_DOWN`), where cot is zero and nothing under the
+  cursor can move the anchor. By hand: pitch the camera vertical before
+  `Ctrl+V`, every chunk, and do not tilt it back until the last one is down.
 - **Right-click drops what is in hand -- but it has to be a *tap*.** This is
   the exact opposite of the left click that commits a paste, and getting it
   wrong is invisible: a right-click held ~250 ms is read as the start of a drag
@@ -299,8 +314,11 @@ cover the same region, and the map table wants to say so.
 walls, upper floors, roof, porch, sign and goods are structure, and the
 structure layer is two files on Forest Church. A paste that misses one leaves
 every house in it as a bare floor -- a dark framed pad with a crate on it,
-beside neighbours that are fine -- which is exactly what was reported as
-"buildings missing the mark". Every per-building pass tags its placements
+beside neighbours that are fine. (That was the first reading of "buildings
+missing the mark"; the actual cause was the anchor slide described under
+*Driving TaleSpire*, which leaves a strip of floor beside every house rather
+than a whole one bare. Both produce four-leaf pads; count the pastes, then
+check the pitch.) Every per-building pass tags its placements
 with the building id (`Builder.group`), and `chunk_plan` assigns a tagged
 placement by its building's low corner, in the grid bucket and in the
 quadtree alike, so one file holds the whole shell. The chunk table prints

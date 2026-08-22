@@ -36,6 +36,30 @@ function Shot([string]$view) {
   & (Join-Path $PSScriptRoot "grab.ps1") -Name "$Name-$view"
 }
 
+# **Every paste is made looking straight down.** A pasted slab is anchored on
+# the cursor's *ground hit point*, and that point is wherever the cursor's ray
+# first meets something: the bare board for the first paste, the top of the
+# grass -- or of a stump, or a pine -- for every paste after it. With the
+# camera pitched, a higher hit slides the point toward the camera by
+# (height x cot(pitch)), and the slab lands a cell or two short of where the
+# layer before it landed. On a 36x30 crop that put every house one to two
+# cells off its own floor, with a strip of floor showing on the far side of
+# each -- the "dark pad beside a house" that was reported as buildings missing
+# the mark. At a vertical pitch cot is zero and the hit point does not move,
+# whatever is under the cursor. The pitch is restored afterwards so the
+# recipes frame as they always did.
+$PITCH_DOWN = 250
+function Paste-Stack([string[]]$slabs, [int]$x, [int]$y) {
+  TS orbit -X $x -Y $y -DX 0 -DY $PITCH_DOWN
+  foreach ($s in $slabs) {
+    TS paste -Slab $s -X $x -Y $y
+    Start-Sleep -Seconds 3
+    TS clear -X $x -Y $y
+    Start-Sleep -Seconds 1
+  }
+  TS orbit -X $x -Y $y -DX 0 -DY (-$PITCH_DOWN)
+}
+
 switch ($Recipe) {
 
   '360' {
@@ -44,12 +68,7 @@ switch ($Recipe) {
     # An isolated board, every time. Sharing a board with the last probe is how
     # a stray stamp gets read as a defect in the thing being probed.
     TS newboard
-    foreach ($s in $Slab) {
-      TS paste -Slab $s -X $X -Y $Y
-      Start-Sleep -Seconds 3
-      TS clear -X $X -Y $Y
-      Start-Sleep -Seconds 1
-    }
+    Paste-Stack $Slab $X $Y
     1..$ZoomOut | ForEach-Object { TS zoom -X 800 -Y 450 -Ticks -12 }
 
     # Four faces at a low oblique. Low, because that is the angle a hole in a
@@ -130,6 +149,8 @@ switch ($Recipe) {
     $chunks = @(Get-ChildItem (Join-Path $out "$Stem-landscape-*.slab.txt")) +
               @(Get-ChildItem (Join-Path $out "$Stem-structure-*.slab.txt"))
     if (-not $chunks) { throw "no out\$Stem-*.slab.txt chunks to paste" }
+    # Straight down for the whole stack -- see Paste-Stack for why.
+    TS orbit -X $cx -Y $cy -DX 0 -DY $PITCH_DOWN
     $i = 0
     foreach ($c in $chunks) {
       $i++
@@ -143,6 +164,7 @@ switch ($Recipe) {
       Shot ("{0:d2}-down" -f $i)
       "$i : $($c.Name)"
     }
+    TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)
     "pasted $i chunk(s) of $Stem at $cx,$cy -> out\flyby\$Name-NN-{hold,down}.jpg"
   }
 }
