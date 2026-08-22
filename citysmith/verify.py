@@ -723,6 +723,70 @@ def chunk_anchors(plan, byid) -> list[str]:
         )
     return out
 
+def shells_rest_on_their_floors(builder, tm) -> list[str]:
+    """Every building's walls start exactly on the top of its own floor.
+
+    ``floating_placements`` asks the weakest question -- is there *anything*
+    under this -- because most of the map is fine and a strict test would
+    argue with it. This asks the strict one, and only of buildings, because a
+    building is the thing that gets pasted on its own now: its shell and its
+    floor are in different layers, so "the walls sit on the floor" is a claim
+    about two slabs agreeing, and that is exactly what a per-building paste is
+    checking on the board. Cheaper to catch here than to find by eye.
+
+    A wall that starts below its floor is buried; one that starts above it is
+    a building standing on air with a strip of floor showing underneath.
+    """
+    from .build import placed_bounds
+
+    byid = builder.byid
+    groups = getattr(builder, "group_of", None)
+    if not groups:
+        return []
+
+    # Floor top per cell, from the landscape layer.
+    floor_top: dict[tuple[int, int], float] = {}
+    for p, layer in zip(builder.placements, builder.layer_of):
+        asset = byid.get(p.asset_id)
+        if asset is None or layer != "landscape" or p.asset_id in builder.prop_ids:
+            continue
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        for cx in range(int(math.floor(x0 + 1e-6)), int(math.ceil(x1 - 1e-6))):
+            for cz in range(int(math.floor(z0 + 1e-6)), int(math.ceil(z1 - 1e-6))):
+                top = p.y + asset.size_y
+                if top > floor_top.get((cx, cz), -1e9):
+                    floor_top[(cx, cz)] = top
+
+    # Lowest wall course per building, and the cell it stands in.
+    lowest: dict[str, tuple[float, tuple[int, int]]] = {}
+    for p, layer, group in zip(builder.placements, builder.layer_of, groups):
+        asset = byid.get(p.asset_id)
+        if (asset is None or not group or layer != "structure"
+                or p.asset_id in builder.prop_ids or asset.size_y < 1.0):
+            continue                      # floors and roof plates are not walls
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        cell = (int(math.floor((x0 + x1) / 2)), int(math.floor((z0 + z1) / 2)))
+        if group not in lowest or p.y < lowest[group][0]:
+            lowest[group] = (p.y, cell)
+
+    off = []
+    for group, (y, cell) in sorted(lowest.items()):
+        want = floor_top.get(cell)
+        if want is None or abs(y - want) > 1e-6:
+            off.append((group, y, want))
+    if not off:
+        return []
+    where = ", ".join(
+        f"{g} at y={y:g} over floor top {'none' if w is None else format(w, 'g')}"
+        for g, y, w in off[:4]
+    )
+    return [
+        f"{len(off)} building(s) do not stand on their own floor ({where}) -- "
+        "the shell and the floor are in different slabs, so this is two "
+        "pastes disagreeing about height"
+    ]
+
+
 def floating_placements(builder, tm) -> list[str]:
     """Anything standing over a cell that has no ground in it at all.
 

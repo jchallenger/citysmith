@@ -60,6 +60,10 @@ def _write_chunks(chunks, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path
     # the map, so clear the stem's previous output first.
     for stale in out_dir.glob(f"{stem}-r*.slab.txt"):
         stale.unlink()
+    for stale in out_dir.glob(f"{stem}-landscape-*.slab.txt"):
+        stale.unlink()
+    for stale in out_dir.glob(f"{stem}-structure-*.slab.txt"):
+        stale.unlink()
     for stale in out_dir.glob(f"{stem}.slab.txt"):
         stale.unlink()
     written: list[pathlib.Path] = []
@@ -123,7 +127,7 @@ def _chunk_table(plan, stem: str) -> str:
         # floors -- which is how a missing fifth paste was first noticed.
         held = f", {chunk.buildings} buildings" if chunk.buildings else ""
         lines.append(
-            f"  {chunk.region:>12}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
+            f"  {(chunk.name or chunk.region):>16}  x {chunk.x0:>4}-{chunk.x1 - 1:<4} "
             f"z {chunk.z0:>4}-{chunk.z1 - 1:<4} {chunk.count:>6} assets"
             f"{span}{held}  {name}"
         )
@@ -381,8 +385,8 @@ def cmd_build(args) -> int:
     from .raster import rasterize
     from .build import build_from_tilemap
     from .verify import (check_placements, chunk_anchors, enclosed_voids,
-                     floating_placements, tile_interpenetration, tilemap_svg,
-                     verify)
+                     floating_placements, shells_rest_on_their_floors,
+                     tile_interpenetration, tilemap_svg, verify)
 
     layout = Layout.load(args.layout)
     tm = rasterize(layout, bridges=not args.no_bridges)
@@ -403,6 +407,7 @@ def cmd_build(args) -> int:
     plan = builder.chunk_plan(
         max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
         skip_open_country=not args.keep_open_country,
+        per_building=args.per_building,
     )
     try:
         written = _write_chunks(plan.chunks, out_dir, args.stem)
@@ -432,6 +437,8 @@ def cmd_build(args) -> int:
         report.add("warn", "tile seams", problem)
     for problem in floating_placements(builder, tm):
         report.add("fail", "floating geometry", problem)
+    for problem in shells_rest_on_their_floors(builder, tm):
+        report.add("fail", "shell footing", problem)
 
     print(f"\n{plan.assets_emitted:,} assets in {len(written)} chunk(s)"
           + (f"; {len(plan.skipped)} open-country chunk(s) skipped "
@@ -663,6 +670,10 @@ def build_parser() -> argparse.ArgumentParser:
                         f"country and cost more pastes (default {DEFAULT_CHUNK_TILES})")
     c.add_argument("--keep-open-country", action="store_true",
                    help="also write chunks that hold only grass and scenery")
+    c.add_argument("--per-building", action="store_true",
+                   help="emit one slab per building instead of a few large "
+                        "structure chunks, so each is pasted and checked on "
+                        "its own; the town wall gets its own slab too")
     c.add_argument("--scale", type=int, default=3, help="raster SVG pixels per tile")
     c.add_argument("--crop", default=None, metavar="X,Z,W,D",
                    help="build only this tile region, for a staged in-game test")

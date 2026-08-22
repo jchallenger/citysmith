@@ -19,10 +19,16 @@ the two passes that catch that, written down so they run the same way twice.
         and cleared at the client centre without the camera moving
         .\tools\review.ps1 paste -Name final -Stem forest
 
+  buildings
+        the same, for a `build --per-building` output: the landscape first,
+        then one building at a time, each on the shared marker, with a shot
+        of every tenth so a paste that went wrong can be found afterwards
+        .\tools\review.ps1 buildings -Name pb -Stem pb
+
 Shots land in out\flyby\<Name>-<view>.jpg.
 #>
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('360','flyby','paste')][string]$Recipe,
+  [Parameter(Mandatory=$true)][ValidateSet('360','flyby','paste','buildings')][string]$Recipe,
   [Parameter(Mandatory=$true)][string]$Name,
   [string]$Stem = "forest",
   [string[]]$Slab,
@@ -166,5 +172,43 @@ switch ($Recipe) {
     }
     TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)
     "pasted $i chunk(s) of $Stem at $cx,$cy -> out\flyby\$Name-NN-{hold,down}.jpg"
+  }
+
+  'buildings' {
+    # One building per paste, each on the shared registration marker.
+    #
+    # A structure chunk of forty buildings lands or fails as one thing, and
+    # nothing in the result says which building went wrong -- that is what
+    # made a single missing shell take a whole session to chase. Cut by
+    # building (`build --per-building`) and each is its own paste: a bad one
+    # is re-pasted alone, and the rest of the town is untouched.
+    #
+    # Every slab still carries the map's two markers, so they all go at the
+    # same cursor cell and land in their own places. Camera straight down for
+    # all of them -- see Paste-Stack.
+    $cl = & $ts client
+    $cx = $cl.CX; $cy = $cl.CY
+    TS newboard
+    Start-Sleep -Seconds 3
+    $plane = & $ts planestate
+    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+    $out = Join-Path $PSScriptRoot "..\out"
+    $land = @(Get-ChildItem (Join-Path $out "$Stem-landscape-*.slab.txt"))
+    $bld  = @(Get-ChildItem (Join-Path $out "$Stem-structure-*.slab.txt"))
+    if (-not $bld) { throw "no out\$Stem-structure-*.slab.txt slabs; build with --per-building" }
+
+    TS orbit -X $cx -Y $cy -DX 0 -DY $PITCH_DOWN
+    $i = 0
+    foreach ($c in ($land + $bld)) {
+      $i++
+      TS paste -Slab $c.FullName -X $cx -Y $cy
+      Start-Sleep -Seconds 2
+      TS clear -X $cx -Y $cy
+      Start-Sleep -Milliseconds 600
+      if ($i -le $land.Count -or $i % 10 -eq 0) { Shot ("{0:d2}" -f $i) }
+      "$i/$($land.Count + $bld.Count) : $($c.BaseName)"
+    }
+    TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)
+    "pasted $($land.Count) landscape + $($bld.Count) building slab(s) at $cx,$cy"
   }
 }

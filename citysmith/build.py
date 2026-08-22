@@ -511,7 +511,8 @@ class Builder:
     def chunk_plan(self, max_assets: int = 4000, *, register: bool = True,
                    chunk_tiles: int = DEFAULT_CHUNK_TILES,
                    skip_open_country: bool = True,
-                   pack: bool = True, by_layer: bool = True) -> "ChunkPlan":
+                   pack: bool = True, by_layer: bool = True,
+                   per_building: bool = False) -> "ChunkPlan":
         """Cut the map into a 2D grid of pasteable chunks.
 
         **The grid.** Chunks are square tile regions ``chunk_tiles`` on a side,
@@ -652,6 +653,18 @@ class Builder:
         kept: list[SlabChunk] = []
         skipped: list[SlabChunk] = []
         for name, group in groups:
+            # **One building, one slab.** A chunk of forty buildings lands or
+            # fails as one thing: if the paste is off, every building in it is
+            # off together, and nothing about the result says which. Cut the
+            # structure layer by building instead and each one is pasted, seen
+            # and corrected on its own -- at the cost of a paste apiece. The
+            # town wall, its towers and anything else not part of a building
+            # keep the region grid.
+            if per_building and name == STRUCTURE:
+                kept.extend(self._building_chunks(
+                    group, group_of_moved, dx, dz, max_assets))
+                continue
+
             buckets: dict[tuple[int, int], list[Placement]] = {}
             for p in group:
                 ax, az = anchor_of.get(id(p), (p.x, p.z))
@@ -760,6 +773,45 @@ class Builder:
         self.stats.assets_skipped = sum(ch.count for ch in skipped)
         return ChunkPlan(kept, skipped, rows, cols, size,
                          (ox - dx, oz - dz), anchors)
+
+    def _building_chunks(self, group: list[Placement],
+                         group_of_moved: dict[int, str],
+                         dx: float, dz: float,
+                         max_assets: int) -> list["SlabChunk"]:
+        """One chunk per building, plus one for the rest of the structure layer.
+
+        The rest is the town wall, its towers, and anything else that is not
+        part of a building; it keeps no region of its own because it spans the
+        whole circuit, so it is emitted as a single piece named ``rampart``.
+
+        A building is small -- the largest on Forest Church is the temple at
+        577 placements -- so nothing here needs subdividing or packing. Each
+        chunk still gets the map's registration markers afterwards, which is
+        what lets every one of them be pasted at the same cursor cell.
+        """
+        by_building: dict[str, list[Placement]] = {}
+        for p in group:
+            by_building.setdefault(group_of_moved.get(id(p), ""), []).append(p)
+
+        out: list[SlabChunk] = []
+        for bid, items in sorted(by_building.items()):
+            xs = [p.x for p in items]
+            zs = [p.z for p in items]
+            x0 = int(math.floor(min(xs) - dx))
+            z0 = int(math.floor(min(zs) - dz))
+            out.append(SlabChunk(
+                row=max(0, z0 // DEFAULT_CHUNK_TILES),
+                col=max(0, x0 // DEFAULT_CHUNK_TILES),
+                quad="",
+                x0=x0, z0=z0,
+                x1=int(math.ceil(max(xs) - dx)) + 1,
+                z1=int(math.ceil(max(zs) - dz)) + 1,
+                slab=Slab(items),
+                layer=STRUCTURE,
+                buildings=1 if bid else 0,
+                name=bid or "rampart",
+            ))
+        return out
 
     def _grade_terrain(
         self, placements: list[Placement]
@@ -919,11 +971,16 @@ class SlabChunk:
     #: split across chunks, so the structure files' counts add up to the
     #: town's, and a paste missing one file is diagnosable from the table.
     buildings: int = 0
+    #: Overrides :attr:`region` in the label when a chunk is not a grid cell --
+    #: a per-building slab is named for its building, because "house-0005" is
+    #: what the paste is checking and "r03c04" is not.
+    name: str = ""
 
     @property
     def label(self) -> str:
         """Layer and region, e.g. ``landscape-r02c03`` -- the filename stem."""
-        return f"{self.layer}-{self.region}" if self.layer else self.region
+        what = self.name or self.region
+        return f"{self.layer}-{what}" if self.layer else what
 
     @property
     def region(self) -> str:

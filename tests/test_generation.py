@@ -936,6 +936,90 @@ def test_a_building_straddling_a_chunk_line_stays_in_one_chunk():
     assert all(ch.buildings == 0 for ch in plan.chunks if ch.layer != STRUCTURE)
 
 
+def test_per_building_emits_one_slab_per_building_and_one_for_the_wall():
+    """A chunk of forty buildings lands or fails as one thing, and nothing
+    about the result says which building went wrong. Cut by building instead
+    and each is pasted, seen and corrected on its own -- the town wall and
+    anything else not part of a building in a slab of its own."""
+    import collections
+    import math
+
+    from citysmith.build import STRUCTURE, build_from_tilemap, footprints, placed_bounds
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import Palette
+    from citysmith.raster import FLOOR, STREET, TileMap, _find_perimeters, _place_doors
+
+    palette = Palette.named(load_or_build(), "medieval", 33)
+    tm = TileMap.blank(40, 24)
+    for i, (bx, bz) in enumerate([(4, 4), (20, 4), (12, 14)]):
+        bid = f"house-{i:04d}"
+        for x in range(bx, bx + 5):
+            for z in range(bz, bz + 5):
+                tm.building[z][x] = bid
+                tm.surface[z][x] = FLOOR
+        tm.floors[bid] = 2
+    for x in range(40):                       # a wall run, owned by no building
+        tm.wall[22][x] = True
+        tm.surface[22][x] = STREET
+    _find_perimeters(tm, None)
+    _place_doors(tm, None)
+
+    b = build_from_tilemap(tm, palette, storeys=2, roofs=True)
+    plan = b.chunk_plan(max_assets=9000, chunk_tiles=24, per_building=True)
+    struct = [c for c in plan.chunks if c.layer == STRUCTURE]
+
+    names = sorted(c.name for c in struct)
+    assert names == ["house-0000", "house-0001", "house-0002", "rampart"], names
+    assert [c.label for c in struct if c.name == "house-0001"] == ["structure-house-0001"]
+    assert sum(c.buildings for c in struct) == 3
+    assert next(c for c in struct if c.name == "rampart").buildings == 0
+
+    # Every one of a building's pieces is in its own slab and nowhere else.
+    byid = b.byid
+    cell_bid = {c: bid for bid, cells in footprints(tm).items() for c in cells}
+    where = collections.defaultdict(set)
+    for ch in struct:
+        for p in ch.slab.placements:
+            if plan.is_marker(p) or p.asset_id in b.prop_ids:
+                continue
+            a = byid[p.asset_id]
+            x0, z0, x1, z1 = placed_bounds(a, p)
+            bid = cell_bid.get((int(math.floor((x0 + x1) / 2)),
+                                int(math.floor((z0 + z1) / 2))))
+            if bid:
+                where[bid].add(ch.name)
+    assert where, "no building pieces found"
+    for bid, chunks in where.items():
+        assert chunks == {bid}, f"{bid} is spread over {sorted(chunks)}"
+
+
+def test_a_shell_that_hovers_over_its_floor_is_caught():
+    """The shell and the floor are in different slabs, so "the walls sit on
+    the floor" is two pastes agreeing about height. Cheaper to catch in the
+    geometry than by eye on the board."""
+    from citysmith.build import LANDSCAPE, STRUCTURE
+    from citysmith.raster import TileMap
+    from citysmith.verify import shells_rest_on_their_floors
+
+    tm = TileMap.blank(6, 6)
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        b.add(place_tile(GROUND, 1, 1, 0.0))          # floor, top at 0.5
+    b.group = "house-0001"
+    with b.layer(STRUCTURE):
+        b.add(place_wall(WALL, 1, 1, "n", 0.5))       # sits on it
+    assert shells_rest_on_their_floors(b, tm) == []
+
+    hover = _builder()
+    with hover.layer(LANDSCAPE):
+        hover.add(place_tile(GROUND, 1, 1, 0.0))
+    hover.group = "house-0001"
+    with hover.layer(STRUCTURE):
+        hover.add(place_wall(WALL, 1, 1, "n", 1.0))   # half a tile of air
+    problems = shells_rest_on_their_floors(hover, tm)
+    assert problems and "house-0001" in problems[0]
+
+
 def test_a_plank_is_decked_over_running_water():
     """A plank used to be cobble at grade with a tile of air under it and no bed
     below. Now the river runs on under a deck laid by its top, flush with the
