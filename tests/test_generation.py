@@ -993,6 +993,35 @@ def test_per_building_emits_one_slab_per_building_and_one_for_the_wall():
         assert chunks == {bid}, f"{bid} is spread over {sorted(chunks)}"
 
 
+def test_tiled_chunks_all_reach_the_shared_floor():
+    """Measured on the board: a chunk pasted over another inherited the height
+    of the surface under the cursor -- a whole structure layer landed 1.5 tiles
+    up. Tiled chunks are pasted onto bare board instead, so each comes to rest
+    on its own lowest point; unless every one of them reaches the same floor,
+    they step against each other along the joins."""
+    from citysmith.build import LANDSCAPE, volume_bounds
+    from citysmith.verify import chunk_datum
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 16, 16)
+        b.add(place_tile(GROUND, 3, 3, -1.5))      # a sunken bed in one chunk
+    plan = b.chunk_plan(max_assets=9000, chunk_tiles=8, by_layer=False,
+                        pack=False, skip_open_country=False)
+    assert len(plan.chunks) > 1
+    assert all(c.layer == "" for c in plan.chunks), "tiling mode is unlayered"
+    assert chunk_datum(plan, b.byid) == []
+    for c in plan.chunks:
+        (_, ly, _), _ = volume_bounds(c.slab, b.byid)
+        assert abs(ly) < 1e-6, f"{c.label} floors at {ly}"
+
+    # Strip the pins and the chunk holding the sunken tile floors lower than
+    # the rest -- which is the step the pins exist to prevent.
+    for c in plan.chunks:
+        c.slab.placements = [p for p in c.slab.placements if not plan.is_marker(p)]
+    assert chunk_datum(plan, b.byid), "an unpinned tiling should be caught"
+
+
 def test_a_shell_that_hovers_over_its_floor_is_caught():
     """The shell and the floor are in different slabs, so "the walls sit on
     the floor" is two pastes agreeing about height. Cheaper to catch in the

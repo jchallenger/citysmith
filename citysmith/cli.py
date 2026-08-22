@@ -142,6 +142,28 @@ def _chunk_table(plan, stem: str) -> str:
 
 #: How to paste a chunked map. Every chunk carries a registration marker at the
 #: whole map's corner, so they share one bounding box and one anchor point.
+#: How to paste a map cut by region, with every layer in each chunk. Nothing
+#: is ever pasted over anything, which is the whole point.
+TILE_HELP = """TILE THE CHUNKS ONTO BLANK BOARD. Each file holds one region of the map with
+its terrain, buildings and walls together, and the regions do not overlap --
+so every chunk is pasted onto ground nothing has been laid on yet.
+
+A paste comes to rest on whatever is under the cursor. That is what put a
+whole structure layer 1.5 tiles up and a tile sideways when it was pasted over
+terrain: it inherited the height of the surface under the anchor. Onto bare
+board there is nothing to inherit, so every chunk lands on the same floor.
+
+  1. Paste the first chunk anywhere with room for the whole map around it.
+  2. For each of the rest, put the cursor one region along -- the chunk grid
+     below says which region each file covers -- and look at the preview
+     BEFORE committing. It snaps to the global grid, so nudge the cursor
+     until its edge meets its neighbour's, then commit with a held press.
+  3. Never let the cursor sit over geometry already on the board. If it does,
+     the chunk will land on top of it.
+
+Order does not matter and a subset is fine; each file is a complete piece of
+town, ground included."""
+
 PASTE_HELP = """Every chunk shares one origin (a registration marker at the map's corner),
 so paste each file at the SAME anchor point. Do not move the camera between
 pastes.
@@ -384,9 +406,10 @@ def cmd_build(args) -> int:
     from .layout import Layout
     from .raster import rasterize
     from .build import build_from_tilemap
-    from .verify import (check_placements, chunk_anchors, enclosed_voids,
-                     floating_placements, shells_rest_on_their_floors,
-                     tile_interpenetration, tilemap_svg, verify)
+    from .verify import (check_placements, chunk_anchors, chunk_datum,
+                     enclosed_voids, floating_placements,
+                     shells_rest_on_their_floors, tile_interpenetration,
+                     tilemap_svg, verify)
 
     layout = Layout.load(args.layout)
     tm = rasterize(layout, bridges=not args.no_bridges)
@@ -408,6 +431,7 @@ def cmd_build(args) -> int:
         max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
         skip_open_country=not args.keep_open_country,
         per_building=args.per_building,
+        by_layer=not args.by_region,
     )
     try:
         written = _write_chunks(plan.chunks, out_dir, args.stem)
@@ -430,6 +454,8 @@ def cmd_build(args) -> int:
         report.add("fail", "chunk coverage", problem)
     for problem in chunk_anchors(plan, builder.byid):
         report.add("fail", "chunk registration", problem)
+    for problem in chunk_datum(plan, builder.byid):
+        report.add("fail", "chunk datum", problem)
     # Buried geometry is a finish problem, not a broken map: it shows as a
     # seam rather than stopping anything working, so it warns rather than
     # failing the build.
@@ -674,6 +700,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="emit one slab per building instead of a few large "
                         "structure chunks, so each is pasted and checked on "
                         "its own; the town wall gets its own slab too")
+    c.add_argument("--by-region", action="store_true",
+                   help="one slab per map region with every layer in it, to "
+                        "be tiled onto blank board: nothing is ever pasted "
+                        "over anything, which is what stops a chunk inheriting "
+                        "the height of what is under the cursor")
     c.add_argument("--scale", type=int, default=3, help="raster SVG pixels per tile")
     c.add_argument("--crop", default=None, metavar="X,Z,W,D",
                    help="build only this tile region, for a staged in-game test")

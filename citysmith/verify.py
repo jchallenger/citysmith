@@ -688,6 +688,11 @@ def chunk_anchors(plan, byid) -> list[str]:
 
     if len(plan.chunks) < 2:
         return []
+    # Tiling mode does not share an origin and is not supposed to: each chunk
+    # is pasted at its own place on bare board, pinned by a marker at its own
+    # region corner. `chunk_datum` is the check that fits that plan.
+    if any(c.layer == "" for c in plan.chunks):
+        return []
 
     stored: dict[tuple[float, float, float], list[str]] = {}
     volume: dict[tuple[float, float, float], list[str]] = {}
@@ -722,6 +727,43 @@ def chunk_anchors(plan, byid) -> list[str]:
             "offset from each other"
         )
     return out
+
+def chunk_datum(plan, byid) -> list[str]:
+    """Tiled chunks that would not come out level with each other.
+
+    A chunk pasted onto bare board comes to rest with the lowest point of its
+    geometry on the board, so two chunks whose terrain sits at different
+    heights *above their own lowest point* land at different heights -- a step
+    in open grass along the join, which is the one thing a reviewer notices.
+    Each chunk is pinned by a marker at the map's global floor for exactly
+    this reason; this is the check that the pin did its job.
+
+    Only the vertical datum is checked. Sideways, the pieces are lined up by
+    eye against the grid before the press that commits them -- and they cannot
+    be pinned exactly anyway, because a pine on a map edge overhangs the map
+    itself, so the outermost chunks' geometry genuinely starts before their
+    own region. Height is the one that cannot be judged from a preview and
+    the one that shows, as a step in open grass along the join.
+    """
+    from .build import volume_bounds
+
+    tiled = [c for c in plan.chunks if c.layer == ""]
+    if len(tiled) < 2:
+        return []
+
+    bad = []
+    for c in tiled:
+        (_, ly, _), _ = volume_bounds(c.slab, byid)
+        if abs(ly) > 1e-6:
+            bad.append(f"{c.label} floors at y={ly:g}")
+    if not bad:
+        return []
+    return [
+        f"{len(bad)} tiled chunk(s) do not reach the shared floor at y=0 "
+        f"({'; '.join(bad[:4])}) -- each comes to rest on its own lowest "
+        "point, so they would step against each other along the joins"
+    ]
+
 
 def shells_rest_on_their_floors(builder, tm) -> list[str]:
     """Every building's walls start exactly on the top of its own floor.

@@ -639,6 +639,21 @@ class Builder:
         # placement that belongs to a building is assigned by the building's
         # low corner instead, so the whole shell -- walls, floors, roof, the
         # sign on the door -- rides in the same slab.
+        # A placement is filed by the corner of the box it *occupies*, not by
+        # its stored coordinate. A prop stores its collider centre, so a pine
+        # on a chunk's western edge reaches a tile and a half further west
+        # than any number in the file -- and a chunk whose geometry starts
+        # before its own region cannot be tiled onto the grid, because the
+        # paste anchors the box and the box is not where the region is.
+        boxmin: dict[int, tuple[float, float]] = {}
+        for q in slab.placements:
+            asset = self.byid.get(q.asset_id)
+            if asset is None:
+                boxmin[id(q)] = (q.x, q.z)
+                continue
+            bx0, bz0, _, _ = placed_bounds(asset, q)
+            boxmin[id(q)] = (bx0, bz0)
+
         group_of_moved: dict[int, str] = {}
         anchors: dict[str, tuple[float, float]] = {}
         for pl, g in zip(self.placements, self.group_of):
@@ -646,8 +661,9 @@ class Builder:
                 continue
             q = moved[id(pl)]
             group_of_moved[id(q)] = g
-            ax, az = anchors.get(g, (q.x, q.z))
-            anchors[g] = (min(ax, q.x), min(az, q.z))
+            qx, qz = boxmin[id(q)]
+            ax, az = anchors.get(g, (qx, qz))
+            anchors[g] = (min(ax, qx), min(az, qz))
         anchor_of = {pid: anchors[g] for pid, g in group_of_moved.items()}
 
         kept: list[SlabChunk] = []
@@ -667,9 +683,9 @@ class Builder:
 
             buckets: dict[tuple[int, int], list[Placement]] = {}
             for p in group:
-                ax, az = anchor_of.get(id(p), (p.x, p.z))
-                c = min(cols - 1, max(0, int((ax - ox) // size)))
-                r = min(rows - 1, max(0, int((az - oz) // size)))
+                ax, az = anchor_of.get(id(p), boxmin.get(id(p), (p.x, p.z)))
+                c = min(cols - 1, max(0, int((ax - ox + 1e-6) // size)))
+                r = min(rows - 1, max(0, int((az - oz + 1e-6) // size)))
                 buckets.setdefault((r, c), []).append(p)
 
             cells: list[_Cell] = []
@@ -730,7 +746,35 @@ class Builder:
             skipped.extend(layer_skipped)
 
         anchors: tuple[Placement, ...] = ()
-        if register and len(kept) > 1:
+        if register and not by_layer and len(kept) > 1:
+            # **Tiling mode: one marker per chunk, at the chunk's own corner.**
+            #
+            # Measured on the board (a copy-out the user took, 2026-08-22):
+            # the landscape landed 320 of 320 placements exactly right, and
+            # the structure layer landed +1.5 in y and a tile out in z --
+            # 1.5 being precisely the height of the terrain surface sitting
+            # under the cursor. The anchor is the cursor's ray-hit on
+            # *existing geometry*, so any chunk pasted over an earlier one
+            # inherits its height and, on a tilted camera, its slide.
+            #
+            # A chunk pasted onto bare board cannot do that. So the chunks are
+            # cut by region with every layer together, they tile the map
+            # without overlapping, and each is pasted on ground nothing has
+            # been laid on yet. What each one then needs is not a shared box
+            # but a shared *datum*: one marker at its own region corner, at
+            # the map's lowest point, so the piece lands where the grid says
+            # and every piece measures its heights from the same floor.
+            marker = self.palette.resolve("ground") or self.palette.resolve("floor")
+            marker_id = (marker.id if marker is not None
+                         else min(slab.placements, key=lambda p: (p.y, p.z, p.x)).asset_id)
+            pins: list[Placement] = []
+            for piece in kept:
+                pin = Placement(marker_id, piece.x0 + dx, 0.0, piece.z0 + dz, 0)
+                piece.slab.add(pin)
+                pins.append(pin)
+            self.stats.registration_markers = len(pins)
+            anchors = tuple(pins)
+        elif register and len(kept) > 1:
             # **Two markers, not one: a shared corner is not a shared box.**
             #
             # Every chunk used to carry a marker at the map's low corner, which
