@@ -1022,6 +1022,78 @@ def test_tiled_chunks_all_reach_the_shared_floor():
     assert chunk_datum(plan, b.byid), "an unpinned tiling should be caught"
 
 
+def test_tiled_chunks_present_one_identical_box():
+    """The paste anchors on the bounding box's *centre* -- measured on the
+    board with a 24x24 pad, which came to rest centred on the cursor. So the
+    thing that lets nine chunks go down at one cursor cell is not that they
+    share a corner but that they share the whole box: same centre, same anchor,
+    no measuring. It also makes any error in that anchor common to all of them,
+    so the map lands assembled even if it lands a little off where it was
+    aimed."""
+    from citysmith.build import LANDSCAPE, volume_bounds
+    from citysmith.verify import chunk_anchors
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 16, 16)
+        b.add(place_tile(GROUND, 3, 3, 2.0))       # a tall thing in one chunk
+    plan = b.chunk_plan(max_assets=9000, chunk_tiles=8, by_layer=False,
+                        pack=False, skip_open_country=False)
+    assert len(plan.chunks) > 1
+    assert chunk_anchors(plan, b.byid) == []
+
+    boxes = {volume_bounds(c.slab, b.byid) for c in plan.chunks}
+    assert len(boxes) == 1, f"chunks anchor on different centres: {boxes}"
+
+
+def test_the_shared_box_is_anchored_on_a_tile_not_between_two():
+    """The paste centres the slab's bounding box on the cursor's ray hit and
+    snaps the result to the grid. An odd-width box centres between two cells,
+    so the snap has a tie -- and it does not always break the same way: with a
+    189-wide box two copy-outs off the board put one chunk's props a whole tile
+    east of its neighbour's, a step down the length of the join."""
+    from citysmith.build import LANDSCAPE, volume_bounds
+    from citysmith.verify import anchor_on_a_whole_tile
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 17, 19)          # odd both ways before rounding
+    plan = b.chunk_plan(max_assets=9000, chunk_tiles=8, by_layer=False,
+                        pack=False, skip_open_country=False)
+    assert len(plan.chunks) > 1
+    assert anchor_on_a_whole_tile(plan, b.byid) == []
+    for c in plan.chunks:
+        (lx, _, lz), (hx, _, hz) = volume_bounds(c.slab, b.byid)
+        for axis, v in (("x", (lx + hx) / 2), ("z", (lz + hz) / 2)):
+            assert abs(v - round(v)) < 1e-6, f"{c.label} centres on {axis}={v}"
+
+
+def test_the_chunk_covering_the_anchor_is_pasted_last():
+    """All nine chunks anchor on the same point, and that point has to still be
+    bare board when each one arrives -- a paste comes to rest on whatever the
+    cursor's ray hits. Every region but one is somewhere else entirely; the one
+    covering the centre goes last, so nothing is ever pasted onto it."""
+    from citysmith.build import LANDSCAPE, volume_bounds
+    from citysmith.slab import Slab
+
+    b = _builder()
+    with b.layer(LANDSCAPE):
+        _ground_field(b, 24, 24)
+    plan = b.chunk_plan(max_assets=9000, chunk_tiles=8, by_layer=False,
+                        pack=False, skip_open_country=False)
+    assert len(plan.chunks) > 1
+
+    (lox, _, loz), (hix, _, hiz) = volume_bounds(
+        Slab([p for p in plan.chunks[0].slab.placements]), b.byid)
+    cx, cz = (lox + hix) / 2.0, (loz + hiz) / 2.0
+    last = plan.chunks[-1]
+    assert last.x0 <= cx < last.x1 and last.z0 <= cz < last.z1, (
+        f"{last.label} is last but does not cover the anchor at ({cx}, {cz})")
+    for c in plan.chunks[:-1]:
+        assert not (c.x0 <= cx < c.x1 and c.z0 <= cz < c.z1), (
+            f"{c.label} covers the anchor and is not last")
+
+
 def test_a_shell_that_hovers_over_its_floor_is_caught():
     """The shell and the floor are in different slabs, so "the walls sit on
     the floor" is two pastes agreeing about height. Cheaper to catch in the

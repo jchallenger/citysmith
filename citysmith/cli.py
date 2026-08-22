@@ -148,21 +148,29 @@ TILE_HELP = """TILE THE CHUNKS ONTO BLANK BOARD. Each file holds one region of t
 its terrain, buildings and walls together, and the regions do not overlap --
 so every chunk is pasted onto ground nothing has been laid on yet.
 
-A paste comes to rest on whatever is under the cursor. That is what put a
+A paste comes to rest on whatever the cursor's ray hits. That is what put a
 whole structure layer 1.5 tiles up and a tile sideways when it was pasted over
-terrain: it inherited the height of the surface under the anchor. Onto bare
-board there is nothing to inherit, so every chunk lands on the same floor.
+terrain: it inherited the height of the surface under the anchor. Regions
+cannot do that to each other, because no two of them occupy the same ground.
 
-  1. Paste the first chunk anywhere with room for the whole map around it.
-  2. For each of the rest, put the cursor one region along -- the chunk grid
-     below says which region each file covers -- and look at the preview
-     BEFORE committing. It snaps to the global grid, so nudge the cursor
-     until its edge meets its neighbour's, then commit with a held press.
-  3. Never let the cursor sit over geometry already on the board. If it does,
-     the chunk will land on top of it.
+PASTE EVERY FILE AT THE SAME CURSOR CELL, IN THE ORDER LISTED, WITHOUT MOVING
+THE CAMERA. Every chunk carries the map's two registration markers, so they
+all present the identical bounding box and all anchor on the same point --
+which means they need no measuring and no lining up by eye. It also means an
+error in that one anchor is shared by every chunk, so the map can land a
+little off where you aimed it and still be perfectly assembled with itself.
 
-Order does not matter and a subset is fine; each file is a complete piece of
-town, ground included."""
+  1. Pitch the camera straight down first, and leave it there. The anchor is
+     the cursor's ray hit, and with the camera vertical nothing under the
+     cursor can slide it sideways.
+  2. Pick a cell with room for the whole map around it, and paste every file
+     there. Look at the preview before each commit: a held slab that
+     intersects placed geometry renders as a pale translucent mesh.
+  3. Do not reorder the list. The anchor sits at the centre of the map, and
+     the chunk whose region covers it is listed last so that the anchor is
+     still bare board for all the pastes before it.
+
+A subset is fine -- each file is a complete piece of town, ground included."""
 
 PASTE_HELP = """Every chunk shares one origin (a registration marker at the map's corner),
 so paste each file at the SAME anchor point. Do not move the camera between
@@ -406,7 +414,8 @@ def cmd_build(args) -> int:
     from .layout import Layout
     from .raster import rasterize
     from .build import build_from_tilemap
-    from .verify import (check_placements, chunk_anchors, chunk_datum,
+    from .verify import (anchor_on_a_whole_tile, check_placements,
+                     chunk_anchors, chunk_datum,
                      enclosed_voids, floating_placements,
                      shells_rest_on_their_floors, tile_interpenetration,
                      tilemap_svg, verify)
@@ -463,6 +472,8 @@ def cmd_build(args) -> int:
         report.add("fail", "chunk registration", problem)
     for problem in chunk_datum(plan, builder.byid):
         report.add("fail", "chunk datum", problem)
+    for problem in anchor_on_a_whole_tile(plan, builder.byid):
+        report.add("fail", "paste anchor", problem)
     # Buried geometry is a finish problem, not a broken map: it shows as a
     # seam rather than stopping anything working, so it warns rather than
     # failing the build.
@@ -482,7 +493,7 @@ def cmd_build(args) -> int:
     print(f"\n  wrote {svg}  (tile numbers here match the chunk table below)")
     print(f"  wrote {len(written)} slab file(s) in {out_dir}")
     print("\n" + _chunk_table(plan, args.stem))
-    print("\n" + PASTE_HELP)
+    print("\n" + (TILE_HELP if args.by_region else PASTE_HELP))
     return 2 if report.failed else 0
 
 

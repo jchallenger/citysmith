@@ -747,45 +747,42 @@ class Builder:
 
         anchors: tuple[Placement, ...] = ()
         if register and not by_layer and len(kept) > 1:
-            # **Tiling mode: one marker per chunk, at the chunk's own corner.**
+            # **Tiled chunks want the shared box too, and for a subtler reason
+            # than the layers did.**
             #
-            # Measured on the board (a copy-out the user took, 2026-08-22):
-            # the landscape landed 320 of 320 placements exactly right, and
-            # the structure layer landed +1.5 in y and a tile out in z --
-            # 1.5 being precisely the height of the terrain surface sitting
-            # under the cursor. The anchor is the cursor's ray-hit on
-            # *existing geometry*, so any chunk pasted over an earlier one
-            # inherits its height and, on a tilted camera, its slide.
+            # Tiling was introduced because a paste comes to rest on whatever
+            # the cursor's ray hits, so a layer pasted over another inherits
+            # its height -- measured, from a copy-out the user took off the
+            # board: the landscape landed 320 of 320 placements exactly right
+            # and the structure layer +1.5 in y, 1.5 being exactly the height
+            # of the terrain under the anchor. Cutting by region with every
+            # layer together fixes that, because the regions do not overlap
+            # and nothing is ever pasted over anything.
             #
-            # A chunk pasted onto bare board cannot do that. So the chunks are
-            # cut by region with every layer together, they tile the map
-            # without overlapping, and each is pasted on ground nothing has
-            # been laid on yet. What each one then needs is not a shared box
-            # but a shared *datum*: one marker at its own region corner, at
-            # the map's lowest point, so the piece lands where the grid says
-            # and every piece measures its heights from the same floor.
-            # **The pin is deliberately something you can see.** A tiled chunk
-            # is lined up by eye against its neighbour, and open country is
-            # self-similar -- grass against grass, with a tree here and there,
-            # gives the eye nothing to register on, so a seam a tile out looks
-            # exactly like a seam that is right. A stone block standing half a
-            # tile proud of the turf at each chunk's own corner turns that into
-            # a lattice: place the piece so its pip is one region from its
-            # neighbour's and the join is exact. They are one tile each and
-            # come out with a marquee once the map is assembled.
-            marker = (self.palette.resolve("city_wall_core")
-                      or self.palette.resolve("ground")
-                      or self.palette.resolve("floor"))
-            marker_id = (marker.id if marker is not None
-                         else min(slab.placements, key=lambda p: (p.y, p.z, p.x)).asset_id)
-            pins: list[Placement] = []
-            for piece in kept:
-                pin = Placement(marker_id, piece.x0 + dx, 0.0, piece.z0 + dz, 0)
-                piece.slab.add(pin)
-                pins.append(pin)
-            self.stats.registration_markers = len(pins)
-            anchors = tuple(pins)
-        elif register and len(kept) > 1:
+            # It does *not* follow that each chunk should be pinned at its own
+            # corner and placed by hand. **The anchor is the bounding box's
+            # centre, not its corner** -- measured on the board with a 24x24
+            # pad, which came to rest centred on the cursor to within half a
+            # tile. Give every chunk its own box and every chunk anchors on a
+            # different point, so each has to be lined up by eye, and at the
+            # 17.2 px/tile the zoom-out caps at, one 72-tile region is 1239 px
+            # against a 900 px-tall window: eight alignments, each needing a
+            # pan, each able to be a tile out. That is what "a few tiles to the
+            # South East" was.
+            #
+            # Give them the identical box instead and they all anchor on the
+            # same point, so they go down at ONE cursor cell with no
+            # measurement at all -- and, far more useful, any error in that
+            # anchor is *common to all nine*. The map can land a tile off where
+            # it was aimed and still be perfectly assembled with respect to
+            # itself, which is the only thing that shows.
+            #
+            # The one thing to get right is that the anchor point must stay
+            # bare board for all nine pastes, or the last ones inherit a height
+            # again. The anchor sits at the centre of the map, so the chunk
+            # whose region covers it is written last; see `_anchor_last`.
+            kept = _anchor_last(kept, slab, self.byid, dx, dz)
+        if register and len(kept) > 1:
             # **Two markers, not one: a shared corner is not a shared box.**
             #
             # Every chunk used to carry a marker at the map's low corner, which
@@ -807,15 +804,22 @@ class Builder:
             _, (hx, hy, hz) = volume_bounds(slab, self.byid)
             lo = Placement(marker_id, 0.0, 0.0, 0.0, 0)
             # Placed so the marker's own far face lands on the map's, since a
-            # tile's stored coordinate is its min corner -- rounded *out* to
-            # the half-tile lattice. The far face of the map is wherever some
-            # pine canopy's 2.55-tile collider happens to end, which put the
-            # marker at x=187.51: the one non-prop tile on the board off the
-            # grid the off-grid canary exists to guard. It cannot shift the
-            # paste (the anchor is the low corner), but a check with a known
-            # exception is a check nobody runs. Every chunk still gets the
-            # identical box, which is all the marker is for.
-            hx, hz = (math.ceil(hx * 2) / 2, math.ceil(hz * 2) / 2)
+            # tile's stored coordinate is its min corner -- rounded *out* to an
+            # even whole tile. The far face of the map is wherever some pine
+            # canopy's 2.55-tile collider happens to end, which put the marker
+            # at x=187.51: the one non-prop tile on the board off the grid the
+            # off-grid canary exists to guard.
+            #
+            # **Even, because the paste anchors on the box's centre, and a
+            # centre that lands on a cell boundary is a coin toss.** Rounding
+            # out to the half-tile lattice gave a 189.0-wide box, so the centre
+            # sat at x=94.5 -- exactly between two cells. Measured on the board
+            # from two independent copy-outs: r01c00's props resolved at one
+            # offset and r01c01's at one tile further east, so the tie had been
+            # broken both ways in the same paste run and the map came out with
+            # a one-tile step down the c00/c01 join. An even extent puts the
+            # centre on a whole tile, where there is nothing to round.
+            hx, hz = (_even_ceil(hx), _even_ceil(hz))
             hi = Placement(marker_id, hx - sx, hy - sy, hz - sz, 0)
             for piece in kept:
                 piece.slab.add(lo)
@@ -1143,6 +1147,38 @@ def _trim_open_country(
     kept = [ch for ch in made if (ch.row, ch.col) not in outside]
     skipped = [ch for ch in made if (ch.row, ch.col) in outside]
     return kept, skipped
+
+
+def _even_ceil(v: float) -> float:
+    """Round up to an even whole tile.
+
+    The registration box is anchored by its centre, so its extent has to be
+    even for that centre to land on a tile rather than on the boundary between
+    two -- see the marker code in :meth:`Builder.chunk_plan`.
+    """
+    return 2.0 * math.ceil(v / 2.0)
+
+
+def _anchor_last(kept: list[SlabChunk], whole: Slab,
+                 byid: dict[str, Asset], dx: float, dz: float) -> list[SlabChunk]:
+    """Put the chunk covering the paste anchor at the end of the order.
+
+    Every chunk carries the map's two registration markers, so they all present
+    the identical bounding box and all nine go down at one cursor cell. The
+    point TaleSpire anchors on is that box's *centre*, which lands somewhere in
+    the middle of the map -- and the anchor has to still be bare board when each
+    chunk arrives, or the paste inherits the height of whatever is under it.
+    Every region but one is somewhere else entirely; the one that covers the
+    centre only has to go last.
+    """
+    (lox, _, loz), (hix, _, hiz) = volume_bounds(whole, byid)
+    # volume_bounds reads the *normalised* slab; the chunks carry the builder's
+    # tile numbers, which is the same lattice shifted by (dx, dz).
+    cx, cz = (lox + hix) / 2.0 - dx, (loz + hiz) / 2.0 - dz
+    covering = [c for c in kept if c.x0 <= cx < c.x1 and c.z0 <= cz < c.z1]
+    if not covering:
+        return kept
+    return [c for c in kept if c not in covering] + covering
 
 
 def _absorb_open_country(

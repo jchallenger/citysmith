@@ -688,12 +688,6 @@ def chunk_anchors(plan, byid) -> list[str]:
 
     if len(plan.chunks) < 2:
         return []
-    # Tiling mode does not share an origin and is not supposed to: each chunk
-    # is pasted at its own place on bare board, pinned by a marker at its own
-    # region corner. `chunk_datum` is the check that fits that plan.
-    if any(c.layer == "" for c in plan.chunks):
-        return []
-
     stored: dict[tuple[float, float, float], list[str]] = {}
     volume: dict[tuple[float, float, float], list[str]] = {}
     for ch in plan.chunks:
@@ -727,6 +721,37 @@ def chunk_anchors(plan, byid) -> list[str]:
             "offset from each other"
         )
     return out
+
+def anchor_on_a_whole_tile(plan, byid) -> list[str]:
+    """Chunks whose shared box is anchored on a cell boundary.
+
+    A paste comes to rest with the slab's bounding box *centred* on the
+    cursor's ray hit, and the result is snapped to the global grid. If the box
+    has an odd extent its centre falls exactly between two cells, and the snap
+    has a tie to break -- which it does not always break the same way. Measured
+    on the board: with a 189-wide box (centre x=94.5) two copy-outs put one
+    chunk's props at one offset and its neighbour's a tile further east, a
+    one-tile step down the whole join. An even extent has nothing to round.
+    """
+    from .build import volume_bounds
+
+    if len(plan.chunks) < 2:
+        return []
+    bad = []
+    for c in plan.chunks:
+        (lx, _, lz), (hx, _, hz) = volume_bounds(c.slab, byid)
+        cx, cz = (lx + hx) / 2.0, (lz + hz) / 2.0
+        for axis, v in (("x", cx), ("z", cz)):
+            if abs(v - round(v)) > 1e-6:
+                bad.append(f"{c.label} centres on {axis}={v:g}")
+    if not bad:
+        return []
+    return [
+        "registration box is anchored between cells, so the paste has a tie to "
+        "break and neighbouring chunks can land a tile apart: "
+        + "; ".join(sorted(set(bad))[:4])
+    ]
+
 
 def chunk_datum(plan, byid) -> list[str]:
     """Tiled chunks that would not come out level with each other.

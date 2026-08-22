@@ -15,3 +15,4 @@ dist/
 # These are other builders' work from Tales Tavern -- we learn construction
 # technique from them, we do not redistribute their geometry.
 library/
+.claude/worktrees/

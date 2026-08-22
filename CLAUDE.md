@@ -221,9 +221,30 @@ actually matters, all confirmed in-game:
   thin horizontal *slice* at the plane's height rather than a volume from the
   ground up, and the plane could not be driven down to the turf. The hint bar
   goes blank while a selection is active, so it does not name the binding.
-  `M` (bottom right, a ruler icon) is still unidentified. Until this works,
-  the fallbacks are the user copying a region by hand, and the angle test
-  below.
+  `M` (bottom right, a ruler icon) is still unidentified.
+  **What 2026-08-22 added, and it is enough to verify a board with:**
+  - **The clipboard still holds the last slab you pasted**, and `Ctrl+C` over
+    a selection that did not take leaves it there. A "copy-out" that decodes
+    to exactly one chunk file, at offset (0,0,0), is the echo of your own
+    paste and proves nothing. Compare its length against the last file pasted
+    before believing a word of it -- this was believed for several minutes.
+  - Only **one marquee per board** could be driven. After a selection takes,
+    `X`+drag stops registering; clicking the marquee icon on the build toolbar
+    re-arms it for one more. Beyond that, make a new board.
+  - The slice is at the working plane, so **what comes back depends on where
+    the plane is**: at the default it sliced an upper storey at y=11. One
+    `elev -DY -300` brought it down to y=3.5, which cuts the rampart and the
+    tree canopies -- and canopies are the useful thing, because a prop has
+    fractional coordinates and a rotation, so its signature is unique and it
+    can be matched to a source chunk without ambiguity. A wall run cannot:
+    every block is identical, so a chunk shifted one tile still matches.
+  - **While the select tool is armed the whole scene renders washed out.** It
+    reads exactly like distance fog and it is not; the tool stays armed
+    between selections.
+  - Do **not** drag the camera height slider: it sits close enough to the
+    screen edge that the drag opened the Windows widgets flyout over the
+    game. Raise the camera in `-DY 150` steps and check the compass after
+    each; a new board resets anything that gets stuck.
 - **The right-hand vertical track is a camera *height* slider, and it goes far
   higher than the wheel.** Zoom-out is capped well short of a 187-tile map;
   raising the camera is how a whole quarter fits one frame, which is what a
@@ -342,10 +363,37 @@ paste lands on the first. It solved terrain seams and created this instead.
 **`build --by-region` is the answer**: cut by region with every layer
 together, so the chunks tile the map without overlapping and each is pasted
 onto ground nothing has been laid on yet. Nothing to inherit, so every chunk
-rests on the board at the same height. What they need is not a shared box but
-a shared **datum** -- one marker per chunk at the map's global floor, so a
-chunk with a deep riverbed still measures from the same level.
-`verify.chunk_datum` fails the build if any tiled chunk does not reach y=0.
+rests on the board at the same height. `verify.chunk_datum` fails the build if
+any tiled chunk does not reach y=0.
+
+**The anchor is the bounding box's CENTRE (SETTLED 2026-08-22, measured).**
+Held over open board, a 24x24 cobble pad came to rest centred on the cursor to
+within half a tile -- not with a corner there. Everything else follows from
+that:
+
+- **Tiled chunks carry the map's two registration markers, same as the layers
+  do**, so all nine present the identical box, all anchor on the same point,
+  and **all go down at one cursor cell**. No measuring, no lining up by eye,
+  no panning. Better still, an error in that single anchor is *common to all
+  nine*: the map can land a tile off where it was aimed and still be perfectly
+  assembled with respect to itself, which is the only thing that shows. The
+  earlier scheme -- a pin at each chunk's own corner, placed by hand -- meant
+  eight alignments at 17 px/tile against a 900 px window, each able to be a
+  tile out. That was "a few tiles to the South East".
+- **The anchor point must stay bare board for every paste**, or the last ones
+  inherit a height. It sits at the middle of the map, so `_anchor_last` writes
+  the chunk whose region covers it last; the CLI prints the files in that
+  order and `TILE_HELP` says not to reorder them.
+- **The box's extent has to be EVEN, or the snap has a tie to break.** Rounded
+  out to the half-tile lattice the box was 189 wide, so its centre sat at
+  x=94.5 -- exactly between two cells. Measured from two independent copy-outs
+  of one paste run: `r01c00`'s props resolved at one offset and `r01c01`'s a
+  whole tile east, so the tie had been broken both ways and the map had a
+  one-tile step down the length of the c00/c01 join. `_even_ceil` rounds the
+  far marker out to an even tile (190 x 184, centre 95, 92) and
+  `verify.anchor_on_a_whole_tile` fails the build otherwise. Re-measured after
+  the fix, a copy straddling the same seam matched **39 of 39 placements at
+  one rigid offset, 19 of them owned by `r01c00` and 20 by `r01c01`**.
 
 **What is measured about placing them (2026-08-22), and what is not:**
 
