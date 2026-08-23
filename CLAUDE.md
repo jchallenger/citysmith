@@ -756,6 +756,25 @@ shape instead of reading it. The rules that fall out:
     of N cells running east is unmistakable. Zoom-out is capped, so size the
     probe to fit one frame rather than expecting to fly around it.
 
+- **The last roof course is a ridge CAP, not another ring.** `_roof_rings`
+  steps every course one cell in and one rise up, and the top ring was being
+  roofed in slopes like any other -- so along the apex you saw their
+  undersides, bare timber the length of every ridge. The cap piece goes on the
+  top ring instead, seated so its **top** is flush with the ring height
+  (`y = roof_y + r*rise - cap.size_y`), which is the same rule
+  `Builder.surface()` follows for anything laid flat. Read off a hand-built
+  correction the user made to one of these roofs and decoded: the caps sat at
+  0.5 where the ring would have been 1.0. Ridge tiles lap from the ends
+  towards the stack, so the caps mirror about the chimney
+  (`_ridge_rotations`), and the chimney is two courses lapped `CHIMNEY_LAP`
+  rather than one piece sitting on the ridge as a stub.
+
+- **A porch needs a storey to carry it.** The hood seats at `storey_h + 0.5`,
+  which on a one-storey cottage is level with its own eaves -- a second roof
+  grafted onto the first. Single-storey buildings get a lantern on the
+  doorpost instead (`_hang_lanterns`), and never both a lantern and a sign:
+  a signed trade already says who it is.
+
 - **A corner piece eats the facade on a small footprint, so a glazing *rate*
   cannot say much.** Windows are dealt one-in-N per segment, and on Forest
   Church the front face of a trade building came out 27% glazed against a

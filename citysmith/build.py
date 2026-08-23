@@ -2122,6 +2122,35 @@ def _lay_bridges(b: Builder, tm, grade: float,
     return laid
 
 
+#: How far the upper chimney course laps the lower one. A single 0.5-tall
+#: piece sitting on the ridge reads as a stub; two lapped a quarter stand
+#: proud of it and still leave no joint to see.
+CHIMNEY_LAP = 0.25
+
+
+def _ridge_rotations(wing, rings, top_ring, chimney_at):
+    """Which way each ridge cap faces, mirrored about the chimney.
+
+    Ridge tiles are lapped from the ends of the ridge towards the stack, so
+    the joints face away from the weather on both slopes. Along z that is
+    rot 12 on one side and rot 0 on the other; along x, 18 and 6. With no
+    chimney the mirror is the ridge's own midpoint, which comes to the same
+    thing on a symmetrical plan and is at least consistent on an asymmetric
+    one.
+    """
+    crown = [c for c in sorted(wing) if rings[c] == top_ring]
+    if not crown:
+        return {}
+    xs = {c[0] for c in crown}
+    zs = {c[1] for c in crown}
+    along_z = len(zs) >= len(xs)
+    axis = 1 if along_z else 0
+    near, far = (12, 0) if along_z else (18, 6)
+    pivot = (chimney_at[axis] if chimney_at is not None
+             else (min(c[axis] for c in crown) + max(c[axis] for c in crown)) / 2.0)
+    return {c: (near if c[axis] < pivot else far) for c in crown}
+
+
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                skip: set[tuple[int, int]] | None = None) -> None:
     """Roof each block as concentric rings, the way hand-builders do.
@@ -2202,11 +2231,29 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                 if crown:
                     chimney_at = crown[len(crown) // 2]
 
+            # **The last course is a ridge cap, not another ring.** Stepping
+            # the top ring up a full rise and roofing it in slopes leaves
+            # their undersides on show along the apex -- the bare timber that
+            # showed at the top of every slate roof. A ridge is capped, and
+            # the cap is seated so its *top* is flush with the ring height,
+            # which is the same rule `Builder.surface()` follows for anything
+            # laid flat. Read off a hand-built correction to one of these
+            # roofs: the caps sat at 0.5 where the ring would have been 1.0.
+            ridge_rot = _ridge_rotations(wing, rings, top_ring, chimney_at)
+
             for (x, z) in sorted(wing):
                 r = rings[(x, z)]
                 y = roof_y + r * rise
                 if (x, z) == chimney_at and chimney is not None:
-                    b.add(place_tile(chimney, x, z, y)); continue
+                    # Two courses, lapped a quarter, so the stack clears the
+                    # ridge instead of sitting on it as a stub.
+                    b.add(place_tile(chimney, x, z, y - CHIMNEY_LAP))
+                    b.add(place_tile(chimney, x, z, y))
+                    continue
+                if r == top_ring and cap is not None:
+                    b.add(place_tile(cap, x, z, y - cap.size_y,
+                                     ridge_rot.get((x, z), 0)))
+                    continue
                 # Which way the slope falls: the sides where the roof steps
                 # back down towards this wing's own eaves.
                 fall = tuple(s for s, dx, dz in SIDE_OFFSETS
@@ -3158,7 +3205,7 @@ def build_from_tilemap(
                         b.add(place_tile(upper, x, z, y))
 
     with b.layer(STRUCTURE):
-        _build_porches(b, tm, floor.size_y, taper, storey_h)
+        _build_porches(b, tm, floor.size_y, taper, storey_h, storeys)
         towers = pick_towers(tm, storeys)
         if roof_asset is not None:
             _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
@@ -3167,7 +3214,7 @@ def build_from_tilemap(
         _lay_town_wall(b, tm, town_wall, top, wall_tiles)
 
     b.group = ""
-    _dress_districts(b, tm, grade=floor.size_y, taper=taper)
+    _dress_districts(b, tm, grade=floor.size_y, taper=taper, storeys=storeys)
 
     return b
 
@@ -3490,7 +3537,7 @@ def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
 
 def _build_porches(b: Builder, tm, grade: float,
                    taper: dict[tuple[int, int], float | None],
-                   storey_h: float) -> int:
+                   storey_h: float, max_floors: int) -> int:
     """Roof the cell outside the primary door of each public building.
 
     Every building is otherwise one flat-topped mass, and an entrance reads
@@ -3502,6 +3549,13 @@ def _build_porches(b: Builder, tm, grade: float,
     for bid, doors in sorted(tm.doors.items()):
         b.group = bid
         if bid.split("-")[0] not in PORCHED_KINDS or not doors:
+            continue
+        # **A single storey has nothing to carry a porch.** The hood seats at
+        # `storey_h + 0.5`, which on a one-storey cottage is level with its
+        # own eaves -- a second roof grafted onto the first at the same
+        # height. Those buildings get a lantern by the door instead, which is
+        # what says "you may knock here" at cottage scale.
+        if storeys_of(tm, bid, max_floors) < 2:
             continue
         # The porch is a slope off the building's own roof, so it takes that
         # building's material and that kit's turn -- a thatched hood on a
@@ -3525,6 +3579,50 @@ def _build_porches(b: Builder, tm, grade: float,
                          (ROOF_EDGE_ROT[side] + edge_off) % 24))
         built += 1
     return built
+
+
+#: Head height for a lantern on a doorpost, in tiles above the threshold.
+LANTERN_Y = 1.5
+
+
+def _hang_lanterns(b: Builder, tm, scatter: "Scatter", grade: float,
+                   taper: dict[tuple[int, int], float | None],
+                   max_floors: int) -> int:
+    """A lantern on the doorpost of every single-storey house.
+
+    These are the buildings a porch cannot serve -- the hood would seat level
+    with their own eaves -- and without it a cottage is a blank wall with a
+    hole in it, which is the complaint the porch was built to answer in the
+    first place. A signed trade already gets its board; this is for everyone
+    else, so the two are mutually exclusive.
+    """
+    lantern = b.palette.resolve("door_lantern")
+    if lantern is None:
+        return 0
+    hung = 0
+    for bid, doors in sorted(tm.doors.items()):
+        b.group = bid
+        if not doors or storeys_of(tm, bid, max_floors) >= 2:
+            continue
+        if bid.split("-")[0] in SIGNED_KINDS:
+            continue                       # its sign already says who it is
+        x, z, side = doors[0]
+        dx, dz = next((d, e) for sd, d, e in SIDE_OFFSETS if sd == side)
+        ox, oz = x + dx, z + dz
+        if not tm.inside(ox, oz) or tm.building[oz][ox] or tm.wall[oz][ox]:
+            continue
+        drop = taper.get((ox, oz), 0.0)
+        if drop is None:
+            continue
+        # Against the facade and off to one side, clear of the doorway --
+        # the same placement the sign uses, so a building can never get both
+        # in the same square.
+        cx = ox + 0.5 - dx * 0.34 + (0.32 if dx == 0 else 0.0)
+        cz = oz + 0.5 - dz * 0.34 + (0.32 if dz == 0 else 0.0)
+        if scatter.one(lantern, cx, cz, grade - drop + LANTERN_Y,
+                       _SIDE_ROT[side]):
+            hung += 1
+    return hung
 
 
 def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
@@ -3562,7 +3660,8 @@ def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
 
 
 def _dress_districts(b: Builder, tm, grade: float,
-                     taper: dict[tuple[int, int], float | None]) -> None:
+                     taper: dict[tuple[int, int], float | None],
+                     storeys: int = 3) -> None:
     """Scatter district-appropriate props so each quarter reads as itself.
 
     Bare surfaces carry no story: a field of Tilled Earth is just brown, a
@@ -3610,6 +3709,7 @@ def _dress_districts(b: Builder, tm, grade: float,
     # landscape. This pass is the one place the two mix.
     with b.layer(STRUCTURE):
         _hang_signs(b, tm, scatter, grade, taper)
+        _hang_lanterns(b, tm, scatter, grade, taper, storeys)
         b.group = ""
     near_town = building_distance(tm)
     market = [b.palette.resolve("market_goods", v) for v in range(4)]

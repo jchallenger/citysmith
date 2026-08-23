@@ -2228,3 +2228,57 @@ def test_a_tier_is_roofed_in_its_own_material():
             if other != tier:
                 assert s[0].id not in placed, (
                     f"{bid}: {tier} building roofed in {other}'s slope")
+
+
+def test_the_ridge_is_capped_not_carried_up_another_course():
+    """Stepping the top ring up a full rise and roofing it in slopes leaves
+    their undersides showing along the apex -- the bare timber that showed at
+    the top of every slate roof. The last course is a cap, seated so its top
+    is flush with the ring height."""
+    from citysmith.build import build_from_tilemap, roof_set
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    side, _, _, cap, _ = roof_set(palette, "common")
+
+    # 3 wide is the case the hand-built correction was made on: the top ring
+    # is a single column, so the whole ridge is cap.
+    tm = _one_building("house-0001", w=3, d=7)
+    b = build_from_tilemap(tm, palette, storeys=1, roofs=True)
+    caps = [p for p in b.placements if p.asset_id == cap.id]
+    slopes = [p for p in b.placements if p.asset_id == side.id]
+    assert caps, "no ridge cap laid"
+
+    # The cap's *top* lands on the course the ring above would have used --
+    # which is exactly the course that now carries no slopes, because that is
+    # the ring the cap replaces.
+    top_course = max(round(p.y, 3) for p in slopes) + side.size_y
+    for p in caps:
+        assert round(p.y + cap.size_y, 3) == round(top_course, 3), (
+            f"cap at y={p.y} is not seated flush with the ring at {top_course}")
+    assert not [p for p in slopes if round(p.y, 3) == round(top_course, 3)], \
+        "a slope is still carried up onto the ridge course"
+
+
+def test_a_single_storey_gets_a_lantern_and_no_porch():
+    """A porch seats at storey_h + 0.5, which on a one-storey cottage is level
+    with its own eaves -- a second roof grafted onto the first. Those get a
+    lantern by the door instead."""
+    from citysmith.build import build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    lantern = palette.require("door_lantern")
+
+    low = build_from_tilemap(_one_building("tavern-0001"), palette, storeys=1)
+    tall = build_from_tilemap(_one_building("tavern-0002"), palette, storeys=3)
+
+    assert not [p for p in tall.placements if p.asset_id == lantern.id], \
+        "a two-storey building took a lantern instead of its porch"
+    # A signed trade says who it is with its board; a plain house gets the
+    # lantern. Both are single storey, and neither may take a porch.
+    house = build_from_tilemap(_one_building("house-0003"), palette, storeys=1)
+    assert [p for p in house.placements if p.asset_id == lantern.id], \
+        "no lantern on a single-storey house"

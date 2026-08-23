@@ -409,6 +409,14 @@ MEDIEVAL = Style(
         #
         # Every "Market Sign" in the catalog is Cyberpunk pack -- the ``_MED``
         # filter is what stops a medieval village hanging neon over its inns.
+        #: Hung beside the door of a building too low for a porch. A hood
+        #: seats at `storey_h + 0.5`, so on a one-storey cottage it lands at
+        #: its own eaves and reads as a second roof grafted on; a lantern says
+        #: the same thing -- someone lives here, knock -- at cottage scale.
+        "door_lantern": [
+            _tile(name="Lantern on hook 01", kind="prop", **_MED),
+            _tile(name="Lantern -Small", kind="prop", **_MED),
+        ],
         "shop_sign": [
             _prop(name=("Sign (Generic) 01", "Sign (Generic) 02",
                         "Sign (Village) 01", "Sign (Village) 02",
