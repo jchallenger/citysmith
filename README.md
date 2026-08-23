@@ -204,8 +204,9 @@ where a porch would sit level with their own eaves.
 of the merlons, with square mural towers at every corner and flanking every
 gate. Gate passages are cut square through the band so the portcullis has
 straight jambs to hang on, and a stair runs up the inside of the wall at each
-tower — always on the inward side, because a stair on the field side of a town
-wall is a siege ramp for the enemy.
+tower — parallel to the curtain, landing flush with the wall-walk, and never
+on the field side, because a stair outside a town wall is a siege ramp for the
+enemy.
 
 ---
 
@@ -328,7 +329,7 @@ automatically (Windows only, and the game must be windowed).
 python -m pytest -q
 ```
 
-205 tests. The slab codec is tested against real TaleSpire slabs in
+208 tests. The slab codec is tested against real TaleSpire slabs in
 `tests/fixtures/` — decoding and re-encoding reproduces the original binary
 byte for byte. Generator tests assert *invariants* (no overlapping buildings,
 no unreachable rooms, walls resting on floors, no window on the back of a

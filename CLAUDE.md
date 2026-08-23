@@ -71,7 +71,12 @@ What FTG gives that MFCG does not, and what follows from it:
 - **No metadata feature at all.** No version, no settlement name (it is only in
   the filename), no road width, no wall thickness. Carriageway widths are
   chosen in `ftg.ROAD_WIDTHS_M` and stay fixed in metres whatever anchor is in
-  force.
+  force. **Wall thickness is not a free parameter**: at `Layout`'s 2.0-tile
+  default the band is two cells, so on a diagonal circuit only 13% of wall
+  cells have all four orthogonal neighbours and the rampart has no core to hang
+  its curtain pieces on. `ftg.DEFAULT_WALL_THICKNESS_M` is 4.5 m, which puts
+  East Tradebourne at 41% -- the same place MFCG's own metadata puts Forest
+  Church (2.77 tiles, 37%).
 - **Edges are single segments, not polylines.** Every `EDGE` is exactly two
   points -- it is one boundary segment of a background polygon, and 93-96% of
   edge endpoints are also background vertices. `ftg.chain_segments` joins them
@@ -105,19 +110,24 @@ What FTG gives that MFCG does not, and what follows from it:
   over water.
 
 `docs/ftg-geojson-import.md` is the full schema, the measurements behind each of
-these, and the remaining stages. Verified end to end on **Pelvesthollow**
-(175x184 tiles, 35 buildings, 9 chunks at 64 tiles) and **Graybank** (434x306,
-150 buildings, 91,429 assets, 24 chunks at 80 tiles), both pasted with
-`review.ps1 tiled` and walked round: one continuous sheet of ground, no step at
-any join, buildings flush, and on Graybank a river with a continuous shingle
-bank on both shores.
+these, and the remaining stages. Built and pasted on all three exports:
 
-**Chunk size is bounded by the byte cap, and on a big map there is no slack.**
-Graybank at 96 tiles is 20 chunks with the largest slab at 29,817 bytes against
-the 30,720 cap -- 97%, close enough that another seed could bust it. At 80 tiles
-it is 24 chunks and 20,604 bytes. Pelvesthollow at 64 tiles is 13,848. Size the
-chunks so the largest lands near two thirds of the cap, and re-check the number
-after any change that adds dressing.
+| town | tiles | buildings | assets | chunks | chunk size |
+|---|---|---|---|---|---|
+| Pelvesthollow | 175x184 | 35 | 20,687 | 9 | 64 |
+| Graybank | 434x306 | 150 | 91,429 | 24 | 80 |
+| East Tradebourne | 739x598 | 991 | 387,381 | 114 | 112 |
+
+**Chunk size is bounded by the byte cap -- until `--max-assets` binds, and then
+it stops mattering.** Graybank at 96 tiles is 20 chunks with the largest slab
+at 29,817 bytes against the 30,720 cap -- 97%, close enough that another seed
+could bust it; at 80 tiles it is 24 chunks and 20,604 bytes. But on East
+Tradebourne, 80 / 112 / 160 tiles give 146 / 114 / 137 chunks and all three land
+within 40 bytes of each other, because the quadtree split at `--max-assets 6500`
+is what sets the slab size. Above that threshold, pick the cell size that
+*splits least*: 160 is worse than 112 because an oversized cell splits into four
+where a smaller one would not have split at all. Size for the largest slab near
+two thirds of the cap, and re-check after any change that adds dressing.
 
 **The paste order is not the filename order.** `--by-region` writes the chunk
 covering the anchor cell *last*, so the anchor is still bare board for every
@@ -371,6 +381,24 @@ actually matters, all confirmed in-game:
   The community keybind lists do not cover any of this and are stale besides
   (they list WASD for the camera without saying it has to be held); the hint bar
   would, but it is clipped unless the window is sized to fit the desktop.
+- **A campaign holds many boards, and both naming and switching are drivable.**
+  A town per board only works if you can tell them apart afterwards, and
+  `newboard` leaves them all called `Unknown Realm N`.
+  * **`...` beside the board name opens a rename dialog directly** -- not a
+    menu. The current name arrives already selected, so `Ctrl+V` over it
+    replaces the lot and `OK` commits. The clipboard is the only way to get
+    text in: TaleSpire reads raw input, so synthetic typing does not arrive.
+    `ts.ps1 rename -Text "Graybank"`.
+  * **The chevron beside it is a saved-state indicator, not a board list.** It
+    toggles "No unsaved changes" and nothing else; it was tried first.
+  * **The board switcher is `Space` then the top icon of the left-hand
+    column** -- "Campaign Boards", a list with a play arrow per board.
+    `ts.ps1 boards` opens it and screenshots it, which is the point: the list
+    puts the *current* board first and sorts the rest alphabetically, so the
+    rows move every time a board is renamed. Read them, do not assume an
+    order.
+  * Switching to a 387k-asset board takes tens of seconds. Wait before
+    clicking anything on it.
 - Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
   not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,
   `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
@@ -790,9 +818,34 @@ shape instead of reading it. The rules that fall out:
   rampart 35 ft up, with no stair, ramp or ladder anywhere -- a defenders'
   platform no defender could reach. `verify` did not catch it because its
   access check asks whether *buildings* can be entered, not whether the wall
-  can. `_lay_wall_stairs` runs a flight at every tower, filled solid
-  underneath, and prefers the inward side: a stair on the field side of a town
-  wall is a siege ramp for the enemy.
+  can. `_lay_wall_stairs` runs one flight per tower, filled solid underneath.
+  Where a flight goes was wrong three ways, and each is now an invariant with
+  a test:
+  * **Inside, as a hard filter and not a preference.** A stair on the field
+    side of a town wall is a siege ramp for the enemy. It started as a term in
+    the score, and on Forest Church one tower had *no* inside option under the
+    old perpendicular scheme -- so it scored the field and built there.
+  * **Parallel to the curtain, not perpendicular.** The run used to march
+    straight out from the tower's face into the town: it hugged the wall for
+    one cell in six and ate 35 ft of street. Flights now search the inner face
+    near the tower for the straightest stretch, which is where a real rampart
+    stair goes. Score on *distance* to the wall, not on a count of orthogonal
+    touches -- beside a stair-stepped diagonal a straight flight touches on
+    alternate cells, so two runs that both read as hugging scored 2 and 4 of
+    six for no visible reason. Forest Church: every tread within 2 cells,
+    mean 1.47.
+  * **Land against the CURTAIN, never a tower.** A tower crowns
+    `WALL_TOWER_RISE` courses higher, so a flight arriving at its flank stops
+    ten feet below anywhere you can stand. A `city_wall_walk` tile caps the
+    top tread so the landing is flush rather than half a tile down.
+
+- **A tower footprint is not always part of the mass.** `pick_wall_towers`
+  lets a tower stand on open ground beside the wall (`usable` accepts any
+  unblocked surface), so a cell can be tower-but-not-wall. Excluding only
+  `mass` when siting stairs put three treads exactly where a tower was about
+  to be built -- entombed in solid block, invisible in the file and on the
+  board. Anything that reserves ground near the circuit has to exclude
+  `tower_cells` as well as `mass`.
 
 - **A buried rampart cell shows nothing but its top.** The wall is nearly
   three tiles thick, so 99 of 261 body cells -- 38% -- have no face anyone can
@@ -894,6 +947,34 @@ fine while the board was visibly broken:
 the written chunk plan respectively. **New checks go there, not into the
 TileMap pass.** `verify._Occupancy` reconstructs solid geometry from the
 placements and is the tool for "is there actually anything here".
+
+**OPEN: `entombed()` hollows the rampart and the masonry check catches it.**
+Bisected on Forest Church, which is an MFCG map, so this has nothing to do with
+the second import format:
+
+| commit | `entombed()` | masonry check | Forest Church |
+|---|---|---|---|
+| `93ccba6` cap the ridge | absent | present | **clean** |
+| `8412ce9` square the gate, stairs on the wall | **added** | present | 85 of 300 holed |
+
+`_lay_city_wall`'s `entombed()` lays **only the top course** in a wall cell
+walled in on all four sides, because nothing can ever see the rest -- 111 of
+Forest Church's 300 body cells. `check_placements` samples **mid-height of the
+second course**, so every entombed cell reads as a hole; the first one it
+reports, (82, 85), is entombed. East Tradebourne is 732 of 2367, and the count
+scales with wall thickness because a thicker band entombs more cells.
+
+**The check is the older thing and it is doing its job.** It passed before the
+optimisation landed, so this is a regression rather than two defensible rules
+disagreeing -- the resolution is on the `entombed()` side, most simply by
+keeping the course the check samples as well as the one the walk rests on.
+Cost is small: 111 cells x 4 courses on Forest Church, and about 3,900 blocks
+on a 387,381-asset East Tradebourne.
+
+Until then a walled town still builds and pastes, and the void is invisible:
+the rampart was read from a low oblique outside, from plan and at eye level on
+`Probe - East Tradebourne rampart`, and it is unbroken coursed stone from
+ground to parapet.
 
 Corollary that cost an hour: **when a measurement looks wrong, check for stale
 artifacts before debugging the code.** A tree-species count read 80/15/5

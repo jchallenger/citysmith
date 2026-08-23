@@ -2122,6 +2122,14 @@ def _lay_bridges(b: Builder, tm, grade: float,
     return laid
 
 
+#: How far either side of a tower to sample the wall band when working out
+#: which way the curtain runs there, so a stair can be laid parallel to it.
+WALL_STAIR_SAMPLE = 6
+
+#: How far from a tread to look for the wall when scoring how close a flight
+#: runs to it. Anything further off than this is equally bad.
+WALL_STAIR_REACH = 4
+
 #: How far the upper chimney course laps the lower one. A single 0.5-tall
 #: piece sitting on the ridge reads as a stub; two lapped a quarter stand
 #: proud of it and still leave no joint to see.
@@ -2536,6 +2544,13 @@ def _lay_town_wall(b: Builder, tm, facing, top: float,
     _hang_portcullises(b, tm, gates, mass, top)
 
 
+def _cells_near(cx: float, cz: float, r: int, tm) -> list[tuple[int, int]]:
+    """Every cell of the map within ``r`` of a point, in a stable order."""
+    return [(x, z)
+            for z in range(max(0, int(cz - r)), min(tm.depth, int(cz + r) + 1))
+            for x in range(max(0, int(cx - r)), min(tm.width, int(cx + r) + 1))]
+
+
 def _lay_wall_stairs(b: Builder, tm, towers, mass, outside, top: float,
                      course: float, wall_height: int) -> int:
     """A flight up the inside of the wall at every tower.
@@ -2547,66 +2562,124 @@ def _lay_wall_stairs(b: Builder, tm, towers, mass, outside, top: float,
     `verify` did not catch it either, because its access check asks whether
     *buildings* can be entered, not whether the wall can.
 
-    The flight runs on the ground beside the tower, climbing towards it, one
-    tread per course, so it arrives level with the walk. It is filled solid
-    underneath -- a stair tile is a tread, not a stringer, and a run of them
-    hanging over air reads as a folded ribbon.
+    Three things about where a flight goes, and each was wrong once:
+
+    * **Inside, always.** A stair on the field side of a town wall is a siege
+      ramp for the enemy, which is the one thing it must not be. This started
+      as a *preference* in the scoring, and a preference is not good enough:
+      on Forest Church one tower had no inside option at all under the old
+      scheme, so it scored the field side and built there. A tower that cannot
+      be served from inside now gets no flight, and the count is reported.
+    * **Parallel to the wall.** The run used to march straight out from the
+      tower's face into the town, which hugged the curtain for one cell of six
+      and ate 35 ft of street. A rampart stair runs *along* the inner face --
+      it is how a real one is built, it keeps the street, and the flight has
+      the wall at its shoulder the whole way up.
+    * **Climbing towards the tower**, so the top tread lands against the
+      tower's flank and you step onto the walk rather than off the end into
+      air. A `city_wall_walk` tile caps the top tread so the landing is flush
+      with the rampart instead of half a tile below it.
+
+    The flight is filled solid underneath -- a stair tile is a tread, not a
+    stringer, and a run of them hanging over air reads as a folded ribbon.
     """
     stair = b.palette.resolve("city_wall_stair")
     core = b.palette.resolve("city_wall_core")
+    walk = b.palette.resolve("city_wall_walk")
     if stair is None or core is None or wall_height < 1:
         return 0
 
     from . import raster as R
     blocked = {R.WATER, R.PIER, R.VOID, R.FLOOR}
     taken: set[tuple[int, int]] = set()
+    side_of = {(dx, dz): s for s, dx, dz in SIDE_OFFSETS}
+
+    # **A tower footprint is not always part of the mass.** `pick_wall_towers`
+    # lets a tower stand on open ground beside the wall, so excluding only
+    # `mass` let three treads be laid where a tower was about to be built --
+    # entombed in solid block, invisible in the file and invisible on the
+    # board.
+    tower_cells = {c for t in towers for c in t}
+    curtain = mass - tower_cells
 
     def free(cell: tuple[int, int]) -> bool:
         x, z = cell
         if not tm.inside(x, z) or cell in mass or cell in taken:
             return False
+        if cell in tower_cells or cell in outside:
+            return False              # solid tower, or the field side
         return not tm.building[z][x] and tm.surface[z][x] not in blocked
 
+    def hugs(cell: tuple[int, int]) -> bool:
+        return any((cell[0] + dx, cell[1] + dz) in mass for _, dx, dz in SIDE_OFFSETS)
+
+    def gap(cell: tuple[int, int]) -> int:
+        """How far this cell stands off the wall, in cells.
+
+        Scoring on *touches* rather than distance was too blunt: beside a
+        stair-stepped diagonal a straight flight touches on alternate cells,
+        so two runs that both read as hugging could score 2 and 4 out of six
+        for no visible reason. Distance is the thing being minimised, so
+        minimise it.
+        """
+        return min((max(abs(cell[0] - m[0]), abs(cell[1] - m[1]))
+                    for m in _cells_near(cell[0], cell[1], WALL_STAIR_REACH, tm)
+                    if m in mass),
+                   default=WALL_STAIR_REACH + 1)
+
+    # **Land against the curtain, not against a tower.** A tower crowns two
+    # courses above the curtain (`WALL_TOWER_RISE`), so a flight that arrives
+    # at a tower's flank stops ten feet short of anywhere you can stand.
     built = 0
     for footprint in towers:
-        xs = [c[0] for c in footprint]
-        zs = [c[1] for c in footprint]
+        cx = sum(c[0] for c in footprint) / len(footprint)
+        cz = sum(c[1] for c in footprint) / len(footprint)
+
+        # Any inside cell that already touches the curtain is a candidate foot
+        # of a flight -- not just the cells jammed against the tower. The
+        # circuit is a stair-stepped diagonal, so no straight cardinal run
+        # hugs it for long; searching the inner face near the tower finds the
+        # straightest stretch there is, which is where a real rampart stair
+        # goes anyway.
+        starts = [c for c in _cells_near(cx, cz, WALL_STAIR_SAMPLE, tm)
+                  if free(c) and hugs(c)]
         best = None
-        for side, dx, dz in SIDE_OFFSETS:
-            # Step off the tower's face on this side, then run outward.
-            edge = [(x, z) for (x, z) in footprint
-                    if (x + dx, z + dz) not in footprint]
-            if not edge:
-                continue
-            # One flight, on the middle cell of that face.
-            sx, sz = sorted(edge)[len(edge) // 2]
-            run = [(sx + dx * j, sz + dz * j) for j in range(1, wall_height + 1)]
-            if not all(free(c) for c in run):
-                continue
-            # Prefer the inward side: a stair on the field side of a town wall
-            # is a siege ramp for the enemy, which is the one thing it must
-            # not be.
-            inward = 0 if (sx + dx * 2, sz + dz * 2) in outside else 1
-            score = (inward, -abs(sx - sum(xs) / len(xs)) - abs(sz - sum(zs) / len(zs)))
-            if best is None or score > best[0]:
-                best = (score, side, run)
+        for start in sorted(starts):
+            for _, dx, dz in SIDE_OFFSETS:
+                run = [(start[0] + dx * i, start[1] + dz * i)
+                       for i in range(wall_height)]
+                if not all(free(c) for c in run):
+                    continue
+                # The top tread has to arrive beside the curtain, or there is
+                # nothing at that height to step onto.
+                if not any((run[0][0] + ex, run[0][1] + ez) in curtain
+                           for _, ex, ez in SIDE_OFFSETS):
+                    continue
+                score = (-sum(gap(c) for c in run),
+                         -round(abs(run[0][0] - cx) + abs(run[0][1] - cz)))
+                if best is None or score > best[0]:
+                    best = (score, (dx, dz), run)
         if best is None:
             continue
-        _, side, run = best
+        _, d, run = best
         # **The rotation names the way you climb, not the way the run goes.**
-        # `side` is the direction the flight runs *out* from the tower; the
-        # ascent is back towards it, so the tread faces the opposite way.
-        # Probed with `out/stairrot2.slab.txt` -- four flights, one per quarter
-        # turn, each carrying its own count in pips on the wall it climbs to,
-        # because a marker on the ground cannot be matched to a flight at the
-        # low side-on angle a tread is read from.
-        climb = OPPOSITE_SIDE[side]
-        for j, (x, z) in enumerate(run, start=1):
-            level = wall_height - j
+        # The flight descends along ``d``, so the ascent -- and the tread --
+        # faces the other way. Probed with `out/stairrot2.slab.txt`: four
+        # flights, one per quarter turn, each carrying its own count in pips
+        # on the wall it climbs to, because a marker on the ground cannot be
+        # matched to a flight at the low side-on angle a tread is read from.
+        climb = side_of[(-d[0], -d[1])]
+        for i, (x, z) in enumerate(run):
+            level = wall_height - 1 - i
             for under in range(level):
                 b.add(place_tile(core, x, z, top + under * course))
             b.add(place_tile(stair, x, z, top + level * course, _SIDE_ROT[climb]))
             taken.add((x, z))
+        if walk is not None:
+            # Flush landing: the rampart's own walk sits at this height, so
+            # capping the top tread means you step across rather than up.
+            b.add(place_tile(walk, run[0][0], run[0][1],
+                             top + wall_height * course))
         built += 1
     return built
 

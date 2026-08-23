@@ -417,6 +417,52 @@ def test_trails_are_not_thoroughfares():
     assert "trail" in raster.NOT_THOROUGHFARES
 
 
+# -- the town wall ------------------------------------------------------------
+
+def test_the_wall_band_is_thick_enough_to_have_a_core(village: Layout):
+    """FTG ships no wall thickness, and the default one is too thin.
+
+    A rampart is a full-cell core with thin curtain pieces hung on the faces
+    that show. `Layout`'s 2.0-tile default gives a two-cell band, and on a
+    circuit that runs diagonally that leaves almost every cell an edge cell
+    with nothing behind it -- which is the "curtain-wall piece laid one per
+    cell does not fill the cell" failure. Measured on East Tradebourne: at 2.0
+    tiles only 13% of wall cells have all four orthogonal neighbours in the
+    band; at 4.5 m it is 41%, which matches Forest Church's MFCG-derived 2.77.
+    """
+    assert village.wall_thickness >= 2.5, "a rampart this thin has no core"
+    metric = ftg.DEFAULT_WALL_THICKNESS_M * ftg.FEET_PER_METRE / TILE_FEET
+    assert village.wall_thickness == pytest.approx(metric)
+
+
+def test_a_wall_polyline_rasterises_to_a_band_with_an_interior():
+    """The band has to be deep enough for cells that no face reaches.
+
+    This is the invariant behind the constant: a diagonal run is the worst
+    case, because a stroke of a given width covers fewer whole cells across
+    a diagonal than across an axis.
+    """
+    from citysmith import raster
+    from citysmith.layout import Layout as L
+
+    layout = L(name="wall", source="ftg", width=60.0, depth=60.0)
+    layout.wall_thickness = ftg.DEFAULT_WALL_THICKNESS_M * ftg.FEET_PER_METRE / TILE_FEET
+    layout.walls = [[(6.0, 6.0), (54.0, 54.0)]]          # a pure diagonal
+    layout.buildings = list(_playable_buildings())
+    tm = raster.rasterize(layout)
+
+    band = {(x, z) for z in range(tm.depth) for x in range(tm.width) if tm.wall[z][x]}
+    assert band
+    interior = {
+        (x, z) for (x, z) in band
+        if all((x + dx, z + dz) in band for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+    }
+    assert len(interior) >= 0.2 * len(band), (
+        f"only {len(interior)} of {len(band)} wall cells have a full orthogonal "
+        "cross -- the band is too thin to carry a core"
+    )
+
+
 def _playable_buildings():
     from citysmith.layout import LayoutBuilding
     for i in range(3):

@@ -39,6 +39,7 @@ param(
   [Parameter(Mandatory=$true)][string]$Name,
   [string]$Stem = "forest",
   [string]$OutDir,
+  [int]$ShotEvery = 1,
   [string[]]$Slab,
   [int]$X = 700, [int]$Y = 600,
   [int]$ZoomOut = 6
@@ -249,14 +250,21 @@ switch ($Recipe) {
     $i = 0
     foreach ($c in $chunks) {
       $i++
+      # A shot with the slab in hand and again after it lands is how a paste
+      # that snapped wrong is found afterwards without re-running the map. On a
+      # hundred-chunk town that is two hundred grabs, so -ShotEvery thins them;
+      # the first and the last are always kept, because the first proves the
+      # run started on bare board and the last proves it finished.
+      $watch = ($ShotEvery -le 1) -or ($i % $ShotEvery -eq 0) -or
+               ($i -eq 1) -or ($i -eq $chunks.Count)
       TS hold -Slab $c -X $cx -Y $cy
       Start-Sleep -Seconds 3
-      Shot ("{0:d2}-hold" -f $i)
+      if ($watch) { Shot ("{0:d3}-hold" -f $i) }
       TS commit -X $cx -Y $cy
       Start-Sleep -Seconds 4
       TS clear -X $cx -Y $cy
       Start-Sleep -Seconds 2
-      Shot ("{0:d2}-down" -f $i)
+      if ($watch) { Shot ("{0:d3}-down" -f $i) }
       "$i/$($chunks.Count) : $(Split-Path $c -Leaf)"
     }
     TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)

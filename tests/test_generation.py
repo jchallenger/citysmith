@@ -2294,6 +2294,12 @@ def _ring_map(w=34, d=34, edge=6, thickness=3):
             if (x < edge + thickness or x >= w - edge - thickness
                     or z < edge + thickness or z >= d - edge - thickness):
                 tm.wall[z][x] = True
+    # The raster records where the ring turns, because a band of cells has no
+    # memory of it and a turn is where a mural tower goes. Without these the
+    # circuit gets no towers -- and so no stairs, which is how this fixture
+    # first came out with an empty rampart.
+    tm.wall_corners = [(edge, edge), (w - edge - 1, edge),
+                       (edge, d - edge - 1), (w - edge - 1, d - edge - 1)]
     return tm
 
 
@@ -2370,13 +2376,88 @@ def test_the_buried_core_of_the_rampart_is_not_built():
     NB = ((1, 0), (-1, 0), (0, 1), (0, -1))
     mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
             if tm.wall[z][x]} | set(tm.gates)
-    buried = [c for c in mass
+    # Towers are exempt: they stand the full stack plus WALL_TOWER_RISE by
+    # design, and a tower's footprint can sit over buried curtain.
+    from citysmith.build import pick_wall_towers
+
+    gates = set(tm.gates)
+    towers = {c for t in pick_wall_towers(tm, mass, gates) for c in t}
+    buried = [c for c in mass - towers
               if all((c[0] + dx, c[1] + dz) in mass and
                      (c[0] + dx, c[1] + dz) not in tm.gates for dx, dz in NB)]
     assert buried, "the fixture should have a buried core to test"
-    faced = [c for c in mass if c not in buried and c not in tm.gates]
+    faced = [c for c in mass - towers
+             if c not in buried and c not in tm.gates]
     # A buried cell carries at most the one course the walk rests on; a faced
     # one carries the full stack. Towers stand on some cells and build higher,
     # so compare against the *minimum* a faced cell gets.
     assert max(per_cell[c] for c in buried) <= 1, "buried cells are still solid"
     assert min(per_cell[c] for c in faced) > 1, "a faced cell lost its courses"
+
+
+def test_wall_stairs_are_inside_parallel_and_land_on_the_curtain():
+    """Three things that were each wrong once.
+
+    Inside: a stair on the field side of a town wall is a siege ramp for the
+    enemy. This began as a *preference* in the scoring and a preference is not
+    enough -- one tower had no inside option and duly scored the field.
+
+    Parallel: the run used to march straight out from the tower's face into
+    the town, hugging the curtain for one cell of six and eating 35 ft of
+    street.
+
+    Landing: the top tread must arrive beside the *curtain*, not a tower. A
+    tower crowns WALL_TOWER_RISE courses higher, so a flight that reaches its
+    flank stops ten feet below anywhere you can stand.
+    """
+    from citysmith.build import (
+        Builder, SIDE_OFFSETS, TOWN_WALL_TILES, _lay_town_wall,
+        _outside_the_wall, pick_wall_towers,
+    )
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    stair = palette.resolve("city_wall_stair")
+    assert stair is not None, "the fixture needs a stair to look for"
+
+    tm = _ring_map(thickness=3)
+    b = Builder(palette, 0)
+    _lay_town_wall(b, tm, palette.require("city_wall"), 0.5, TOWN_WALL_TILES)
+
+    gates = set(tm.gates)
+    mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x]} | gates
+    towers = pick_wall_towers(tm, mass, gates)
+    curtain = mass - {c for t in towers for c in t}
+    outside = _outside_the_wall(tm, mass | {c for t in towers for c in t})
+
+    treads = [p for p in b.placements if p.asset_id == stair.id]
+    assert treads, "no stair was laid on the rampart"
+
+    cells = {(int(p.x), int(p.z)) for p in treads}
+    on_field = cells & outside
+    assert not on_field, f"{len(on_field)} treads on the field side: {sorted(on_field)[:4]}"
+    assert not (cells & mass), "a tread was laid inside the wall mass"
+    assert not (cells & gates), "a tread was laid in a gate passage"
+    # A tower footprint is not always part of the mass -- pick_wall_towers
+    # lets one stand on open ground beside the wall -- so excluding `mass`
+    # alone once put three treads where a tower was about to be built, solid
+    # block over the top of them.
+    in_tower = cells & {c for t in towers for c in t}
+    assert not in_tower, f"treads entombed in a tower: {sorted(in_tower)}"
+
+    # On an axis-aligned ring every tread should be hard against the curtain.
+    touching = [c for c in cells
+                if any((c[0] + dx, c[1] + dz) in mass for _, dx, dz in SIDE_OFFSETS)]
+    assert len(touching) == len(cells), (
+        f"only {len(touching)} of {len(cells)} treads touch the wall")
+
+    # Each flight is a straight run, and its highest tread reaches the curtain.
+    by_height = {}
+    for p in treads:
+        by_height.setdefault(round(p.y, 3), []).append((int(p.x), int(p.z)))
+    top = max(by_height)
+    for c in by_height[top]:
+        assert any((c[0] + dx, c[1] + dz) in curtain for _, dx, dz in SIDE_OFFSETS), (
+            f"top tread {c} does not reach the curtain")

@@ -23,6 +23,8 @@ does not rediscover them each time.
   .\tools\ts.ps1 plane                                   # G: build plane on/off
   .\tools\ts.ps1 planestate                              # is it on? (reads the icon)
   .\tools\ts.ps1 newboard
+  .\tools\ts.ps1 rename -Text "Graybank"                 # name the board you are on
+  .\tools\ts.ps1 boards -Name list                       # open the board switcher, shot it
   .\tools\ts.ps1 shot   -Name mystem
   .\tools\ts.ps1 zoom   -X 800 -Y 500 -Ticks -4
   .\tools\ts.ps1 select -X 400 -Y 300 -X2 1200 -Y2 700
@@ -30,7 +32,7 @@ does not rediscover them each time.
 #>
 param(
   [Parameter(Mandatory=$true)][ValidateSet(
-    'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','shot',
+    'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','rename','boards','shot',
     'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','camerastate',
     'cutbox','plane','planestate',
     'select','copyout','setclip')]
@@ -366,6 +368,43 @@ switch ($Cmd) {
     Send-Chord "b" 150                     # a fresh board opens out of build mode
     Start-Sleep -Milliseconds 600
     "new board, building"
+  }
+  'rename'  {
+    # Name the board you are on. The "..." beside the board name in the top
+    # bar opens a Board Name dialog directly -- not a menu -- with the current
+    # name already selected, so a Ctrl+V over it replaces the lot. Typing is
+    # not needed and would not work anyway: TaleSpire reads raw input, so the
+    # clipboard is the only reliable way to get text in.
+    #
+    # Both coordinates are derived from the client rect. The "..." is anchored
+    # to the right edge; the dialog is centred, and OK sits left of centre.
+    Focus-TS
+    $cl = Get-Client
+    [System.Windows.Forms.Clipboard]::SetText($Text)
+    Press ($cl.X + $cl.W - 73) ($cl.Y + 14) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Milliseconds 900
+    Send-Chord "ctrl+v" 150
+    Start-Sleep -Milliseconds 400
+    Press ($cl.X + [int]($cl.W/2) - 100) ($cl.Y + [int]($cl.H/2) + 67) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Milliseconds 800
+    "renamed board to '$Text'"
+  }
+  'boards'  {
+    # The board switcher is NOT the chevron beside the board name -- that is a
+    # saved-state indicator. It is `Space` (which raises the HUD) and then the
+    # top icon of the left-hand column: "Campaign Boards", a list with a play
+    # arrow per board. The list puts the current board first and sorts the
+    # rest alphabetically, so row positions move as boards are renamed --
+    # screenshot it and read the rows rather than assuming an order.
+    Focus-TS
+    $cl = Get-Client
+    Send-Chord "space" 150
+    Start-Sleep -Milliseconds 900
+    Press ($cl.X + 17) ($cl.Y + 57) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Seconds 2
+    $shot = if ($Name) { $Name } else { "boards" }
+    & (Join-Path $PSScriptRoot "grab.ps1") -Name $shot
+    "board list open; rows start at client y=200, 42 apart, play arrow at x=360"
   }
   'shot'    { & (Join-Path $PSScriptRoot "grab.ps1") -Name $Name }
   'chord'   { Focus-TS; Send-Chord $Keys; "sent $Keys" }

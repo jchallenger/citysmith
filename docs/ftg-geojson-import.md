@@ -280,11 +280,16 @@ should be the first target.
 
 2, 3 and 4 are settled and built; 1 is still open and only gates stage 6.
 
-1. **How much town is one board? — STILL OPEN.** A 107-chunk paste is not a
-   session. Options, in rough order of appeal: (a) a crop radius, `--radius-m`,
-   around the centre; (b) build the core cluster only and offer named sub-crops;
-   (c) accept the chunk count for towns and lean on `--per-building` for review.
-   Nothing before stage 6 depends on it.
+1. **How much town is one board? — SETTLED: the whole core, one board.** The
+   answer turned out to be option (c), and it is cheaper than the estimate
+   feared. East Tradebourne's core is 114 chunks, not the ~107-and-rising the
+   planning arithmetic suggested, because `--max-assets` merges open country
+   that a per-cell estimate counted separately. At ~20 s a chunk that is a
+   38-minute unattended paste — long, but it is one command and it does not
+   need watching. `review.ps1 tiled -ShotEvery N` thins the screenshots so a
+   hundred-chunk town does not take two hundred grabs. No crop radius and no
+   sub-crops were needed; if a town ever does need them, `--cluster-gap-ft`
+   already tightens the core.
 2. **Where FTG lives — SETTLED.** `citysmith/ftg.py` beside `citysmith/mfcg.py`,
    with `citysmith/importers.py` holding the sniffer and the dispatcher.
    `Layout` is the common currency; `mfcg.py` was not touched except to record
@@ -353,7 +358,8 @@ The importer already reads all of these into the layout —
 drystone piece in particular is a wall asset, and `CLAUDE.md` records three bad
 wall picks in a row chosen from a single camera angle.
 
-**Stage 6 — scale up. GRAYBANK DONE; East Tradebourne still waiting on §5.1.**
+**Stage 6 — scale up. DONE for all three.** Each town has its own board in one
+campaign, pasted with `review.ps1 tiled`. Per-town numbers below.
 Graybank imports as 434x306 tiles, 150 of 159 buildings (126 house, 15 shop,
 3 smithy, 3 tavern, 2 guildhall, 1 temple), 50 chained roads, 91,429 assets.
 **The nine buildings the core crop dropped are exactly the six FARM and three
@@ -379,6 +385,37 @@ in any frame.
 river was toured but not walked end to end. Same caveat as Pelvesthollow on
 seams: no specific chunk join was located and inspected, only many frames
 spanning more than one 80-tile chunk with no step in them.
+
+### East Tradebourne — the scale case
+
+739x598 tiles, **991 of 1007 buildings** (709 house, 171 smithy, 67 shop, 18
+warehouse, 14 tavern, 5 guildhall, 4 temple, 3 barracks), 162 chained roads,
+**387,381 assets = 38.7% of the per-board limit**, 114 chunks. Nothing about
+the format was new here; everything that had only ever been read in the
+importer got *built* for the first time:
+
+- **The town wall exists.** Two open `STONE_WALL` polylines, rasterised to a
+  2,367-cell rampart with 443 buildings inside it.
+- **The market square is a plaza**, not a roofed box — 631 plaza tiles where
+  the export says `MARKET` / `PAVEMENT`. The rule works on the file it was
+  written for.
+- **Five `raised` bridge quads** import as `LayoutArea("bridge")` and are still
+  not built; the three bridges the board does have are the rasteriser's own,
+  added to join districts split by water.
+
+**Chunk size stops mattering once `--max-assets` binds.** At 112 tiles it is
+114 chunks / 23,085 bytes; at 80 tiles, 146 / 23,070; at 160 tiles, 137 /
+23,043. All three land on the same slab size because the quadtree split at
+`--max-assets 6500` is what decides it, not the grid. **112 is the pick** — it
+is the fewest chunks, and 160 is *worse* than 112 because oversized cells split
+into four where a smaller cell would not have split at all.
+
+**Open, and not the import's doing:** `[FAIL] placements: 732 of 2367 town-wall
+cells have gaps in the masonry`. Bisected to `8412ce9`, which added
+`_lay_city_wall`'s `entombed()`; its parent `93ccba6` builds Forest Church
+clean. Forest Church is an MFCG map, so the FTG path is not involved at all —
+East Tradebourne is simply the first FTG town with a wall, and so the first to
+meet it. Full analysis in `CLAUDE.md` under *Metrics must read the artifact*.
 
 ## 7. Fixtures and tests — DONE
 
