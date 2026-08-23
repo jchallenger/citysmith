@@ -274,6 +274,12 @@ def storeys_of(tm, bid: str | None, ceiling: int) -> int:
     """
     if not bid:
         return 0
+    # Capped here rather than at the shell, because three passes read this --
+    # the shell, the upper floors and the roof -- and a roof that disagrees
+    # with the walls about how tall a building is floats or buries itself.
+    # `footprints` records the same lesson about *where* a building is.
+    if tier_of(bid) == "utility":
+        return min(UTILITY_STOREYS, ceiling)
     return min(max(1, tm.floors.get(bid, 1)), ceiling)
 
 
@@ -2691,6 +2697,105 @@ CORNER_BY_SIDES = {
 #: Building kinds built in civic fabric rather than common house fabric.
 CIVIC_KINDS = frozenset({"temple", "guildhall", "manor", "barracks"})
 
+#: Kinds that trade with the public: a better door and a glazed street front,
+#: in the same timber as a house. They are *not* given their own wall kit,
+#: and the reason is the library rather than taste -- exactly two 1-cell
+#: windows exist in the whole Medieval Fantasy pack (the Tavern one and the
+#: castle one), so a tier that wants glass is built from one of those two.
+#: Trade shares the wall with `common` and differs by door and glazing.
+TRADE_KINDS = frozenset({"tavern", "shop", "apothecary", "smithy"})
+
+#: Kinds with no public face: boarding, one storey, no glass. Rural ships a
+#: wall and a matching corner and no window at all, which is precisely what a
+#: barn is. See `tools/facade_probe.py`, candidate 3.
+UTILITY_KINDS = frozenset({"warehouse", "stable", "shed"})
+
+#: An outbuilding is a single storey whatever the layout dealt it. A three-
+#: storey stable reads as a tenement, and the height is what you see first
+#: from across a street.
+UTILITY_STOREYS = 1
+
+
+#: How often a wall segment is glazed, as one-in-N, by tier and by which face
+#: of the building it sits on. ``0`` means never.
+#:
+#: **The point is the asymmetry, not the numbers.** Windows used to be dealt
+#: by a hash over every exposed segment, so the back of a building was as
+#: glazed as its front and a town looked identical from all four sides. A real
+#: street has its glass on the street: shutters and a shopfront at the front,
+#: a blank gable to the neighbour, and almost nothing at the back.
+#:
+#: Ground floors are one step sparser again (privacy, and doors already break
+#: those runs) -- that rule predates the tiers and is applied on top.
+GLAZE_RATE: dict[str, dict[str, int]] = {
+    "civic":   {"front": 2, "flank": 3, "back": 0},
+    "trade":   {"front": 2, "flank": 4, "back": 0},
+    "common":  {"front": 3, "flank": 4, "back": 0},
+    "utility": {"front": 0, "flank": 0, "back": 0},
+}
+
+#: The face opposite each side, used to find a building's back.
+OPPOSITE_SIDE = {"n": "s", "s": "n", "e": "w", "w": "e"}
+
+
+def _main_street_frontage(tm) -> set[str]:
+    """Buildings with a doorway opening onto a main street.
+
+    These get the show facade -- the better door and the denser glazing --
+    because a frontage on the through road is the one "where" signal that
+    actually varies on a real export. Ward membership does not: on Forest
+    Church 47 of 51 buildings fall in a single ward, so a district-keyed style
+    would be a no-op dressed up as a feature.
+    """
+    out: set[str] = set()
+    for bid, doors in tm.doors.items():
+        for x, z, side in doors:
+            dx, dz = next((d, e) for s, d, e in SIDE_OFFSETS if s == side)
+            ox, oz = x + dx, z + dz
+            if tm.inside(ox, oz) and tm.street_class[oz][ox] == "main":
+                out.add(bid)
+                break
+    return out
+
+
+def glaze_rate(tier: str, side: str, front: str | None, main: bool) -> int:
+    """One-in-N glazing for one wall segment, or 0 for never."""
+    rates = GLAZE_RATE.get(tier, GLAZE_RATE["common"])
+    if front is None:
+        face = "flank"
+    elif side == front:
+        face = "front"
+    elif side == OPPOSITE_SIDE[front]:
+        face = "back"
+    else:
+        face = "flank"
+    rate = rates[face]
+    # A show facade on the through road: one step denser at the front, and
+    # never denser than every other segment -- a wall of glass reads as a
+    # conservatory, which is what the probe's "front only" candidate looked
+    # like at one-in-one.
+    if main and face == "front" and rate > 2:
+        rate -= 1
+    return rate
+
+
+def tier_of(bid: str | None) -> str:
+    """Which of the four fabrics a building is built in.
+
+    The tier decides the *whole* facade -- wall, corner, window and door come
+    from one kit together, because a facade that changes material at the
+    corner reads as a mistake rather than as variety. That was the finding
+    behind `_usable_corner`, and the tiers are the same rule at map scale.
+    """
+    kind = (bid or "").split("-")[0]
+    if kind in CIVIC_KINDS:
+        return "civic"
+    if kind in UTILITY_KINDS:
+        return "utility"
+    if kind in TRADE_KINDS:
+        return "trade"
+    return "common"
+
 
 def build_from_tilemap(
     tm,
@@ -2800,7 +2905,21 @@ def build_from_tilemap(
         civic_wall = palette.resolve("wall_civic")
         civic_window = palette.resolve("wall_window_civic")
         civic_door = palette.resolve("door_civic")
+        util_wall = palette.resolve("wall_utility")
         wall_variants = [palette.resolve("wall", v) or ext_wall for v in range(3)]
+
+        # Every course in the map is pitched at ``ext_wall.size_y``, so a tier
+        # whose wall is a different height would put its own upper storeys and
+        # its roof out of line with the arithmetic. Checked rather than
+        # assumed: a style that pins a 2.5-tall combination piece here would
+        # otherwise raise a whole tier by half a tile and look fine in the
+        # file.
+        def _usable_wall(asset):
+            if asset is None or abs(asset.size_y - ext_wall.size_y) > 1e-6:
+                return None
+            return asset
+
+        util_wall = _usable_wall(util_wall)
 
         # Outside corners are full-cell pieces, dealt per building on the same
         # variant index as the wall so a cottage's corners match its own walls.
@@ -2842,29 +2961,44 @@ def build_from_tilemap(
                                           wall_variants[v]) for v in range(3)]
         civic_corner = _usable_corner(palette.resolve("wall_corner_civic"),
                                       civic_wall or ext_wall)
+        util_corner = _usable_corner(palette.resolve("wall_corner_utility"),
+                                     util_wall or ext_wall)
 
         plan = footprints(tm)
         corner_ok = {
             bid: _corners_affordable(cells) for bid, cells in plan.items()
         }
+        fronts = {bid: doors[0][2] for bid, doors in tm.doors.items() if doors}
+        on_main = _main_street_frontage(tm)
 
         for bid, cells in tm.perimeter.items():
             b.group = bid
             floors = storeys_of(tm, bid, storeys)
-            civic = bid.split("-")[0] in CIVIC_KINDS
-            if civic:
-                # Fall back to the common-house piece per slot: a style with no
-                # civic kit (cyberpunk has none) otherwise gets entry=None, and the
-                # door branch below silently lays a solid wall across the doorway
-                # -- a temple with no way in, while verify still reports it
-                # enterable because verify reads the tilemap, not the placements.
+            tier = tier_of(bid)
+            # Every slot falls back to the common-house piece: a style with no
+            # civic kit (cyberpunk has none) otherwise gets entry=None, and the
+            # door branch below silently lays a solid wall across the doorway
+            # -- a temple with no way in, while verify still reports it
+            # enterable because verify reads the tilemap, not the placements.
+            if tier == "civic":
                 face = civic_wall or ext_wall
                 glass, entry = civic_window or window, civic_door or door_asset
                 nook = civic_corner
+            elif tier == "utility":
+                # No window in this kit, and none wanted: a barn with glass in
+                # it stops being a barn. `glass=None` skips the whole glazing
+                # branch below rather than dealing a window from another kit.
+                face = util_wall or ext_wall
+                glass, entry = None, door_asset
+                nook = util_corner if util_wall is not None else None
             else:
                 variant = zlib.crc32(bid.encode()) % len(wall_variants)
                 face = wall_variants[variant]
-                glass, entry = window, door_asset
+                # Trade shares the house's wall -- it is the only kit with a
+                # 1-cell window -- and is told apart by its door and by a
+                # street front with twice the glass in it.
+                entry = (civic_door or door_asset) if tier == "trade" else door_asset
+                glass = window
                 nook = corner_variants[variant]
             if not corner_ok.get(bid, True):
                 nook = None   # too small to spend cells on corners
@@ -2909,7 +3043,15 @@ def build_from_tilemap(
                         # runs). zlib.crc32, not hash(): str hashes are salted per
                         # process, so hash() would re-deal windows every rebuild.
                         key = zlib.crc32(f"{bid}:{x}:{z}:{level}:{side}".encode())
-                        seg = glass is not None and key % (4 if level == 0 else 3) == 0
+                        rate = glaze_rate(tier, side, fronts.get(bid),
+                                          bid in on_main)
+                        # Ground floors keep one fewer window than the storeys
+                        # above: privacy, and the doorway already breaks those
+                        # runs. Rounded rather than skipped, so a one-storey
+                        # cottage does not end up blank.
+                        if rate and level == 0:
+                            rate += 1
+                        seg = glass is not None and rate and key % rate == 0
                         b.add(place_wall(glass if seg else face, x, z, side, y))
 
         # Upper-storey floors. Without these a multi-storey building is a hollow

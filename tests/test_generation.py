@@ -2062,3 +2062,123 @@ def test_registration_markers_sit_on_the_half_tile_grid():
                    for v in corner)
              for c in plan.chunks}
     assert len(boxes) == 1, "rounding out must not make the chunks disagree"
+
+
+def _one_building(bid, w=7, d=6):
+    """A single rectangular building on a blank map, perimeters and door set."""
+    from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
+
+    tm = TileMap.blank(w + 8, d + 8)
+    for x in range(4, 4 + w):
+        for z in range(4, 4 + d):
+            tm.building[z][x] = bid
+            tm.surface[z][x] = FLOOR
+    tm.floors[bid] = 3
+    _find_perimeters(tm, None)
+    _place_doors(tm, None)
+    return tm
+
+
+def test_an_outbuilding_is_a_single_storey():
+    """A three-storey stable reads as a tenement. The cap lives in storeys_of
+    because the shell, the upper floors and the roof all read that one
+    function -- capping at the shell alone would leave the roof three courses
+    up with nothing under it."""
+    from citysmith.build import storeys_of
+
+    tm = _one_building("stable-0001")
+    assert tm.floors["stable-0001"] == 3
+    assert storeys_of(tm, "stable-0001", 3) == 1
+    # ...and a house of the same size keeps the height the layout dealt it.
+    assert storeys_of(_one_building("house-0001"), "house-0001", 3) == 3
+
+
+def test_a_barn_has_no_windows():
+    """Rural ships a wall and a matching corner and no 1-cell window at all,
+    which is exactly what a warehouse or a stable is. The tier must not reach
+    into another kit for glass."""
+    from citysmith.build import build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    window = palette.resolve("wall_window")
+    assert window is not None, "the fixture needs a window to look for"
+
+    b = build_from_tilemap(_one_building("warehouse-0001"), palette, storeys=3)
+    glazed = [p for p in b.placements if p.asset_id == window.id]
+    assert not glazed, f"{len(glazed)} windows on an outbuilding"
+
+
+def test_the_back_of_a_building_is_never_glazed():
+    """Windows used to be dealt by a hash over every exposed segment, so the
+    back of a building was as glazed as its front and a town looked identical
+    from all four sides. The glass goes on the street."""
+    from citysmith.build import (
+        OPPOSITE_SIDE, build_from_tilemap, place_wall, tier_of,
+    )
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+
+    for bid in ("house-0001", "tavern-0001", "temple-0001"):
+        # Civic glazes in its own kit's arched window, so look for the piece
+        # the tier actually places rather than the common-house one.
+        role = ("wall_window_civic" if tier_of(bid) == "civic" else "wall_window")
+        window = palette.require(role)
+        tm = _one_building(bid)
+        front = tm.doors[bid][0][2]
+        back = OPPOSITE_SIDE[front]
+        b = build_from_tilemap(tm, palette, storeys=3)
+        glazed = {(round(p.x, 3), round(p.z, 3)) for p in b.placements
+                  if p.asset_id == window.id}
+        # A wall's placement is fixed by its cell and side, so the back
+        # segments can be located exactly rather than inferred from position.
+        on_back = {(round(w.x, 3), round(w.z, 3))
+                   for x, z, side in tm.perimeter[bid] if side == back
+                   for w in (place_wall(window, x, z, side, 0.5),)}
+        assert not (glazed & on_back), f"{bid}: glass on the back face"
+        assert glazed, f"{bid}: no glass anywhere"
+
+
+def test_every_tier_turns_its_corner_in_its_own_kit():
+    """A facade that changes material at the corner reads as a mistake. Where
+    no corner in the wall's kit exists the cell falls back to a mitre, so the
+    invariant is 'same kit or no corner piece', never 'another kit'."""
+    from citysmith.build import _kit_of, build_from_tilemap, tier_of
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    # The wall and corner each tier reaches for. Read from the palette rather
+    # than sniffed out of the placements: `Village Roof Side Wall 02` carries
+    # `group='roof'` because it ships in a roof set, so any "is this a wall"
+    # test over group tags finds none of the facade at all.
+    roles = {
+        "civic": ("wall_civic", "wall_corner_civic"),
+        "utility": ("wall_utility", "wall_corner_utility"),
+        "common": ("wall", "wall_corner"),
+        "trade": ("wall", "wall_corner"),
+    }
+
+    checked = 0
+    for bid in ("house-0001", "tavern-0001", "temple-0001", "stable-0001"):
+        wall_role, corner_role = roles[tier_of(bid)]
+        # Common and trade deal the wall per building across three variants,
+        # so ask which one this building actually got rather than assuming
+        # variant 0 -- that is the whole point of the deal.
+        walls = [palette.resolve(wall_role, v) for v in range(3)]
+        corners = [palette.resolve(corner_role, v) for v in range(3)]
+        b = build_from_tilemap(_one_building(bid), palette, storeys=2)
+        placed = {p.asset_id for p in b.placements}
+        wall = next((w for w in walls if w is not None and w.id in placed), None)
+        assert wall is not None, f"{bid}: no {wall_role!r} variant was placed"
+        corner = next((c for c in corners if c is not None and c.id in placed), None)
+        if corner is None:
+            continue          # mitred, which is the allowed fallback
+        assert _kit_of(corner) == _kit_of(wall), (
+            f"{bid}: corner {corner.name!r} from kit {_kit_of(corner)!r}, "
+            f"wall {wall.name!r} from {_kit_of(wall)!r}")
+        checked += 1
+    assert checked, "no tier placed a corner piece -- the test proved nothing"

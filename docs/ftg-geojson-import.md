@@ -1,12 +1,27 @@
-# Plan: importing Fantasy Town Generator exports
+# Fantasy Town Generator import — format reference and plan
 
-Status: **plan only, nothing implemented.** This is the reference for the second
-import format and the staged work to support it. `citysmith/mfcg.py` and the
-`import` command are untouched.
+Status, 2026-08-23: **stages 1-4 are done and Pelvesthollow is on a board.**
+`citysmith/importers.py` sniffs the format, `citysmith/ftg.py` reads it, and
+`citysmith import` dispatches between the two readers. Stage 5 (fences, town
+wall, bridges, forest-driven tree density) and stage 6 (Graybank, East
+Tradebourne) are not started. §2 is the format reference and is the durable
+part of this file; §6 tracks the work.
 
 Companion docs: `CLAUDE.md` (engineering notes), `docs/asset-conventions.md`
 (footprints and roles), `docs/pasting-into-talespire.md` (the paste procedure
 every size estimate here is constrained by).
+
+```bash
+python -m citysmith --out-dir out/pelves import "E:/Downloads/Pelvesthollow.geojson"
+```
+
+```bash
+python -m citysmith --out-dir out/pelves build out/pelves/layout.json --stem pelves --seed 33 --by-region --chunk-tiles 64 --keep-open-country
+```
+
+```bash
+.\tools\review.ps1 tiled -Name pelves -Stem pelves -OutDir out\pelves
+```
 
 ## 1. What arrived
 
@@ -261,79 +276,133 @@ Forest Church's 9, and every chunk is a hand-driven paste
 (`docs/pasting-into-talespire.md`). Pelvesthollow at 6 chunks is comfortable and
 should be the first target.
 
-## 5. Decisions to take before coding
+## 5. Decisions
 
-1. **How much town is one board?** A 107-chunk paste is not a session. Options,
-   in rough order of appeal: (a) a crop radius, `--radius-m`, around the centre;
-   (b) build the core cluster only and offer named sub-crops; (c) accept the
-   chunk count for towns and lean on `--per-building` for review. This needs a
-   call; everything else here is mechanical.
-2. **Where does FTG live in the code?** A sibling `citysmith/ftg.py` with a
-   shared `citysmith/importers.py` sniffer is the obvious shape — `mfcg.py` is
-   588 lines and heavily MFCG-specific, and forcing both through one function
-   would make it worse. `Layout` is already the common currency.
-3. **`import` or `import --format`?** Recommend: `citysmith import` sniffs and
-   dispatches automatically, with `--format mfcg|ftg` to override. The sniff is
-   unambiguous (§2.1), and a wrong guess would be loud rather than silent.
-4. **New `LayoutArea` kinds** (`forest`, `pasture`, `lawn`) plus the palette
-   roles behind them, or fold them into `field`/`park` for now? Folding is cheap
-   and loses exactly the thing that makes FTG worth importing.
+2, 3 and 4 are settled and built; 1 is still open and only gates stage 6.
+
+1. **How much town is one board? — STILL OPEN.** A 107-chunk paste is not a
+   session. Options, in rough order of appeal: (a) a crop radius, `--radius-m`,
+   around the centre; (b) build the core cluster only and offer named sub-crops;
+   (c) accept the chunk count for towns and lean on `--per-building` for review.
+   Nothing before stage 6 depends on it.
+2. **Where FTG lives — SETTLED.** `citysmith/ftg.py` beside `citysmith/mfcg.py`,
+   with `citysmith/importers.py` holding the sniffer and the dispatcher.
+   `Layout` is the common currency; `mfcg.py` was not touched except to record
+   its scale anchor and to align its house-frontage default with the CLI's (the
+   module said 20 ft and the CLI passed 35, so the module default was a
+   constant nothing used).
+3. **`import` sniffs — SETTLED.** `citysmith import` reads the file to decide,
+   with `--format mfcg|ftg` to override. A wrong override is loud: forcing
+   `--format ftg` on an MFCG file reports that it has no BUILDING features.
+4. **New area kinds — SETTLED, carried but not yet built.** `forest`, `pasture`
+   and `lawn` are recorded in the layout and drawn on the reference SVG. The
+   rasteriser leaves them as ground, which is *correct* — all three are grass
+   underfoot — and trees already scatter across open ground, so a forest reads
+   as a forest today. What the distinction buys is stage 5: modulating tree
+   density by the forest outline instead of across every open cell.
 
 ## 6. Staged work
 
 Each stage ends with something measurable, in the project's own idiom — measure
 the artifact, not the plan.
 
-**Stage 1 — sniff and dispatch.** `citysmith/importers.py` with
-`detect_format(path)` and a dispatching `import_layout`. `mfcg.py` unchanged.
-*Accepts when:* all four files on this machine classify correctly and a garbage
-file gives a named error, covered by a unit test.
+**Stage 1 — sniff and dispatch. DONE.** `citysmith/importers.py` with
+`detect_format`, `classify` and a dispatching `import_layout`.
+*Accepted:* all four files on this machine classify correctly, the same bytes
+classify the same way under either extension, and a `FeatureCollection` of
+`LAMPPOST` features errors with "LAMPPOST" in the message.
 
-**Stage 2 — geometry in.** `citysmith/ftg.py`: buildings, water, backgrounds,
-chained roads. Metric scale by default. Core-cluster crop. No fences, no walls,
-no bridges yet.
-*Accepts when:* `import` on Pelvesthollow writes a `layout.json` and an SVG that
-reads as the same village as FTG's own PNG, side by side, and
-`check_playability` is clean.
+**Stage 2 — geometry in. DONE.** `citysmith/ftg.py`: buildings, water,
+backgrounds, chained roads, metric scale, core-cluster crop.
+*Accepted:* Pelvesthollow imports as 175x184 tiles, 35 buildings, 19 chained
+roads, `check_playability` clean. Its `layout.svg` was put beside a direct plot
+of the raw GeoJSON and is the same village — same tongue of clearing, same
+street pattern, same buildings, river in the same place.
 
-**Stage 3 — types and names.** The §3.2 table, the `name` field, the
-PAVEMENT/plaza rule, `material: STONE_BRICK` → civic roles, unknown-value
-reporting.
-*Accepts when:* `sites` on Graybank ranks its inn, its two taverns and its one
-religious building by their authored names, and East Tradebourne's Warden Market
-appears as a plaza with no roof over it.
+**Stage 3 — types and names. DONE.** The §3.2 table, `LayoutBuilding.name` and
+`.stone`, the PAVEMENT/plaza rule, unknown-value reporting through
+`Layout.unmapped`.
+*Accepted:* all 35 Pelvesthollow buildings keep their authored names, nothing
+is unmapped, and a synthetic `MARKET`/`PAVEMENT` building becomes a plaza with
+no building of that name. `sites.py` runs on a `City`, not a `Layout`, so
+ranking Graybank's inn by name is stage 6 work, not a stage 3 gap.
 
-**Stage 4 — build it.** Rasterise and emit for Pelvesthollow. Paste it.
-*Accepts when:* `review.ps1 360` on the pasted board shows the ground as one
-continuous sheet, buildings seated flush, and a cutaway (`N`) through a wall
-that is solid — the same bar Forest Church had to clear.
+**Stage 4 — build it. DONE.** Pelvesthollow builds to 20,687 assets in 9
+`--by-region` chunks (3x3 of 64 tiles), largest 13,848 bytes against the 30,720
+cap, every verify check green apart from *no gates* (it has no wall) and 36
+tile-seam pairs — against Forest Church's 409 on the same settings.
+*Accepted:* pasted onto a fresh board with `review.ps1 tiled` and walked round.
+The ground is one continuous sheet with no step at any join, buildings sit flush
+on it with doors at ground level, thatch and chimneys complete, cobbled lanes
+meeting grass flush, pines and broadleaf scattered through open country. Read
+from four faces, from overhead, and from eye level.
 
-**Stage 5 — the extras.** `STONE_FENCE` as `field_wall` (capped), `STONE_WALL`
-as open wall polylines, `raised` ROAD_TEXTURE quads as bridge decks, trees
-scattered into FOREST polygons, `TRAIL` as a 1-tile path.
+*What was not measured:* no specific chunk seam was located on screen and
+inspected at close range. What the shots show is several frames each spanning
+more than one 64-tile chunk with no step anywhere in them. That plus
+`verify.chunk_datum` passing is strong, but it is not the copy-out measurement
+that settled the tiling rules in the first place.
+
+**Stage 5 — the extras. NOT STARTED.** `STONE_FENCE` as `field_wall` (capped),
+`STONE_WALL` as open wall polylines, `raised` ROAD_TEXTURE quads as bridge
+decks, tree density driven by the FOREST outline, `TRAIL` as a 1-tile path.
+The importer already reads all of these into the layout —
+`Layout.fences`, open `Layout.walls`, `LayoutArea("bridge"|"forest")`,
+`LayoutRoad(kind="trail")` — so this stage is entirely about building them.
 *Accepts when:* each is visible on a board and orbited from four sides — the
 drystone piece in particular is a wall asset, and `CLAUDE.md` records three bad
 wall picks in a row chosen from a single camera angle.
 
-**Stage 6 — scale up.** Graybank, then whatever §5.1 decides for East
-Tradebourne.
+**Stage 6 — scale up. GRAYBANK DONE; East Tradebourne still waiting on §5.1.**
+Graybank imports as 434x306 tiles, 150 of 159 buildings (126 house, 15 shop,
+3 smithy, 3 tavern, 2 guildhall, 1 temple), 50 chained roads, 91,429 assets.
+**The nine buildings the core crop dropped are exactly the six FARM and three
+INDUSTRIAL ones** — the outliers are literally the outlying farms and their
+barns, which is the clearest confirmation the clustering crop is cutting where
+it should.
 
-## 7. Fixtures and tests
+*Chunk size is a real choice at this scale, and the byte cap decides it.* At 96
+tiles the map is 20 chunks but the largest slab is 29,817 bytes against a 30,720
+cap — 97%, close enough that a different seed could bust it. At 80 tiles it is
+24 chunks and 20,604 bytes (67%). **Use 80.** Pelvesthollow's 64 gives 13,848,
+so there is room to go up on a small map and none on a big one.
 
-`tests/fixtures/` holds real TaleSpire slabs as codec ground truth; the import
-side has no equivalent. Add one, and keep it small — Pelvesthollow is 414 KB,
-which is reasonable to commit, or cut a ~20-building corner of it.
+*Accepted:* all 24 chunks pasted at one cursor cell with `review.ps1 tiled`,
+then toured. Every verify check green apart from *no gates*, 344 tile-seam pairs
+and two cart-clearance tiles (0.0%). On the board: the ground is one continuous
+sheet across every frame, houses seated flush along cobbled lanes, and the
+river reads as a river — translucent water over a dark bed with a continuous
+shingle bank on both shores, grass and trees meeting it flush. No step anywhere
+in any frame.
 
-Tests worth writing, all invariant-shaped rather than golden-output:
+*What was not checked:* the one auto-added bridge was never found in game — the
+river was toured but not walked end to end. Same caveat as Pelvesthollow on
+seams: no specific chunk join was located and inspected, only many frames
+spanning more than one 80-tile chunk with no step in them.
 
-- format detection over both formats and both extensions
-- every ring closed, every edge a 2-point line (guards §2.4 if FTG changes)
-- an unknown `buildingType` / `edgeType` / `backgroundType` imports without
-  raising, and is reported
-- background depth never exceeds 2, and a depth-2 point always includes GRASS
-- no two imported buildings overlap. There are 1251 *bounding-box* overlaps in
-  East Tradebourne; whether any polygons actually overlap is unverified, and
-  this test is how we find out
-- the core crop keeps ≥90% of buildings and cuts the window by the expected
-  order of magnitude on Graybank
-- metric scale: a median FTG house measures 34–35 ft across after import
+## 7. Fixtures and tests — DONE
+
+`tests/fixtures/ftg_pelvesthollow_corner.geojson` is a real FTG export trimmed
+to a 140 m square over the middle of the village: 23 buildings, 102 edges, 38
+backgrounds, 2 water, 40 KB. It carries all four feature types and enough
+vocabulary to exercise the tables. `tests/test_import.py` is 38 tests covering:
+
+- format detection over both formats and both extensions, and a named error for
+  a collection that is neither
+- every ring closed and single, every edge a 2-point line — these guard §2.4, so
+  if FTG changes shape they fail rather than the reader quietly misreading it
+- background depth never exceeds 2 and a depth-2 point always includes GRASS
+  (415 of 576 sample points are depth 2, so it is not a vacuous check)
+- an unknown `buildingType` / `edgeType` / `backgroundType` imports under a
+  default and is reported through `Layout.unmapped`
+- chaining consumes every segment exactly once, stops at a junction, closes a
+  loop, and survives a degenerate segment
+- no two imported buildings overlap, as a *polygon* test — 5 of the fixture's
+  253 pairs share a bounding box, so a box test would have been wrong here
+- the core crop drops two synthetic outlying farms and cuts board area by more
+  than 5x doing it
+- metric scale puts a median house at 30–40 ft, and both overrides beat it
+
+The chaining and plaza tests were mutation-checked: breaking `chain_segments` to
+drop a chain, and disabling the PAVEMENT diversion, each fails the tests that
+claim to cover them.

@@ -310,6 +310,27 @@ MEDIEVAL = Style(
                   group="Corner", height=2.0, **_MED, **_UNIT),
             _tile(name="bg_wall_1x1_corner_01", height=2.0, **_MED, **_UNIT),
         ],
+        # -- utility fabric -----------------------------------------------
+        # A barn is not a small house. Rural ships a wall *and* a matching 1x1
+        # corner and **no 1-cell window at all**, which reads as a limitation
+        # until you ask what a warehouse or a stable actually looks like: dark
+        # horizontal boarding, one storey, no glass. Probed as its own design
+        # in `tools/facade_probe.py` (candidate 3) it is the clearest tier of
+        # the four -- a different building at a glance, from any angle.
+        #
+        # This is also why the facade is *not* Rural: a house needs a window
+        # and only two 1-cell windows exist in the whole Medieval Fantasy pack
+        # (this kit has neither). The missing window is what makes Rural the
+        # right kit here and the wrong kit everywhere else.
+        "wall_utility": [
+            _tile(name="Rural Wall 01", height=2.0, **_MED),
+            _tile(name=("Village Roof Side Wall 01", "Village Roof Side Wall 02"),
+                  **_MED),
+        ],
+        "wall_corner_utility": [
+            _tile(name="Rural Corner", height=2.0, **_MED, **_UNIT),
+            _tile(name="Tavern no floor (1x1 a)", height=2.0, **_MED, **_UNIT),
+        ],
         # -- civic fabric -------------------------------------------------
         # Guildhall, temple, manor and barracks are built in dressed stone
         # with arched openings, so a party can read importance off the

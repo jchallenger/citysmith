@@ -19,6 +19,13 @@ the two passes that catch that, written down so they run the same way twice.
         and cleared at the client centre without the camera moving
         .\tools\review.ps1 paste -Name final -Stem forest
 
+  tiled a `build --by-region` map onto a fresh board: every chunk at one
+        cursor cell, in the order the build's own paste-order manifest gives
+        -- which is NOT the filename order, because the chunk covering the
+        anchor cell has to go down last
+
+        .\tools\review.ps1 tiled -Name pelves -Stem pelves -OutDir out\pelves
+
   buildings
         the same, for a `build --per-building` output: the landscape first,
         then one building at a time, each on the shared marker, with a shot
@@ -28,9 +35,10 @@ the two passes that catch that, written down so they run the same way twice.
 Shots land in out\flyby\<Name>-<view>.jpg.
 #>
 param(
-  [Parameter(Mandatory=$true)][ValidateSet('360','flyby','paste','buildings')][string]$Recipe,
+  [Parameter(Mandatory=$true)][ValidateSet('360','flyby','paste','buildings','tiled')][string]$Recipe,
   [Parameter(Mandatory=$true)][string]$Name,
   [string]$Stem = "forest",
+  [string]$OutDir,
   [string[]]$Slab,
   [int]$X = 700, [int]$Y = 600,
   [int]$ZoomOut = 6
@@ -210,5 +218,48 @@ switch ($Recipe) {
     }
     TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)
     "pasted $($land.Count) landscape + $($bld.Count) building slab(s) at $cx,$cy"
+  }
+
+  'tiled' {
+    # A `build --by-region` map: one slab per region, every layer in it, so
+    # nothing is ever pasted over anything and every chunk rests on bare board.
+    #
+    # **The order comes from the manifest, not from a glob.** The chunk whose
+    # region covers the anchor cell is written last on purpose, so the anchor
+    # is still bare board for every paste before it; sorted by filename it
+    # lands in the middle instead, and the four chunks after it inherit its
+    # height. That is a stepped map with nothing wrong in the files.
+    $cl = & $ts client
+    $cx = $cl.CX; $cy = $cl.CY
+    TS newboard
+    Start-Sleep -Seconds 3
+    $plane = & $ts planestate
+    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+    $out = Join-Path $PSScriptRoot "..\out"
+    if ($OutDir) { $out = $OutDir }
+    $manifest = Join-Path $out "$Stem-paste-order.txt"
+    if (-not (Test-Path $manifest)) {
+      throw "no $manifest -- rebuild with --by-region so the paste order is written down"
+    }
+    $chunks = Get-Content $manifest | Where-Object { $_ } |
+              ForEach-Object { Join-Path $out $_ }
+    foreach ($c in $chunks) { if (-not (Test-Path $c)) { throw "missing chunk $c" } }
+
+    TS orbit -X $cx -Y $cy -DX 0 -DY $PITCH_DOWN
+    $i = 0
+    foreach ($c in $chunks) {
+      $i++
+      TS hold -Slab $c -X $cx -Y $cy
+      Start-Sleep -Seconds 3
+      Shot ("{0:d2}-hold" -f $i)
+      TS commit -X $cx -Y $cy
+      Start-Sleep -Seconds 4
+      TS clear -X $cx -Y $cy
+      Start-Sleep -Seconds 2
+      Shot ("{0:d2}-down" -f $i)
+      "$i/$($chunks.Count) : $(Split-Path $c -Leaf)"
+    }
+    TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)
+    "tiled $i chunk(s) of $Stem at $cx,$cy -> out\flyby\$Name-NN-{hold,down}.jpg"
   }
 }

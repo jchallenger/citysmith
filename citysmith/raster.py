@@ -344,6 +344,11 @@ def _onboard_length(points: list[Point], width: float, depth: float) -> float:
     return total
 
 
+#: Road kinds that are landscape rather than thoroughfare: they keep their true
+#: width, get no street class, and are never widened for carts.
+NOT_THOROUGHFARES = frozenset({"river", "plank", "trail"})
+
+
 def classify_roads(layout: Layout) -> list[str]:
     """Put every road in a traffic class -- one entry per ``layout.roads``.
 
@@ -370,14 +375,16 @@ def classify_roads(layout: Layout) -> list[str]:
     highway that only clips the corner of the map is, on this map, a track, and
     paving it like a market street would be a lie about where the traffic is.
 
-    Rivers and planks are terrain rather than thoroughfares and get no class --
-    same reason they are excluded from widening.
+    Rivers, planks and trails are terrain rather than thoroughfares and get no
+    class -- same reason they are excluded from widening. A footpath is
+    *correct* at one tile; widening it to cart standard would invent a road the
+    source does not have.
     """
     classes = [""] * len(layout.roads)
     lengths = {
         i: _onboard_length(r.points, layout.width, layout.depth)
         for i, r in enumerate(layout.roads)
-        if r.kind not in ("river", "plank") and len(r.points) >= 2
+        if r.kind not in NOT_THOROUGHFARES and len(r.points) >= 2
     }
     if not lengths:
         return classes
@@ -435,7 +442,7 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
     # exactly where it crosses -- which deletes the bridges and cuts the town
     # into disconnected halves. Streets therefore paint last and may sit on
     # water, which is precisely what a bridge is.
-    order = {"river": 0, "plank": 1, "road": 2}
+    order = {"river": 0, "plank": 1, "trail": 1, "road": 2}
     road_class = classify_roads(layout)
     ranked = sorted(range(len(layout.roads)),
                     key=lambda i: order.get(layout.roads[i].kind, 2))

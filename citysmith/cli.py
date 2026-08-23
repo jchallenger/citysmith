@@ -73,6 +73,15 @@ def _write_chunks(chunks, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path
         path = out_dir / name
         path.write_text(encode(chunk.slab), encoding="utf-8")
         written.append(path)
+
+    # The paste order is not the filename order, and getting it wrong is the
+    # difference between a flat map and a stepped one: the chunk covering the
+    # anchor cell is written *last* so that the anchor is still bare board for
+    # every paste before it. A glob sorts that chunk into the middle. So the
+    # order is written down beside the slabs, for anything driving the paste.
+    (out_dir / f"{stem}-paste-order.txt").write_text(
+        "\n".join(p.name for p in written) + "\n", encoding="utf-8"
+    )
     return written
 
 
@@ -376,27 +385,45 @@ def cmd_calibrate(args) -> int:
 
 
 def cmd_import(args) -> int:
-    """Import an MFCG GeoJSON export as a polygonal layout."""
-    from .mfcg import MFCGError, import_layout
+    """Import a GeoJSON town export as a polygonal layout.
+
+    The format is sniffed rather than taken from the extension -- both MFCG and
+    FTG exports arrive as ``.json`` and as ``.geojson``. See
+    `docs/ftg-geojson-import.md`.
+    """
+    from . import importers
 
     try:
-        layout = import_layout(
+        fmt = args.format or importers.detect_format(args.geojson)
+        layout = importers.import_layout(
             args.geojson,
+            fmt=fmt,
             house_frontage_ft=args.house_ft,
             feet_per_unit=args.feet_per_unit,
             margin_feet=args.margin_ft,
             clip=not args.no_clip,
+            core_only=not args.whole_canvas,
+            cluster_gap_ft=args.cluster_gap_ft,
+            fences=not args.no_fences,
             name=args.name,
             seed=args.seed,
         )
-    except MFCGError as exc:
+    except ValueError as exc:
         raise SystemExit(f"error: {exc}") from exc
 
     out_dir = pathlib.Path(args.out_dir)
+    print(f"  format: {fmt}")
     print(layout.summary())
-    from .mfcg import check_playability
-    for problem in check_playability(layout, {}):
+    if fmt == importers.FTG:
+        from .ftg import check_playability
+        problems = check_playability(layout)
+    else:
+        from .mfcg import check_playability
+        problems = check_playability(layout, {})
+    for problem in problems:
         print(f"  WARNING: {problem}")
+    for prop, values in layout.unmapped.items():
+        print(f"  WARNING: unmapped {prop}: {', '.join(values)} -- imported as a default")
     path = out_dir / "layout.json"
     layout.save(path)
     print(f"  wrote {path}")
@@ -678,20 +705,40 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--style", default="medieval", choices=sorted(STYLES))
     c.set_defaults(func=cmd_calibrate)
 
-    c = sub.add_parser("import", help="import an MFCG GeoJSON export")
-    c.add_argument("geojson", help="path to a Medieval Fantasy City Generator JSON export")
-    c.add_argument("--house-ft", type=float, default=35.0,
+    c = sub.add_parser("import", help="import an MFCG or FTG GeoJSON town export")
+    c.add_argument("geojson", help="path to a Medieval Fantasy City Generator or "
+                                   "Fantasy Town Generator export")
+    c.add_argument("--format", choices=["mfcg", "ftg"], default=None,
+                   help="override the format sniff. By default the file is read "
+                        "to decide, because the extension does not tell them "
+                        "apart -- both formats ship as .json and as .geojson.")
+    c.add_argument("--house-ft", type=float, default=None,
                    help="scale anchor: real width in feet of a median building "
-                        "footprint. Sets tiles-per-MFCG-unit, so it scales the "
-                        "whole town. Default 35 is chosen for play, not strict "
-                        "history: below ~30 most buildings are too small to "
-                        "stand a party in (at 20 only 31%% clear a 3x3 interior; "
-                        "at 35, 94%% do). Above 35 buys no further playability.")
+                        "footprint. Sets tiles-per-source-unit, so it scales the "
+                        "whole town. MFCG has no real scale of its own and uses "
+                        "35 ft, chosen for play rather than strict history: "
+                        "below ~30 most buildings are too small to stand a party "
+                        "in (at 20 only 31%% clear a 3x3 interior; at 35, 94%% "
+                        "do), and above 35 buys no further playability. FTG "
+                        "declares 1 unit = 1 m and uses that instead; passing "
+                        "this overrides it.")
     c.add_argument("--feet-per-unit", type=float, default=None,
-                   help="override: feet per MFCG world unit")
+                   help="override: feet per source world unit")
     c.add_argument("--margin-ft", type=float, default=60.0,
-                   help="feet of suburb kept around the walls (default 60)")
+                   help="feet of suburb kept around the settlement (default 60)")
     c.add_argument("--no-clip", action="store_true", help="keep the entire export")
+    c.add_argument("--whole-canvas", action="store_true",
+                   help="FTG only: crop to every building instead of to the "
+                        "settled core. An FTG canvas is mostly farmland and a "
+                        "few outlying farms stretch the window across the whole "
+                        "map -- on Graybank that is 853x1013 tiles instead of "
+                        "400x272.")
+    c.add_argument("--cluster-gap-ft", type=float, default=None,
+                   help="FTG only: how far apart two buildings can be and still "
+                        "count as one settlement (default 60 m)")
+    c.add_argument("--no-fences", action="store_true",
+                   help="FTG only: drop field boundaries. They are the format's "
+                        "biggest single asset cost out in open country.")
     c.add_argument("--name", default=None)
     c.add_argument("--seed", type=int, default=0)
     c.add_argument("--scale", type=float, default=4.0, help="SVG pixels per tile")

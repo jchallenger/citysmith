@@ -189,7 +189,13 @@ def load_geojson(path: str | os.PathLike[str]) -> dict[str, dict]:
 #: tile count is *derived* from these -- a creature occupies 5 ft and a tile is
 #: one creature wide, so the map's real size dictates its size in tiles, never
 #: the other way round.
-DEFAULT_HOUSE_FRONTAGE_FT = 20.0
+#:
+#: 35 ft is chosen for play, not for strict history: below ~30 most buildings
+#: are too small to stand a party in (at 20 only 31% clear a 3x3 interior; at
+#: 35, 94% do), and above 35 buys no further playability. This is the same
+#: number the CLI has always passed; they were two constants saying different
+#: things, and the module default was the one nothing used.
+DEFAULT_HOUSE_FRONTAGE_FT = 35.0
 
 #: Minimums below which the map stops working as a battle map: a creature needs
 #: a 5 ft square, so a room narrower than 3 tiles cannot be fought in and a
@@ -366,6 +372,7 @@ def import_layout(
     )
     layout.width = (mx - ox) / units_per_tile
     layout.depth = (my - oy) / units_per_tile
+    layout.scale_anchor = scale.anchor
 
     layout.walls = [T(r) for r in wall_polys]
 

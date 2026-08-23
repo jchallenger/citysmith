@@ -208,6 +208,17 @@ def layout_svg(layout, *, scale: float = 4.0, labels: bool = True) -> str:
         )
 
     # Terrain first, then wards, then streets, then structures.
+    #
+    # Woodland, pasture and lawn are all grass underfoot and the rasteriser
+    # treats them as ground; they are drawn here because a reference map of an
+    # FTG village with them missing is a hamlet floating in a void, which is not
+    # what the source shows.
+    for a in layout.areas_of("forest"):
+        poly(a.ring, "#2f4a33", 0.9)
+    for a in layout.areas_of("pasture"):
+        poly(a.ring, "#5a6b45", 0.6)
+    for a in layout.areas_of("lawn"):
+        poly(a.ring, "#54703f", 0.6)
     for a in layout.areas_of("water"):
         poly(a.ring, "#22485e")
     for a in layout.areas_of("field"):
@@ -229,11 +240,22 @@ def layout_svg(layout, *, scale: float = 4.0, labels: bool = True) -> str:
 
     for a in layout.areas_of("plaza"):
         poly(a.ring, "#b9a06a", 0.85)
+    for a in layout.areas_of("bridge"):
+        poly(a.ring, "#8a7a5c", 0.95)
+
+    for line in layout.fences:
+        p.append(
+            f'<path d="{_path(line, scale)}" fill="none" stroke="#6b6459" '
+            f'stroke-width="{max(0.6, 0.4 * scale):.1f}" stroke-linecap="round" '
+            f'stroke-linejoin="round"/>'
+        )
 
     for b in layout.buildings:
+        label = f"{b.name} -- " if b.name else ""
         poly(b.ring, _LAYOUT_BUILDING_FILL.get(b.kind, "#999"),
              1.0, stroke="#0d0f12", sw=0.4,
-             title=f"{b.id} ({b.kind}) -- {b.floors} floor(s), {b.district or 'outside the walls'}")
+             title=f"{label}{b.id} ({b.kind}) -- {b.floors} floor(s), "
+                   f"{b.district or 'outside the walls'}")
 
     for a in layout.areas_of("landmark"):
         poly(a.ring, "#e8d9a0", 1.0, stroke="#0d0f12", sw=0.6, title="landmark")

@@ -7,6 +7,7 @@ This file is the internal engineering notes. User-facing docs:
 `README.md` (front door and end-to-end quickstart),
 `docs/pasting-into-talespire.md` (the paste interaction, in full),
 `docs/asset-conventions.md` (footprints, pinning, normalization, roof rotations),
+`docs/ftg-geojson-import.md` (the second import format, reverse-engineered),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions).
 
 ## Layers
@@ -16,7 +17,9 @@ This file is the internal engineering notes. User-facing docs:
 | `slab.py` | TaleSpire slab format V2 codec. Verified against real slabs. |
 | `catalog.py` | Loads assets from the user's TaleSpire install; query API. |
 | `palette.py` | Maps semantic roles (floor/wall/door) to catalog queries per style. |
+| `importers.py` | Sniffs which generator a GeoJSON came from and dispatches. |
 | `mfcg.py` | Imports Watabou MFCG GeoJSON -> `Layout`. The primary path. |
+| `ftg.py` | Imports Fantasy Town Generator GeoJSON -> `Layout`. |
 | `layout.py` | Polygonal layout model; `TILE_FEET = 5.0` lives here. |
 | `raster.py` | Layout -> tile grid: footprints, walls, doors, reachability. |
 | `verify.py` | Playability report. Checks the TileMap, *not* the placements. |
@@ -42,6 +45,86 @@ This file is the internal engineering notes. User-facing docs:
   `terms`. Asset names are inconsistent — matching them loosely lets
   "Tavern no floor" satisfy a request for a floor.
 - **The generator must work offline.** Every AI feature is additive.
+
+## Two import formats, and the extension does not tell them apart
+
+There are now two generators citysmith reads, and **all four combinations of
+format and extension exist on this machine**: MFCG ships as `.json` *and* as
+`.geojson`, and so does Fantasy Town Generator. Dispatching on the extension
+would be wrong on real files, today. `importers.classify` reads the first
+features instead, and the discriminator is exact rather than a guess: MFCG puts
+a string `id` from a closed vocabulary on the feature itself and has no
+`properties`; FTG has no feature `id` and carries `properties.type` in
+`{BUILDING, EDGE, BACKGROUND, WATER}`.
+
+What FTG gives that MFCG does not, and what follows from it:
+
+- **A real scale.** FTG's docs state 1 unit = 1 metre, so `feet_per_unit` is
+  3.28084 and nothing is inferred. The cross-check is worth keeping: citysmith's
+  own median-house-frontage anchor at 35 ft lands within 4% of the metric scale
+  on all three FTG exports seen, because an FTG house *is* 34-35 ft across. Two
+  independent routes, one number. `--house-ft` still overrides.
+- **Authored types and names.** MFCG exports geometry only, so `mfcg.py` invents
+  wards and allocates scarce kinds by quota. None of that runs for FTG -- the
+  export says each building's type and its name. `LayoutBuilding.name` carries
+  it; `.stone` carries `material: STONE_BRICK`.
+- **No metadata feature at all.** No version, no settlement name (it is only in
+  the filename), no road width, no wall thickness. Carriageway widths are
+  chosen in `ftg.ROAD_WIDTHS_M` and stay fixed in metres whatever anchor is in
+  force.
+- **Edges are single segments, not polylines.** Every `EDGE` is exactly two
+  points -- it is one boundary segment of a background polygon, and 93-96% of
+  edge endpoints are also background vertices. `ftg.chain_segments` joins them
+  through shared endpoints (which match exactly; no tolerance needed) and stops
+  at any junction, so a fork stays a fork.
+- **Ground cover is a base sheet plus at most one thing on it.** Sampled on a
+  grid over all three exports, no point is more than two backgrounds deep and
+  every depth-2 point is `GRASS` plus one other. So there is no z-order to
+  resolve: drop GRASS, let anything else win. **The file's own feature order is
+  not a draw order** -- FOREST is listed last in one export and LAWN first in
+  another, and both belong on top. It was tempting and it is wrong.
+- **The canvas is mostly farmland, and the crop window is the whole ballgame.**
+  Clipping to `buildings + margin`, which is what the MFCG path does, gives
+  Graybank 853x1013 tiles because nine outlying farms stretch the box; the
+  settled core is 400x272. `ftg.core_cluster` single-links building centroids at
+  60 m and crops to the largest group. It also removes 93-94% of the
+  `STONE_FENCE` run, which on East Tradebourne is 92,638 tiles -- three times
+  Forest Church's entire board.
+- **A market square is exported as a BUILDING**, with `material: PAVEMENT`.
+  Built as one it is a roofed box over the square, so it is diverted into a
+  plaza area. The *material* is the test; `buildingType: MARKET` is only
+  corroboration, because that vocabulary grows and this one has not.
+- **The vocabulary grows between exports.** Five building types, `STONE_WALL`,
+  `ROAD_TEXTURE_TYPE`, `PAVEMENT` and `raised: true` appear only in the largest
+  of the three files seen. An unmapped value therefore imports under a default
+  and is *reported* through `Layout.unmapped` -- never raised, never dropped. A
+  dropped feature is invisible on the board, which is the failure this file
+  records four other times.
+- **`raised: true` means bridge.** Across all three exports it is true for
+  exactly five features, and every one is a ~20x20 m `ROAD_TEXTURE_TYPE` quad
+  over water.
+
+`docs/ftg-geojson-import.md` is the full schema, the measurements behind each of
+these, and the remaining stages. Verified end to end on **Pelvesthollow**
+(175x184 tiles, 35 buildings, 9 chunks at 64 tiles) and **Graybank** (434x306,
+150 buildings, 91,429 assets, 24 chunks at 80 tiles), both pasted with
+`review.ps1 tiled` and walked round: one continuous sheet of ground, no step at
+any join, buildings flush, and on Graybank a river with a continuous shingle
+bank on both shores.
+
+**Chunk size is bounded by the byte cap, and on a big map there is no slack.**
+Graybank at 96 tiles is 20 chunks with the largest slab at 29,817 bytes against
+the 30,720 cap -- 97%, close enough that another seed could bust it. At 80 tiles
+it is 24 chunks and 20,604 bytes. Pelvesthollow at 64 tiles is 13,848. Size the
+chunks so the largest lands near two thirds of the cap, and re-check the number
+after any change that adds dressing.
+
+**The paste order is not the filename order.** `--by-region` writes the chunk
+covering the anchor cell *last*, so the anchor is still bare board for every
+paste before it; an alphabetical glob sorts that chunk into the middle and the
+four after it inherit its height. `_write_chunks` writes
+`<stem>-paste-order.txt` beside the slabs for anything driving the paste, and
+`review.ps1 tiled` reads it rather than globbing.
 
 ## Slab format (verified, do not re-derive)
 
@@ -633,8 +716,81 @@ shape instead of reading it. The rules that fall out:
   `test_the_roof_sits_on_the_wall_head` and
   `test_no_upper_deck_reaches_the_outside_of_a_building` guard the result.
 
+- **Only the Thatched kit has a 1x1 hip vocabulary. The others are 2x2 kits
+  with 1x1 offcuts.** `_lay_roofs` stacks a hip as concentric rings using
+  rotations read out of a community-built cottage -- and nothing had ever
+  checked that another kit shares them. It does not, and rotation cannot fix
+  it, because rotation is about Y and cannot tip a slope upright.
+  `tools/roofkit_probe.py` lays each kit's slope and corner alone at rot
+  0/6/12/18 beside a 6x6 hip built the Thatched way:
+  * **Village** (`Village Roof Side 01`, 1x1x1) is a thin *blade* at every
+    rotation -- the name says so, a "Roof Side" is a gable side. Built as a
+    hip it is a rank of red fins with daylight between them.
+  * **Castle** (`Regular 1x1`) *is* a slope and the hip nearly forms; it fails
+    at the corners, because `Skirt_1x1_corner in/out` is an eave flare. The
+    kit's real corner is `Regular 2x2 corner *`, authored at 2x2.
+  * **Haunted** (`Haunted roof 1x1`, grey slate) fails the same way -- its
+    1x1 pieces are named `corner out tip` / `corner inner tip`, the *tips* of
+    a 2x2 corner.
+  So a second roof material needs either a 2x2 ring mode in `_lay_roofs`, or
+  the non-Thatched kits used for **flat parapet roofs** instead of hips --
+  which is what `_lay_towers` already does, and is architecturally right for
+  civic anyway. Do not "fix the rotations"; the pieces are not there.
+  **Run each dark kit against the tan Thatched control on its own board.**
+  Castle and Haunted are both dark weathered timber and were told apart on a
+  four-kit board only by counting a tally stack at a grazing angle -- which
+  read wrong. `--kits thatched,castle` makes identification a colour.
+
+- **A corner piece eats the facade on a small footprint, so a glazing *rate*
+  cannot say much.** Windows are dealt one-in-N per segment, and on Forest
+  Church the front face of a trade building came out 27% glazed against a
+  one-in-2 rate. The hash is exact (checked); the loss is corners and doors.
+  A median footprint is 28 cells, so a face is five or six cells of which two
+  are corner pieces and, at ground level, one more is the door. Widening the
+  rate gap between tiers therefore buys less than it looks like it should.
+
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**
+
+## Building style: four tiers, and what each axis is allowed to carry
+
+Style used to be one binary -- `kind in CIVIC_KINDS` -- plus a three-way wall
+deal that collapsed to two near-identical panels, because
+`Palette.resolve(role, v)` seeds a choice *inside the first matching query* and
+that query pins two names. Measured on Forest Church: 5 civic, 46 identical.
+Every roof on the map was `Thatched Roof 01`, since `_lay_roofs` resolves the
+roof set once for the map rather than once per building.
+
+`tier_of` now deals four fabrics -- civic 5, trade 12, common 28, utility 6 --
+and each axis carries a different thing, rather than all three fighting over
+the wall material:
+
+- **Importance (kind) -> the wall kit.** The tier decides the *whole* facade,
+  because a facade that changes material at the corner reads as a mistake.
+  Utility (warehouse, stable, shed) is Rural boarding, one storey, no glass:
+  **that kit's missing window is the reason it is right here and wrong
+  everywhere else.** Trade shares the house's wall, because exactly two 1-cell
+  windows exist in the whole Medieval Fantasy pack (Tavern's and the castle's)
+  -- so a tier that wants glass is built from one of those two, and trade is
+  told apart by its door and its street front instead.
+- **Where -> the glazing, not the material.** `GLAZE_RATE` is keyed on which
+  face a segment is on: dense at the front, sparse on the flank, **never on
+  the back**. Windows used to be dealt by a hash over every exposed segment,
+  so a town looked identical from all four sides.
+- **Frontage -> the show facade.** `_main_street_frontage` reads
+  `tm.street_class` at each doorway; 8 of 51 buildings front the through road
+  and get one step denser glazing.
+
+**Ward is not a usable axis and it is worth saying why.** 47 of Forest
+Church's 51 buildings fall in a single ward, and `inside_walls` is true for
+exactly one -- correctly, since that export's "wall" is a small citadel ring,
+not a town circuit. A district-keyed style would be a no-op dressed as a
+feature.
+
+**The storey cap belongs in `storeys_of`, not at the shell.** Three passes read
+it -- the shell, the upper floors and the roof -- and capping only the shell
+leaves the roof three courses up with nothing under it. Same lesson as
+`footprints` and *where* a building is.
 
 ## Metrics must read the artifact, not the plan
 

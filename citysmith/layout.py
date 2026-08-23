@@ -154,6 +154,13 @@ class LayoutBuilding:
     district: str = ""
     floors: int = 1
     inside_walls: bool = False
+    #: The name the source authored, where it has one. MFCG exports geometry
+    #: only and leaves this empty; FTG names every building, and "The Halfling
+    #: and the Fox" is a better encounter hook than "tavern-0042".
+    name: str = ""
+    #: Built of masonry rather than timber, so the civic wall and door roles
+    #: apply. FTG says so per building; MFCG does not.
+    stone: bool = False
 
     @property
     def centroid(self) -> Point:
@@ -208,6 +215,16 @@ class Layout:
     buildings: list[LayoutBuilding] = field(default_factory=list)
     areas: list[LayoutArea] = field(default_factory=list)
     wall_thickness: float = 2.0
+    #: Field boundaries -- drystone walls and hedgerows -- as open polylines.
+    #: Distinct from ``walls``, which is the defensive circuit.
+    fences: list[list[Point]] = field(default_factory=list)
+    #: What decided the scale, for the import report. Sources differ: FTG
+    #: declares a metric one, MFCG has to be anchored to a real dimension.
+    scale_anchor: str = ""
+    #: Source vocabulary this importer did not recognise, by property name.
+    #: Reported rather than raised: the value was still imported, under a
+    #: default, and a silently dropped feature is invisible on the board.
+    unmapped: dict[str, list[str]] = field(default_factory=dict)
 
     def areas_of(self, kind: str) -> list[LayoutArea]:
         return [a for a in self.areas if a.kind == kind]
@@ -235,13 +252,16 @@ class Layout:
         area_kinds: dict[str, int] = {}
         for a in self.areas:
             area_kinds[a.kind] = area_kinds.get(a.kind, 0) + 1
+        anchor = f", {self.scale_anchor}" if self.scale_anchor else ""
+        fences = f", {len(self.fences)} fence line(s)" if self.fences else ""
         return (
-            f"{self.name} -- {self.width:.0f}x{self.depth:.0f} tiles "
+            f"{self.name} [{self.source}] -- {self.width:.0f}x{self.depth:.0f} tiles "
             f"= {self.width_feet:.0f}x{self.depth_feet:.0f} ft "
-            f"(1 tile = {TILE_FEET:.0f} ft = {self.units_per_tile:.2f} MFCG units)\n"
+            f"(1 tile = {TILE_FEET:.0f} ft = {self.units_per_tile:.2f} source "
+            f"units{anchor})\n"
             f"  {len(self.buildings)} buildings ({inside} inside the walls): {parts}\n"
             f"  {len(self.districts)} districts, {len(self.roads)} roads, "
-            f"{len(self.gates)} gates, {len(self.walls)} wall ring(s)\n"
+            f"{len(self.gates)} gates, {len(self.walls)} wall ring(s){fences}\n"
             f"  areas: {', '.join(f'{v} {k}' for k, v in sorted(area_kinds.items())) or 'none'}"
         )
 
@@ -257,7 +277,10 @@ class Layout:
             "width": self.width,
             "depth": self.depth,
             "wall_thickness": self.wall_thickness,
+            "scale_anchor": self.scale_anchor,
+            "unmapped": self.unmapped,
             "walls": [[list(p) for p in ring] for ring in self.walls],
+            "fences": [[list(p) for p in line] for line in self.fences],
             "gates": [list(g) for g in self.gates],
             "roads": [
                 {"points": [list(p) for p in r.points], "width": r.width, "kind": r.kind}
@@ -270,7 +293,8 @@ class Layout:
             ],
             "buildings": [
                 {"id": b.id, "kind": b.kind, "district": b.district, "floors": b.floors,
-                 "inside_walls": b.inside_walls, "ring": [list(p) for p in b.ring]}
+                 "inside_walls": b.inside_walls, "name": b.name, "stone": b.stone,
+                 "ring": [list(p) for p in b.ring]}
                 for b in self.buildings
             ],
             "areas": [
@@ -298,8 +322,11 @@ class Layout:
             feet_per_unit=data.get("feet_per_unit", 1.0),
             width=data["width"], depth=data["depth"],
             wall_thickness=data.get("wall_thickness", 2.0),
+            scale_anchor=data.get("scale_anchor", ""),
+            unmapped=data.get("unmapped", {}),
         )
         layout.walls = [ring(r) for r in data["walls"]]
+        layout.fences = [ring(r) for r in data.get("fences", [])]
         layout.gates = [(float(x), float(y)) for x, y in data["gates"]]
         layout.roads = [
             LayoutRoad(points=ring(r["points"]), width=r["width"], kind=r["kind"])
@@ -314,6 +341,7 @@ class Layout:
                 id=b["id"], ring=ring(b["ring"]), kind=b["kind"],
                 district=b["district"], floors=b.get("floors", 1),
                 inside_walls=b.get("inside_walls", False),
+                name=b.get("name", ""), stone=b.get("stone", False),
             )
             for b in data["buildings"]
         ]
