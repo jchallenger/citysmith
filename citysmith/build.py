@@ -2593,11 +2593,19 @@ def _lay_wall_stairs(b: Builder, tm, towers, mass, outside, top: float,
         if best is None:
             continue
         _, side, run = best
+        # **The rotation names the way you climb, not the way the run goes.**
+        # `side` is the direction the flight runs *out* from the tower; the
+        # ascent is back towards it, so the tread faces the opposite way.
+        # Probed with `out/stairrot2.slab.txt` -- four flights, one per quarter
+        # turn, each carrying its own count in pips on the wall it climbs to,
+        # because a marker on the ground cannot be matched to a flight at the
+        # low side-on angle a tread is read from.
+        climb = OPPOSITE_SIDE[side]
         for j, (x, z) in enumerate(run, start=1):
             level = wall_height - j
             for under in range(level):
                 b.add(place_tile(core, x, z, top + under * course))
-            b.add(place_tile(stair, x, z, top + level * course, _SIDE_ROT[side]))
+            b.add(place_tile(stair, x, z, top + level * course, _SIDE_ROT[climb]))
             taken.add((x, z))
         built += 1
     return built

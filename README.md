@@ -1,106 +1,213 @@
 # citysmith
 
-Turn a Watabou **Medieval Fantasy City Generator** export into a playable
-TaleSpire board. citysmith reads the MFCG GeoJSON, scales it to a 5 ft tile
-grid, rasterises it into ground/street/water/building cells, dresses it with
-real assets from your own TaleSpire install, and emits `.slab.txt` files you
-paste into the game with `Ctrl+V`.
+Turn a fantasy-town map export into a playable **TaleSpire** board.
+
+citysmith reads a GeoJSON town from [Watabou's Medieval Fantasy City
+Generator][mfcg] or from [Fantasy Town Generator][ftg], scales it to a 5 ft tile
+grid, rasterises it into ground / street / water / building / wall cells,
+dresses it with real assets **from your own TaleSpire install**, and emits
+`.slab.txt` files you paste into the game with `Ctrl+V`.
 
 It also has a self-contained procedural city generator and an interior
-floorplan builder, but the MFCG path is the one that produces a whole town.
+floorplan builder, but the import path is the one that produces a whole town.
 
+[mfcg]: https://watabou.github.io/city-generator/
+[ftg]: https://www.fantasytowngenerator.com/
+
+---
+
+## The process, end to end
+
+```mermaid
+flowchart TB
+    TS["TaleSpire install<br/>your packs, your assets"]
+    TS -->|"citysmith catalog build — once per machine"| CAT[("catalog.json")]
+
+    IMP["citysmith import<br/>sniffs the generator, derives the tile scale"]
+    M["Watabou MFCG export"] --> IMP
+    F["Fantasy Town Generator export"] --> IMP
+    IMP --> LAY[("out/layout.json<br/>the stable intermediate, in 5 ft tiles")]
+    IMP -.-> LSVG["out/layout.svg"]
+    LAY --> VER["citysmith verify<br/>optional: does it play?"]
+
+    subgraph BUILDSTEP["citysmith build"]
+        RAS["raster<br/>polygons to cells: footprints, doors, gates"]
+        PAL["palette<br/>semantic roles to real assets"]
+        BLD["builder<br/>cells to placements"]
+        CHK["verify<br/>measures the emitted boxes, not the plan"]
+        RAS --> BLD
+        PAL --> BLD
+        BLD --> CHK
+    end
+
+    LAY --> RAS
+    CAT --> PAL
+    CHK --> SLAB[("slab.txt chunks<br/>+ paste-order.txt")]
+    CHK -.-> RSVG["out/city-raster.svg"]
+
+    SLAB --> PASTE["Ctrl+V in TaleSpire<br/>every file at the same cursor cell,<br/>in the listed order, camera straight down"]
+    PASTE --> BOARD(["A town you can walk around"])
 ```
-forest_church.json ──▶ layout.json ──▶ raster ──▶ forest-r00c00+17.slab.txt ──▶ Ctrl+V
-  (Watabou export)      + layout.svg    + city-raster.svg   forest-r02c02+14.slab.txt
-                                                            forest-r04c02+20.slab.txt
-```
 
-## Prerequisites
+Three things in that diagram are load-bearing and easy to miss:
 
-- **TaleSpire, installed.** citysmith reads asset ids, names, tags and collider
-  bounds straight out of `<install>/Taleweaver/<pack-uuid>/index.json`, so
-  whatever packs you own are what it can build with. Nothing is bundled.
-- **Python 3.10+** (developed on 3.14).
-- **No dependencies.** The core is stdlib-only. `anthropic` is an optional
-  extra used by one command (`brief`); everything else works offline.
+- **`catalog.json` is built from *your* TaleSpire install** and is not
+  committed. Two people with different DLC will get different-looking towns
+  from the same layout, and that is by design — citysmith can only build with
+  what you own.
+- **`layout.json` is the stable intermediate.** It is plain JSON in 5 ft tiles.
+  Hand-edit it, keep it in version control, diff it. Everything downstream is
+  deterministic from it plus a seed.
+- **The paste order is not the filename order.** `build` writes
+  `<stem>-paste-order.txt` next to the slabs; follow it.
+
+---
+
+## Setup
+
+### Prerequisites
+
+| | |
+|---|---|
+| **TaleSpire, installed** | citysmith reads asset ids, names, tags and collider bounds straight out of `<install>/Taleweaver/<pack-uuid>/index.json`. Whatever packs you own are what it can build with. Nothing is bundled. |
+| **Python 3.10+** | Developed on 3.14. |
+| **Dependencies** | None. The core is stdlib-only. `anthropic` is an optional extra used by one command (`brief`); everything else works offline. |
+
+### Install
 
 ```bash
-pip install -e .          # or just run from the repo with python -m citysmith
+git clone https://github.com/jchallenger/citysmith.git
+cd citysmith
+pip install -e .
 ```
 
-## Quick start (end to end)
+Or skip installing and run `python -m citysmith ...` from the repo root.
 
-**1. Get a map.** Open <https://watabou.github.io/city-generator/>, generate a
-town you like, then use its export menu to save the **JSON** (GeoJSON) export.
-Verified against MFCG v0.11.5 exports. Call it `mytown.json`.
-
-**2. Index your TaleSpire assets.** Once per install, or after buying packs:
+### Index your assets (once per install, or after buying packs)
 
 ```bash
 python -m citysmith catalog build
 ```
 
 Writes `catalog.json`. It finds TaleSpire via Steam automatically; if it can't,
-set `TALESPIRE_PATH` or pass `--talespire-path "D:\SteamLibrary\steamapps\common\TaleSpire"`.
+set the `TALESPIRE_PATH` environment variable or pass
+`--talespire-path "D:\SteamLibrary\steamapps\common\TaleSpire"`.
 
-**3. Import the export into a scaled layout.**
+Check it worked:
+
+```bash
+python -m citysmith catalog search --group wall --tag stone --limit 5
+```
+
+---
+
+## Quick start
+
+**1 · Get a map.** Generate a town at <https://watabou.github.io/city-generator/>
+and use its export menu to save the **JSON** (GeoJSON) export. Fantasy Town
+Generator exports work too — citysmith sniffs which generator a file came from
+by reading its features, because **the file extension does not tell them
+apart** (both generators ship both `.json` and `.geojson`).
+
+**2 · Import it.**
 
 ```bash
 python -m citysmith import mytown.json
 ```
 
-Writes `out/layout.json` and `out/layout.svg`. The tile scale is *derived*: the
-map is anchored to a real median building width (`--house-ft`, default 35 ft),
-and the tile count follows. 35 is chosen for play: below about 30, most
-buildings are too small to stand a party in — at 20 only 31% of them clear a
-3×3 interior, at 35 it is 94%, and above 35 buys no further playability. `--margin-ft` (default 60) sets how much suburb is
-kept outside the walls; `--no-clip` keeps the entire export. Any playability
-warnings (buildings too small to fight in, streets too narrow) print here.
+Writes `out/layout.json` and `out/layout.svg`.
 
-**4. Check it plays before you build it** — optional but cheap:
+The tile scale is *derived*, not guessed. MFCG exports have no real-world
+units, so the map is anchored to a median building width (`--house-ft`, default
+35 ft) and the tile count follows. 35 is chosen for play: below about 30 most
+buildings are too small to stand a party in — at 20 ft only 31% clear a 3×3
+interior, at 35 ft 94% do, and above 35 buys nothing further. FTG states its
+own scale (1 unit = 1 metre) so nothing is inferred there; the two routes agree
+within 4% on every export tested.
+
+`--margin-ft` (default 60) sets how much suburb is kept outside the walls;
+`--no-clip` keeps the whole export. Playability warnings print here.
+
+**3 · Check it plays** — optional but cheap:
 
 ```bash
 python -m citysmith verify out/layout.json
 ```
 
-**5. Build the slabs.**
+**4 · Build the slabs.**
 
 ```bash
-python -m citysmith build out/layout.json --stem mytown
+python -m citysmith build out/layout.json --by-region --stem mytown
 ```
 
-Writes one file per chunk — `out/mytown-r00c00+17.slab.txt` and friends —
-plus `out/city-raster.svg`, and prints the verification report followed by a
-map of which chunk covers which tile range.
+Writes `out/mytown-rNNcNN.slab.txt`, `out/mytown-paste-order.txt` and
+`out/city-raster.svg`, then prints the verification report and a table of which
+chunk covers which tile range.
 
-Chunks are cut on a **spatial grid** and the printed map shows which cells are
-written and which were skipped as open country — on a typical town about a
-fifth of the map is empty field and is never emitted at all.
+**5 · Paste into TaleSpire.** Open each slab file, copy the whole contents, and
+in build mode press `Ctrl+V`. The slab arrives *in hand at the cursor*; commit
+it with a left press **held for about a fifth of a second** — a zero-duration
+click is swallowed by Unity's input polling.
 
-Detection and pasting pull opposite ways: a fine grid can see (and skip) more
-empty ground, but writing one file per cell would mean dozens of pastes. So
-`build` detects on a fine grid, then **packs** the surviving cells back up to
-the asset budget, walking the grid so each emitted slab is a contiguous run of
-neighbouring cells. Each file is therefore a connected swathe of the map — you
-can paste a subset and get a coherent piece of town, though the split is chosen
-by the byte budget, not by district boundaries.
+> **Read [docs/pasting-into-talespire.md](docs/pasting-into-talespire.md)
+> before your first paste.** The interaction is unforgiving and every failure
+> mode looks like the tool is broken rather than the input.
 
-Useful flags: `--style {medieval,cyberpunk}`, `--seed N`, `--storeys N`
+The three rules that matter most:
+
+1. **Pitch the camera straight down and leave it there.** A paste anchors on
+   the cursor's *ray hit*, so with the camera tilted, anything already on the
+   ground slides the anchor toward you.
+2. **Paste every file at the same cursor cell**, in the order
+   `paste-order.txt` lists. Every chunk carries the map's registration markers,
+   so they present an identical bounding box and assemble with no measuring.
+   The last file covers the anchor cell and must land last.
+3. **Empty the hand after each paste** with a right-click *tap*. A held
+   right-click reads as a drag and the slab stays in hand — so every later
+   click stamps another copy of the town.
+
+---
+
+## Build modes
+
+| Mode | Flag | What it is for |
+|---|---|---|
+| **Tiled** *(recommended)* | `--by-region` | One slab per map region, every layer together. Chunks tile the map without overlapping, so nothing is ever pasted over anything and no chunk can inherit another's height. |
+| Layered | *(default)* | Landscape first, then structures over it. Fewer, larger files, and lets you re-paste just the buildings after a change — at the cost of the second layer resting on the first. |
+| Per building | `--per-building` | One slab per building plus one for the rampart. Dozens of files; the mode for checking a single house without re-laying the town. |
+
+Other useful flags: `--style {medieval,cyberpunk}`, `--seed N`, `--storeys N`
 (ceiling on building height, default 3), `--no-roofs`, `--no-bridges`,
-`--max-assets N` (per-chunk asset cap), `--chunk-tiles N` (detection grid, 8
-skips more but emits more before packing), `--keep-open-country` to write the
-empty chunks too, `--crop X,Z,W,D` to build one region for a staged in-game
-test, `--scale N` for the raster SVG.
+`--max-assets N`, `--chunk-tiles N`, `--keep-open-country`,
+`--crop X,Z,W,D` (build one region for a staged in-game test), `--scale N`.
 
-**6. Paste into TaleSpire.** Open a slab file, copy the whole contents, and in
-build mode press `Ctrl+V`. The slab arrives in hand at the cursor — commit it
-with a left press held for about a fifth of a second. Every chunk is committed
-at the *same* grid cell without moving the camera; order does not matter, and
-you may paste a subset.
+---
 
-**Read [docs/pasting-into-talespire.md](docs/pasting-into-talespire.md) before
-your first paste.** The interaction is unforgiving and the failure modes look
-like the tool is broken.
+## What it actually builds
+
+**Buildings are dealt one of four fabrics** by kind, so importance reads off the
+architecture rather than off storey count:
+
+| Tier | Kinds | Walls | Roof |
+|---|---|---|---|
+| civic | temple, guildhall, manor, barracks | dressed castle stone, arched windows, fancy door | grey slate |
+| trade | tavern, shop, apothecary, smithy | timber frame, better door, glazed street front | terracotta tile |
+| common | house and everything else | timber frame, peasant door | thatch |
+| utility | warehouse, stable, shed | dark boarding, **one storey, no windows** | thatch |
+
+Glazing is keyed on which face a wall segment sits on — dense at the front,
+sparse on the flank, **never at the back** — and a building fronting a main
+street gets the show facade. Single-storey buildings get a lantern by the door
+where a porch would sit level with their own eaves.
+
+**The town wall** is a faced rampart 35 ft to the wall-walk and 45 ft to the top
+of the merlons, with square mural towers at every corner and flanking every
+gate. Gate passages are cut square through the band so the portcullis has
+straight jambs to hang on, and a stair runs up the inside of the wall at each
+tower — always on the inward side, because a stair on the field side of a town
+wall is a siege ramp for the enemy.
+
+---
 
 ## Outputs
 
@@ -109,34 +216,35 @@ like the tool is broken.
 | `catalog.json` | Your TaleSpire asset index. Machine-local; gitignored. |
 | `out/layout.json` | The imported town in 5 ft tiles: walls, gates, roads, districts, buildings, areas. The stable intermediate — hand-edit it if you like. |
 | `out/layout.svg` | Polygonal reference map of the import. |
-| `out/city-raster.svg` | The rasterised tile grid, with unreachable pockets in red, gates in yellow, added bridges in blue. This is the file to look at when something is wrong. |
-| `out/<stem>-rNNcNN[+N].slab.txt` | The pasteable chunks, base64 of gzipped binary. The name is the grid cell it starts at; `+N` means it spans N more cells. |
+| `out/city-raster.svg` | The rasterised tile grid, with unreachable pockets in red, gates in yellow, added bridges in blue. **This is the file to look at when something is wrong.** |
+| `out/<stem>-rNNcNN.slab.txt` | The pasteable chunks: base64 of gzipped binary. |
+| `out/<stem>-paste-order.txt` | The order to paste them in. Not alphabetical. |
 
 The procedural path additionally writes `out/city.json` / `city.svg`,
 `out/<site>.plan.json` / `.plan.svg`, and `out/<site>.slab.txt`.
 
+---
+
 ## Known limits
 
 - **30,720 compressed bytes per slab.** A whole town does not fit, so `build`
-  cuts it on a spatial grid. Every chunk carries a registration marker tile at
-  the *whole map's* origin so all chunks share one bounding box — paste them at
-  one anchor and they assemble, in any order. Move the camera between pastes
-  and they don't.
-- **Chunk size trades two ways.** Detection can only skip a region it can see,
-  so a fine grid skips more open country; pasting wants few files. `build`
-  detects fine and then packs surviving chunks back up to the asset budget,
-  walking the grid so each emitted slab is a contiguous region.
-- **1 tile = 5 ft, and a creature occupies one tile.** That is the scale
-  everything is derived from. A town whose median house is under ~4 tiles across
-  has no room to fight indoors; `import` warns when the derived scale lands there.
-- **Board limits:** 2000 × 2000 grid units, 1,000,000 assets. `verify` checks both.
+  cuts it into chunks. Every chunk carries the *whole map's* registration
+  markers so they share one bounding box — paste them at one anchor and they
+  assemble. Move the camera between pastes and they do not.
+- **1 tile = 5 ft, and a creature occupies one tile.** Everything is derived
+  from that. A town whose median house is under ~4 tiles across has no room to
+  fight indoors; `import` warns when the derived scale lands there.
+- **Board limits:** 2000 × 2000 grid units, 1,000,000 assets. `verify` checks
+  both.
 - **Pasting is the only ingestion path.** `talespire://` links do not import
   boards, and there is no file-drop or API. Everything goes through `Ctrl+V`.
 - **No creatures.** `creatureCount` is always 0 in the slabs we emit.
+- **No interiors on the town board.** `floorplan.py` builds them, but nothing
+  wires an interior onto a second board per building yet.
 - **No UI.** `cli.py` is a thin shell over the core modules; a UI would slot in
   without touching generation code, but it does not exist yet.
-- **Pasting is manual.** Each chunk is a separate `Ctrl+V` and commit; a
-  typical town is a handful of them.
+
+---
 
 ## The other pipeline: procedural city + interiors
 
@@ -152,9 +260,12 @@ python -m citysmith board out/city.json          # coarse 3D city shell
 ```
 
 `--size` takes `hamlet | village | town | city | metropolis` (48/72/104/144/200
-tiles) or a raw tile count. `sites` scores every building on encounter potential
-and shows its reasoning, so you can disagree with the ranking and see which
-signal to override. `pipeline` runs city → sites → plan → design in one command.
+tiles) or a raw tile count. `sites` scores every building on encounter
+potential and shows its reasoning, so you can disagree with the ranking and see
+which signal to override. `pipeline` runs city → sites → plan → design in one
+command.
+
+---
 
 ## Optional: natural language
 
@@ -165,18 +276,51 @@ python -m citysmith brief "a rainy harbour town run by three smuggling families"
 ```
 
 Claude only chooses generator parameters and writes GM notes. It never emits
-coordinates, asset ids, or slab bytes — all geometry is deterministic Python, so
-a bad model response gives you a boring city, never a broken one.
+coordinates, asset ids, or slab bytes — all geometry is deterministic Python,
+so a bad model response gives you a boring city, never a broken one.
+
+---
+
+## Tools
+
+`tools/` holds the workshop, not the product. Two are worth knowing about:
+
+```bash
+python tools/kit_index.py --complete      # which asset kits can build a house
+python tools/kit_index.py --kit Tavern    # everything in one kit
+```
+
+`kit_index.py` regenerates [docs/asset-index.md](docs/asset-index.md), the
+searchable dump of your library grouped by kit. **The kit is the catalog's
+`folder`** — `pack` is the DLC and `group_tag` is a form, so neither tells you
+whether two pieces belong together.
+
+The `*_probe.py` scripts each build one question as a slab you paste and look
+at — roof rotations, wall masses, corner pairings. The standing rule on this
+project is that an asset's shape is never assumed from its name or its
+measurements; it is probed and read from four sides. `tools/review.ps1` and
+`tools/ts.ps1` drive TaleSpire over Windows synthetic input to do that
+automatically (Windows only, and the game must be windowed).
+
+---
 
 ## Docs
 
 - [docs/pasting-into-talespire.md](docs/pasting-into-talespire.md) — how to get
   a slab into the game without fighting it.
-- [docs/asset-conventions.md](docs/asset-conventions.md) — the footprint,
-  pinning, normalization and roof-rotation rules that keep geometry valid.
+- [docs/asset-conventions.md](docs/asset-conventions.md) — footprint, pinning,
+  normalization and roof-rotation rules.
+- [docs/asset-index.md](docs/asset-index.md) — generated index of the asset
+  library, by kit.
+- [docs/ftg-geojson-import.md](docs/ftg-geojson-import.md) — the Fantasy Town
+  Generator schema, reverse-engineered.
 - [docs/slab-format-v2.md](docs/slab-format-v2.md) — BouncyRock's official slab
   format spec, kept alongside the implementation in `citysmith/slab.py`.
-- [CLAUDE.md](CLAUDE.md) — internal engineering notes and module map.
+- [CLAUDE.md](CLAUDE.md) — internal engineering notes, module map, and a long
+  record of what was tried and why it failed. Read this before changing
+  generation code.
+
+---
 
 ## Testing
 
@@ -184,18 +328,12 @@ a bad model response gives you a boring city, never a broken one.
 python -m pytest -q
 ```
 
-146 tests. The slab codec is tested against real TaleSpire slabs in
-`tests/fixtures/` — decoding and re-encoding reproduces the original binary byte
-for byte. Generator tests assert invariants (no overlapping buildings, no
-unreachable rooms, walls resting on floors) rather than exact output, so the
-aesthetics can change freely but real bugs cannot come back silently.
-
-## Searching your assets
-
-```bash
-python -m citysmith catalog search --group wall --tag stone --limit 10
-python -m citysmith catalog search thatched --kind tile
-```
+205 tests. The slab codec is tested against real TaleSpire slabs in
+`tests/fixtures/` — decoding and re-encoding reproduces the original binary
+byte for byte. Generator tests assert *invariants* (no overlapping buildings,
+no unreachable rooms, walls resting on floors, no window on the back of a
+building) rather than exact output, so aesthetics can change freely but real
+bugs cannot come back silently.
 
 ## Verifying placement in-game
 
@@ -205,7 +343,7 @@ python -m citysmith calibrate
 
 Emits `out/calibrate.slab.txt`: a 9×3 floor pad with four walls in the middle
 row, each hugging one named edge of its own tile. Paste it, look straight down,
-and confirm the rotation convention still holds for your packs.
+and confirm the rotation convention holds for your packs.
 
 ## License
 

@@ -136,6 +136,19 @@ IGNORED_EDGES = frozenset({"INVISIBLE", "BORDER", "WATERFRONT"})
 WALL_EDGES = frozenset({"STONE_WALL"})
 FENCE_EDGES = frozenset({"STONE_FENCE"})
 
+#: Town wall thickness in metres. FTG draws its wall as a bare polyline and
+#: ships no thickness, so this is chosen -- and it is **not** a free parameter.
+#:
+#: A rampart is built as a full-cell core with thin curtain pieces hung on the
+#: faces that show (`build.is_curtain_piece`). At :class:`Layout`'s 2.0-tile
+#: default the band is two cells wide, so on a circuit that runs diagonally
+#: almost every cell is an edge cell, there is nothing behind the thin pieces,
+#: and `verify.check_placements` fails 149 of East Tradebourne's 1605 wall
+#: cells for daylight through the masonry. At 4.5 m the band carries a core.
+#: MFCG arrives at the same place from its own metadata: Forest Church's
+#: `wallThickness` works out at 2.77 tiles.
+DEFAULT_WALL_THICKNESS_M = 4.5
+
 #: ``backgroundType`` -> :class:`LayoutArea` kind, or ``None`` to drop it.
 #:
 #: ``GRASS`` is dropped on purpose: it is the base sheet under everything (92-94%
@@ -423,6 +436,7 @@ def import_layout(
         source="ftg",
         units_per_tile=units_per_tile,
         feet_per_unit=per_unit,
+        wall_thickness=max(1.0, DEFAULT_WALL_THICKNESS_M * FEET_PER_METRE / TILE_FEET),
     )
     layout.width = (mx - ox) / units_per_tile
     layout.depth = (my - oy) / units_per_tile
