@@ -1159,6 +1159,20 @@ def _even_ceil(v: float) -> float:
     return 2.0 * math.ceil(v / 2.0)
 
 
+def _kit_of(name: str) -> str:
+    """The kit a piece belongs to, which is only ever in its name.
+
+    Nothing in the catalog data separates one family from another: `group`
+    names a *form* -- "corner", "wall" -- and the same tag covers castle stone,
+    rural boarding and a spaceship bulkhead. The kit is in the name, the same
+    place `is_curtain_piece` reads "diag" and "half" from. First word, because
+    that is where every family in this catalog puts it: "Rural Corner",
+    "Brick wall corner", "castle wall corner 1x1 base", "md_wall_corner_1x1_01".
+    """
+    head = name.strip().lower().replace("-", " ").replace("_", " ").split()
+    return head[0] if head else ""
+
+
 def _anchor_last(kept: list[SlabChunk], whole: Slab,
                  byid: dict[str, Asset], dx: float, dz: float) -> list[SlabChunk]:
     """Put the chunk covering the paste anchor at the end of the order.
@@ -2775,17 +2789,40 @@ def build_from_tilemap(
         # the wall it stacks beside, is rejected rather than placed: the first
         # would overhang its neighbours and drag the whole board off the tile grid,
         # the second would break the floor line at every storey above the ground.
-        def _usable_corner(asset):
-            if asset is None:
+        def _usable_corner(asset, wall):
+            if asset is None or wall is None:
                 return None
             if (asset.size_x, asset.size_z) != (1.0, 1.0):
                 return None
             if abs(asset.size_y - ext_wall.size_y) > 1e-6:
                 return None
+            # **And it has to come from the wall's own kit.** Under seed 33 the
+            # facade deals `Village Roof Side Wall 01/02` while every corner
+            # variant resolves to `Rural Corner` -- cream timber-framed panels
+            # with dark horizontal boarding at all four corners, a different
+            # material and a different relief. Probed side by side against the
+            # same box mitred from its own panels (`tools/corner_probe.py`,
+            # read from two faces): the mismatch is obvious from any angle and
+            # the mitre is clean, because the Village panel carries an edge
+            # timber that meets its neighbour as a corner post.
+            #
+            # There is no Village corner to find -- that family is entirely
+            # `group='roof'`, three flat panels and nothing else. Rural and
+            # Brick each ship a wall *and* a matching corner and neither has a
+            # 1-cell window, which is why the facade is Village in the first
+            # place. So when the kits disagree the corner is dropped rather
+            # than swapped, and the cell falls back to a panel per exposed
+            # side. That costs two wall ends in one square, which is what the
+            # corner piece was introduced to avoid -- but a buried seam warns
+            # where a two-material corner shows.
+            if _kit_of(asset.name) != _kit_of(wall.name):
+                return None
             return asset
 
-        corner_variants = [_usable_corner(palette.resolve("wall_corner", v)) for v in range(3)]
-        civic_corner = _usable_corner(palette.resolve("wall_corner_civic"))
+        corner_variants = [_usable_corner(palette.resolve("wall_corner", v),
+                                          wall_variants[v]) for v in range(3)]
+        civic_corner = _usable_corner(palette.resolve("wall_corner_civic"),
+                                      civic_wall or ext_wall)
 
         plan = footprints(tm)
         corner_ok = {
@@ -2862,10 +2899,18 @@ def build_from_tilemap(
         if upper is not None:
             for bid, cells_xy in sorted(plan.items()):
                 b.group = bid
-                # Through the top storey, not up to it: the highest slab is the
-                # ceiling the roof seats on. Each sits in the gap *below* its
-                # storey's wall course, resting on the wall beneath.
-                for level in range(1, storeys_of(tm, bid, storeys) + 1):
+                # Up to the top storey, not through it. **An attic needs no
+                # floor**: the highest slab used to go in as "the ceiling the
+                # roof seats on", but the roof seats on the wall head, not on
+                # it, so all it did was deck the roof void -- a room nothing
+                # stands in, under a roof you cannot see past. On Forest Church
+                # that is one slab per cell per building, over a thousand tiles
+                # spent on a surface no one sees. A single-storey cottage now
+                # gets no upper slab at all, which is what a cottage is.
+                #
+                # Each remaining slab sits in the gap *below* its storey's wall
+                # course, resting on the wall beneath.
+                for level in range(1, storeys_of(tm, bid, storeys)):
                     y = top + level * storey_h - deck
                     for x, z in sorted(cells_xy):
                         b.add(place_tile(upper, x, z, y))

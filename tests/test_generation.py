@@ -936,6 +936,42 @@ def test_a_building_straddling_a_chunk_line_stays_in_one_chunk():
     assert all(ch.buildings == 0 for ch in plan.chunks if ch.layer != STRUCTURE)
 
 
+def test_an_attic_gets_no_floor():
+    """The roof seats on the wall head, not on a deck, so a slab at the top
+    storey only floors the roof void -- a room nothing stands in, under a roof
+    you cannot see past. A single-storey cottage gets no upper slab at all; a
+    two-storey house gets exactly one, the floor you walk on upstairs."""
+    from citysmith.build import build_from_tilemap, footprints
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    upper = palette.resolve("floor_upper") or palette.require("floor")
+
+    def decks(floors: int) -> int:
+        tm = TileMap.blank(16, 16)
+        for x in range(4, 9):
+            for z in range(4, 8):
+                tm.building[z][x] = "house-0001"
+                tm.surface[z][x] = FLOOR
+        tm.floors["house-0001"] = floors
+        _find_perimeters(tm, None)
+        _place_doors(tm, None)
+        b = build_from_tilemap(tm, palette, storeys=floors, roofs=True)
+        cells = set(footprints(tm)["house-0001"])
+        # Ground floors are laid in the landscape pass and sit at y=0; anything
+        # above that in the building's own cells is an upper deck.
+        ys = {round(p.y, 3) for p in b.placements
+              if p.asset_id == upper.id and p.y > 0.01
+              and (int(p.x), int(p.z)) in cells}
+        return len(ys)
+
+    assert decks(1) == 0, "a one-room cottage was given an attic floor"
+    assert decks(2) == 1, "a two-storey house should have exactly one deck"
+    assert decks(3) == 2
+
+
 def test_per_building_emits_one_slab_per_building_and_one_for_the_wall():
     """A chunk of forty buildings lands or fails as one thing, and nothing
     about the result says which building went wrong. Cut by building instead

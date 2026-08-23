@@ -1,0 +1,339 @@
+# Plan: importing Fantasy Town Generator exports
+
+Status: **plan only, nothing implemented.** This is the reference for the second
+import format and the staged work to support it. `citysmith/mfcg.py` and the
+`import` command are untouched.
+
+Companion docs: `CLAUDE.md` (engineering notes), `docs/asset-conventions.md`
+(footprints and roles), `docs/pasting-into-talespire.md` (the paste procedure
+every size estimate here is constrained by).
+
+## 1. What arrived
+
+Two new exports, plus one already sitting in `E:/Downloads` from an earlier
+session that turns out to be the same format:
+
+| File | Features | Buildings | Edges | Backgrounds | Water | Canvas |
+|---|---|---|---|---|---|---|
+| `Pelvesthollow.geojson` | 827 | 41 | 676 | 108 | 2 | 1500 x 1500 |
+| `Graybank.geojson` | 1867 | 159 | 1463 | 241 | 4 | 2000 x 2000 |
+| `East Tradebourne.geojson` | 5543 | 1007 | 3770 | 761 | 5 | 4000 x 4000 |
+
+They are **not** MFCG. They are [Fantasy Town Generator](https://docs.fantasytowngenerator.com/useSettlements/export/)
+(FTG) GeoJSON exports — confirmed from FTG's own export docs, which describe a
+GeoJSON containing all the backgrounds, edges, buildings and their outlines as
+coordinates, and state the coordinate system is FTG-internal with **1 unit =
+1 metre**. FTG does not publish the property schema; section 2 is reverse
+engineered from the three files and is the spec until something better exists.
+
+Pelvesthollow is a hamlet (41 buildings, all wood, residences and farms).
+Graybank is a village (159 buildings, ten types, one stone building).
+East Tradebourne is a town (1007 buildings, fourteen types, a partial town wall,
+five bridges, a market square) and is the stress case for everything below.
+
+## 2. The format
+
+### 2.1 Telling the two formats apart
+
+**The file extension is not a discriminator and must not be used as one.** All
+four combinations exist on this machine already:
+
+| File | Extension | Format |
+|---|---|---|
+| `samples/forest_church.json` | `.json` | MFCG |
+| `E:/Downloads/candlewell_church.json` | `.json` | MFCG |
+| `E:/Downloads/East Tradebourne.geojson` | `.geojson` | FTG |
+| `E:/Downloads/Pelvesthollow.geojson` | `.geojson` | FTG |
+
+Both are `FeatureCollection`s. Sniff the first feature instead:
+
+- **MFCG** — features carry a top-level `"id"` string from a closed vocabulary
+  (`values`, `earth`, `buildings`, `walls`, `roads`, ...) and have no
+  `properties`.
+- **FTG** — features have no top-level `id`; they carry
+  `properties.type` in `{BUILDING, EDGE, BACKGROUND, WATER}` and a
+  `properties.id` integer.
+
+Neither can be mistaken for the other, and the check is one dict lookup.
+
+### 2.2 Feature schema
+
+```
+Feature.geometry : Polygon (single ring, closed) | LineString (exactly 2 points)
+Feature.properties:
+  id            int, 1..N, unique *per type*, NOT globally unique
+  type          BUILDING | EDGE | BACKGROUND | WATER
+
+  BUILDING      name           str, authored ("The Halfling and the Fox")
+                buildingType   enum, see below
+                material       WOOD | STONE_BRICK | PAVEMENT
+  EDGE          edgeType       enum, see below
+  BACKGROUND    backgroundType enum, see below
+                raised         bool
+  WATER         (no further properties)
+```
+
+There is **no `values`/metadata feature** — no version, no settlement name, no
+road width, no wall thickness. MFCG gave all of those. The settlement name is
+only in the filename, and every width is ours to choose (§3.3).
+
+### 2.3 Vocabularies (union over the three files)
+
+`buildingType` — RESIDENCE, SHOP, ARTISAN, FARM, INDUSTRIAL, TAVERN, INN,
+SERVICE, WAREHOUSE, RELIGIOUS, EDUCATIONAL, LAW_ENFORCEMENT, FACTION, MARKET.
+
+`edgeType` — INVISIBLE, WATERFRONT, BORDER, STONE_FENCE, STONE_WALL,
+MAIN_ROAD, ROAD, SMALL_ROAD, DIRT_ROAD, TRAIL.
+
+`backgroundType` — GRASS, LAWN_TEXTURE_TYPE, FOREST, WHEAT, GRAIN, TILLED,
+SHEEP_TEXTURE_TYPE, PIGS_TEXTURE_TYPE, CATTLE_TEXTURE_TYPE, ROAD_TEXTURE_TYPE.
+
+The vocabulary **grew between files**: `STONE_WALL`, `ROAD_TEXTURE_TYPE`,
+`PAVEMENT`, `raised: true`, and five building types appear only in East
+Tradebourne. Assume more exist. The importer must map an unknown enum value to a
+safe default **and report it by name**, never raise and never silently drop —
+a dropped feature is invisible on the board, and that is the failure mode
+`CLAUDE.md` records four separate times.
+
+### 2.4 Measured invariants
+
+Everything here was measured across all three files, not assumed:
+
+- Every Polygon has exactly **one ring**, and it is **closed** (first point ==
+  last). No holes, no MultiPolygon. MFCG's unclosed-ring and
+  inconsistent-nesting workarounds are not needed.
+- Every EDGE is a **2-point segment**, not a polyline. Roads must be chained
+  into paths through shared endpoints before they can be given a width.
+- The EDGE layer is the **boundary graph of the BACKGROUND polygons**: 93–96%
+  of edge endpoints are also background-ring vertices. `INVISIBLE` is a parcel
+  boundary that is simply not drawn — it is the largest or second largest class
+  in every file (351/676, 613/1463, 1324/3770) and is not geometry we want.
+- Vertices are shared exactly, so chaining can key on the raw coordinate pair;
+  no snapping tolerance is needed. Road-only vertex degree is overwhelmingly 2.
+- **BACKGROUND polygons overlap, but never more than two deep.** A 60x60 sample
+  grid over each canvas: depth is 0, 1 or 2 at every point, and every depth-2
+  combination is `GRASS` plus one other. GRASS is the base sheet (92–94% of
+  canvas); FOREST, the field textures and LAWN sit on it, one at a time.
+  So there is **no z-order to resolve**: paint GRASS, then let anything else
+  win. (File order groups by type and is *not* a reliable draw order — in
+  Pelvesthollow FOREST is listed last, in Graybank LAWN is listed first, and
+  both need to be on top. Do not use it.)
+- Coordinates are continuous floats; there is no lattice to snap to.
+- Buildings are mostly rotated quads (883/1007 four-cornered in East
+  Tradebourne), occasionally 5–8, once 14.
+- `raised: true` occurs on **exactly five features across all three files**, and
+  every one is a ~20x20 m `ROAD_TEXTURE_TYPE` quad. Those are the **bridges**.
+  Nothing else is ever raised.
+- `STONE_WALL` in East Tradebourne is 47 segments / 49 vertices with degree
+  histogram `{1: 4, 2: 45}` — **two open polylines**, 1220 m total, not a closed
+  circuit. `Layout.walls` currently holds closed rings.
+
+### 2.5 Scale — and a pleasing cross-check
+
+FTG's docs give 1 unit = 1 m, so `feet_per_unit = 3.28084` and
+`units_per_tile = 5 / 3.28084 = 1.524`.
+
+Independently, running `resolve_scale`'s median-house-frontage anchor at the
+CLI's `--house-ft 35` default over these files gives **1.49, 1.47 and 1.53**
+units per tile. The declared metric scale and citysmith's playability anchor
+agree to within 4%, which is worth stating plainly: an FTG house has a median
+short side of 10.3–10.7 m = **34–35 ft**, and citysmith's 35 ft anchor was
+chosen for play, with no knowledge of FTG. They landed on the same number from
+opposite directions.
+
+**So FTG imports should default to the native metric scale**
+(`feet_per_unit = 3.280839895`), not to a derived anchor. `--house-ft` and
+`--feet-per-unit` stay available as overrides. This is the first import path in
+the project with a documented real-world scale; take it.
+
+## 3. Mapping onto `Layout`
+
+### 3.1 What lands where
+
+| FTG | citysmith |
+|---|---|
+| `BUILDING` polygon | `LayoutBuilding.ring` |
+| `buildingType` | `LayoutBuilding.kind` via table (§3.2) |
+| `name` | **new** `LayoutBuilding.name` field |
+| `material: STONE_BRICK` | select the existing `wall_civic` / `door_civic` / `wall_corner_civic` roles |
+| `WATER` polygon | `LayoutArea("water")` |
+| `BACKGROUND: FOREST` | `LayoutArea("park")` today; wants a `forest` kind |
+| `BACKGROUND: WHEAT/GRAIN/TILLED` | `LayoutArea("field")` |
+| `BACKGROUND: SHEEP/PIGS/CATTLE` | `LayoutArea("field")` today; wants a `pasture` kind |
+| `BACKGROUND: LAWN` | `LayoutArea("park")` |
+| `BACKGROUND: GRASS` | nothing — it is the base sheet `raster.py` already lays |
+| `BACKGROUND: ROAD_TEXTURE_TYPE`, `raised: false` | `LayoutArea("plaza")` |
+| `BACKGROUND: ROAD_TEXTURE_TYPE`, `raised: true` | bridge deck — `bridge_deck` role, already pinned to `Harbor Middle 06` |
+| `EDGE: MAIN_ROAD/ROAD/SMALL_ROAD/DIRT_ROAD` | `LayoutRoad(kind="road")`, chained, widths per §3.3 |
+| `EDGE: TRAIL` | `LayoutRoad(kind="trail")` — **new kind**, see §3.3 |
+| `EDGE: STONE_WALL` | `Layout.walls`, but as **open** polylines |
+| `EDGE: STONE_FENCE` | new `field_wall` role (drystone), see §4 |
+| `EDGE: WATERFRONT` | shoreline; redundant with the water polygons, ignore at first |
+| `EDGE: BORDER` | canvas edge, ignore |
+| `EDGE: INVISIBLE` | ignore |
+| *(nothing)* | `Layout.districts` — FTG has no wards |
+| *(nothing)* | `Layout.gates` — no gate is marked |
+| *(nothing)* | trees — FOREST is a texture polygon, so trees must be scattered |
+
+### 3.2 Building kinds
+
+The big win of this format: **types and names are authored, not guessed.**
+`mfcg.py` currently invents wards from radial bands (`_BANDS`) and then rolls a
+weighted kind per ward (`_DISTRICT_BUILDINGS`). For FTG none of that runs — the
+export says what each building is, and gives it a name. Proposed table:
+
+```
+RESIDENCE       -> house       SHOP        -> shop      TAVERN  -> tavern
+INN             -> tavern      ARTISAN     -> smithy    SERVICE -> shop
+INDUSTRIAL      -> warehouse   WAREHOUSE   -> warehouse FARM    -> stable
+RELIGIOUS       -> temple      EDUCATIONAL -> guildhall FACTION -> guildhall
+LAW_ENFORCEMENT -> barracks
+MARKET          -> NOT A BUILDING (see below)
+unknown         -> house, and print the unmapped value
+```
+
+**Trap: `MARKET` + `material: PAVEMENT` is a plaza, not a building.** East
+Tradebourne's "Warden Market" is a 1350 m² polygon typed `BUILDING`. Built as a
+building shell it becomes a roofed box over the market square. It has to become
+`LayoutArea("plaza")`. The discriminator is `material == "PAVEMENT"`; treat
+`buildingType == "MARKET"` as corroboration, not as the test, since the
+vocabulary grows.
+
+Downstream, `sites.py` scores by kind and should keep doing so — but the
+authored `name` should ride along into the site report and the brief, because
+"The Halfling and the Fox" is a better encounter hook than "tavern-0042".
+
+### 3.3 Widths, which we now have to invent
+
+FTG ships no `roadWidth`. Proposed, in metres, with the tile count at 1.524
+units per tile:
+
+| edgeType | width | tiles |
+|---|---|---|
+| `MAIN_ROAD` | 6.0 m | 3.9 |
+| `ROAD` | 4.5 m | 3.0 |
+| `SMALL_ROAD` | 3.0 m | 2.0 |
+| `DIRT_ROAD` | 3.0 m | 2.0 |
+| `TRAIL` | 1.5 m | 1.0 |
+
+`check_playability` warns when the widest road is under `MIN_ROAD_TILES` (2.0).
+A 1-tile trail is a footpath and is *correct* at one tile — so it must be a
+separate `kind` the check skips, not a narrow road that trips it.
+
+## 4. The size problem, which is the real one
+
+The whole canvas is fields. Cropping is not a nicety here; it is the difference
+between a board and an impossibility. Forest Church is the yardstick: 186.5 x
+179.1 tiles = 33,411 tiles, emitted as 9 tiled chunks — about 3,700 tiles per
+chunk against the 30,720-byte cap.
+
+| Export | Crop | Buildings | Metres | Tiles | Total | ≈ chunks |
+|---|---|---|---|---|---|---|
+| Pelvesthollow | all | 41/41 | 352 x 320 | 231 x 210 | 48,500 | 13 |
+| Pelvesthollow | **core** | 35/41 | 217 x 230 | 142 x 151 | 21,500 | **6** |
+| Graybank | all | 159/159 | 1299 x 1544 | 853 x 1013 | 864,000 | 233 |
+| Graybank | **core** | 150/159 | 610 x 415 | 400 x 272 | 109,000 | **29** |
+| East Tradebourne | all | 1007/1007 | 1160 x 1991 | 761 x 1307 | 995,000 | 268 |
+| East Tradebourne | **core** | 671/1007 | 1072 x 857 | 704 x 563 | 396,000 | **107** |
+
+"core" is single-link clustering of building centroids at 60 m. The outliers are
+a handful of isolated farms that drag the bounding box across the whole canvas —
+Graybank's 9 stragglers cost 755,000 tiles.
+
+`mfcg.import_layout` crops to `walls ∪ buildings + margin`. On FTG that is the
+"all" row: correct by its own logic, catastrophic in practice. **The clip window
+has to come from the settled core, not the building bounding box.**
+
+The fences make the same argument twice. Total `STONE_FENCE` run:
+
+| Export | Whole canvas | Inside the core crop |
+|---|---|---|
+| Pelvesthollow | 1,347 tiles | — |
+| Graybank | 18,728 tiles | 1,042 (6%) |
+| East Tradebourne | 92,638 tiles | 6,931 (7%) |
+
+East Tradebourne's field walls alone are **three times Forest Church's entire
+board**. The core crop removes 93–94% of that, which is the whole answer, but
+`field_wall` still deserves a cap and a `--no-fences` escape.
+
+Even cropped, Graybank at 29 chunks and East Tradebourne at 107 are far past
+Forest Church's 9, and every chunk is a hand-driven paste
+(`docs/pasting-into-talespire.md`). Pelvesthollow at 6 chunks is comfortable and
+should be the first target.
+
+## 5. Decisions to take before coding
+
+1. **How much town is one board?** A 107-chunk paste is not a session. Options,
+   in rough order of appeal: (a) a crop radius, `--radius-m`, around the centre;
+   (b) build the core cluster only and offer named sub-crops; (c) accept the
+   chunk count for towns and lean on `--per-building` for review. This needs a
+   call; everything else here is mechanical.
+2. **Where does FTG live in the code?** A sibling `citysmith/ftg.py` with a
+   shared `citysmith/importers.py` sniffer is the obvious shape — `mfcg.py` is
+   588 lines and heavily MFCG-specific, and forcing both through one function
+   would make it worse. `Layout` is already the common currency.
+3. **`import` or `import --format`?** Recommend: `citysmith import` sniffs and
+   dispatches automatically, with `--format mfcg|ftg` to override. The sniff is
+   unambiguous (§2.1), and a wrong guess would be loud rather than silent.
+4. **New `LayoutArea` kinds** (`forest`, `pasture`, `lawn`) plus the palette
+   roles behind them, or fold them into `field`/`park` for now? Folding is cheap
+   and loses exactly the thing that makes FTG worth importing.
+
+## 6. Staged work
+
+Each stage ends with something measurable, in the project's own idiom — measure
+the artifact, not the plan.
+
+**Stage 1 — sniff and dispatch.** `citysmith/importers.py` with
+`detect_format(path)` and a dispatching `import_layout`. `mfcg.py` unchanged.
+*Accepts when:* all four files on this machine classify correctly and a garbage
+file gives a named error, covered by a unit test.
+
+**Stage 2 — geometry in.** `citysmith/ftg.py`: buildings, water, backgrounds,
+chained roads. Metric scale by default. Core-cluster crop. No fences, no walls,
+no bridges yet.
+*Accepts when:* `import` on Pelvesthollow writes a `layout.json` and an SVG that
+reads as the same village as FTG's own PNG, side by side, and
+`check_playability` is clean.
+
+**Stage 3 — types and names.** The §3.2 table, the `name` field, the
+PAVEMENT/plaza rule, `material: STONE_BRICK` → civic roles, unknown-value
+reporting.
+*Accepts when:* `sites` on Graybank ranks its inn, its two taverns and its one
+religious building by their authored names, and East Tradebourne's Warden Market
+appears as a plaza with no roof over it.
+
+**Stage 4 — build it.** Rasterise and emit for Pelvesthollow. Paste it.
+*Accepts when:* `review.ps1 360` on the pasted board shows the ground as one
+continuous sheet, buildings seated flush, and a cutaway (`N`) through a wall
+that is solid — the same bar Forest Church had to clear.
+
+**Stage 5 — the extras.** `STONE_FENCE` as `field_wall` (capped), `STONE_WALL`
+as open wall polylines, `raised` ROAD_TEXTURE quads as bridge decks, trees
+scattered into FOREST polygons, `TRAIL` as a 1-tile path.
+*Accepts when:* each is visible on a board and orbited from four sides — the
+drystone piece in particular is a wall asset, and `CLAUDE.md` records three bad
+wall picks in a row chosen from a single camera angle.
+
+**Stage 6 — scale up.** Graybank, then whatever §5.1 decides for East
+Tradebourne.
+
+## 7. Fixtures and tests
+
+`tests/fixtures/` holds real TaleSpire slabs as codec ground truth; the import
+side has no equivalent. Add one, and keep it small — Pelvesthollow is 414 KB,
+which is reasonable to commit, or cut a ~20-building corner of it.
+
+Tests worth writing, all invariant-shaped rather than golden-output:
+
+- format detection over both formats and both extensions
+- every ring closed, every edge a 2-point line (guards §2.4 if FTG changes)
+- an unknown `buildingType` / `edgeType` / `backgroundType` imports without
+  raising, and is reported
+- background depth never exceeds 2, and a depth-2 point always includes GRASS
+- no two imported buildings overlap. There are 1251 *bounding-box* overlaps in
+  East Tradebourne; whether any polygons actually overlap is unverified, and
+  this test is how we find out
+- the core crop keeps ≥90% of buildings and cuts the window by the expected
+  order of magnitude on Graybank
+- metric scale: a median FTG house measures 34–35 ft across after import

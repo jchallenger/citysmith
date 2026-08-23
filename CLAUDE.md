@@ -558,6 +558,41 @@ shape instead of reading it. The rules that fall out:
   causeway read as a fortification. `bridge_deck` is pinned to
   `Harbor Middle 06`.
 
+- **A corner has to come from the wall's own kit, and sometimes there isn't
+  one.** Under seed 33 the facade deals `Village Roof Side Wall 01/02` and
+  every `wall_corner` variant resolved to `Rural Corner`: cream timber-framed
+  panels with dark horizontal boarding at all four corners of every common
+  house. `tools/corner_probe.py` builds the shape the generator actually makes
+  -- a closed two-storey box with four outside corners -- one per candidate
+  pairing, and read from two faces the mismatch is obvious from any angle.
+  **There is no Village corner to find.** That family is entirely
+  `group='roof'`: three flat panels, one of which is the only 1-cell window in
+  the medieval set, and nothing else. Rural and Brick each ship a wall *and* a
+  matching 1x1 corner, and neither has a 1-cell window -- which is why the
+  facade is Village to begin with. So `_usable_corner` now requires the
+  corner's kit to match the wall's (`_kit_of`, first word of the name, because
+  `group` names a form and not a family), and where they disagree the corner
+  is dropped and the cell falls back to a panel per exposed side. Mitred, the
+  Village panel's own edge timber meets its neighbour as a corner post and
+  reads clean. Civic keeps its corner piece: `castle wall 1x1` and
+  `castle wall corner 1x1 base` are one kit already.
+  **The cost is buried geometry**, which is what the full-cell corner was
+  introduced to avoid: two panels in one square took `tile_interpenetration`
+  from 265 pairs to 1,138. It warns rather than fails, and the harm it names
+  -- "a seam that shifts with the camera" -- comes from *coplanar* faces;
+  two panels meeting at right angles interpenetrate without ever showing one.
+  Worth teaching the check about perpendicular corner panels before the count
+  hides something real.
+
+- **An attic needs no floor.** Upper decks used to run *through* the top
+  storey, on the reasoning that the highest slab was "the ceiling the roof
+  seats on". The roof seats on the wall head, not on the slab, so all that
+  slab did was floor the roof void: a room nothing stands in, under a roof you
+  cannot see past. It is one tile per cell per building -- 1,627 of them on
+  Forest Church, and ~900 bytes off the largest chunk. Decks now run `1..floors`
+  exclusive, so a single-storey cottage gets no upper slab at all, which is
+  what a cottage is. `test_an_attic_gets_no_floor` guards it.
+
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**
 
