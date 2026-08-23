@@ -102,22 +102,63 @@ paste is the only way in. Plan around it.
 
 ## Bindings worth knowing
 
-| Key | Does |
-|---|---|
-| `B` | toggle build mode |
-| `Ctrl+V` | paste slab into hand |
-| left press (held) | commit what is in hand |
-| right-click | clear the hand |
-| `Ctrl+Z` | undo |
-| `X` + drag | select |
-| left-click | pick up a placed asset |
-| middle-drag | rotate camera |
-| scroll | zoom |
-| `Shift` + scroll | raise / lower |
-| `F2` | recentre |
-| `Space` | menus |
-| `F1` | help — a video overlay; it does not screen-capture |
-| `Alt+Enter` | toggle windowed / fullscreen |
+Read off the game's own hint bar, which is the authority here — and the reason
+the window must be sized to fit the desktop, because the bar is clipped
+otherwise.
+
+**The modifier keys mean different things depending on whether your hand is
+empty.** Same chord, different target. This is the single most confusing thing
+about driving TaleSpire, and it is why "nudge it down a course" once spent a
+whole session sliding a slab sideways instead.
+
+| Chord | Hand empty → the camera | Holding something → the object |
+|---|---|---|
+| `Ctrl` + scroll | move camera **vertically** | move object **vertically** |
+| `Shift` + scroll | — | move object **on the plane** (horizontal!) |
+| `Alt` + scroll | — | **rotate** object in place |
+| scroll | zoom | zoom |
+
+The *holding* column is driven and verified (`ts.ps1 nudge -Mode
+vertical|plane|rotate`). The *hand empty* column is read off the hint bar and
+has **not** been driven — treat it as a lead, not a measurement.
+
+*Everything* below is unconditional.
+
+| Input | Does | Duration matters? |
+|---|---|---|
+| `Ctrl+V` | paste slab into hand | — |
+| left press | commit what is in hand | **hold ~0.2 s** — an instant click is swallowed |
+| right-click | clear the hand | **tap ~40 ms** — a ~250 ms hold reads as a drag and the slab stays in hand |
+| left-click | pick up a placed asset | — |
+| `W`/`A`/`S`/`D` | fly the camera | **hold** — velocity ramps; 0.4 s crawls, 3 s crosses a map |
+| `Q` / `E` | rotate the camera (hint bar; not driven) | — |
+| left-drag | pan the camera | **slow** — 60 steps × 40 ms tracks; 24 × 16 ms outruns it and registers as nothing |
+| middle-drag | rotate camera | — |
+| `Ctrl` + right-drag | set the build **elevation plane** | — |
+| right-hand vertical track | camera **height** slider — goes far higher than the wheel | drag it in steps, not one throw |
+| `B` | toggle build mode | — |
+| `G` | raise a build plane — **a paste snaps to it instead of the ground** | persists across new boards |
+| `N` | cut box — removes a region so the *section* shows | persists across new boards |
+| `X` + drag | selection marquee | — |
+| `Ctrl+Z` | undo | — |
+| `F2` | recentre | — |
+| `Space` | raise the HUD (a **toggle** — pressing it again closes it) | — |
+| `F1` | help — a video overlay; it does not screen-capture | — |
+| `Alt+Enter` | toggle windowed / fullscreen | — |
+
+Four traps behind that table, each of which cost real time:
+
+- **Zoom-out is capped** well short of a large map. Raising the camera on the
+  right-hand slider is how a whole quarter fits one frame; the wheel cannot do
+  it. To review one district up close, build a `--crop` onto its own board.
+- **`G` and `N` survive making a new board.** A build plane left up makes every
+  chunk land a course high with nothing wrong in the file; a cut box left on
+  reads as a rectangular hole in the terrain with the trees still standing in
+  it. Check them before believing a defect.
+- **The full-width band in a high overview is distance fog, not a seam.** It
+  sits at the same screen height whatever is under it. Judge a step with the
+  camera below the height slider's midpoint.
+- **Arrow keys are untested.** So is `M` (bottom right, a ruler icon).
 
 ## If you are automating the paste
 

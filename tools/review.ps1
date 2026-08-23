@@ -159,7 +159,10 @@ switch ($Recipe) {
     TS newboard
     Start-Sleep -Seconds 3
     $plane = & $ts planestate
-    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+    # Require an explicit "off". Matching 'ON' would sail straight past
+    # "build plane UNKNOWN", which is what `planestate` now says when the
+    # toolbar is not drawn and it has nothing to read.
+    if ($plane -notmatch 'off') { throw "$plane -- fix this before pasting" }
     $out = Join-Path $PSScriptRoot "..\out"
     $chunks = @(Get-ChildItem (Join-Path $out "$Stem-landscape-*.slab.txt")) +
               @(Get-ChildItem (Join-Path $out "$Stem-structure-*.slab.txt"))
@@ -200,7 +203,10 @@ switch ($Recipe) {
     TS newboard
     Start-Sleep -Seconds 3
     $plane = & $ts planestate
-    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+    # Require an explicit "off". Matching 'ON' would sail straight past
+    # "build plane UNKNOWN", which is what `planestate` now says when the
+    # toolbar is not drawn and it has nothing to read.
+    if ($plane -notmatch 'off') { throw "$plane -- fix this before pasting" }
     $out = Join-Path $PSScriptRoot "..\out"
     $land = @(Get-ChildItem (Join-Path $out "$Stem-landscape-*.slab.txt"))
     $bld  = @(Get-ChildItem (Join-Path $out "$Stem-structure-*.slab.txt"))
@@ -235,7 +241,10 @@ switch ($Recipe) {
     TS newboard
     Start-Sleep -Seconds 3
     $plane = & $ts planestate
-    if ($plane -match 'ON') { throw "$plane -- press G (ts.ps1 plane) first" }
+    # Require an explicit "off". Matching 'ON' would sail straight past
+    # "build plane UNKNOWN", which is what `planestate` now says when the
+    # toolbar is not drawn and it has nothing to read.
+    if ($plane -notmatch 'off') { throw "$plane -- fix this before pasting" }
     $out = Join-Path $PSScriptRoot "..\out"
     if ($OutDir) { $out = $OutDir }
     $manifest = Join-Path $out "$Stem-paste-order.txt"

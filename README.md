@@ -208,6 +208,48 @@ tower — parallel to the curtain, landing flush with the wall-walk, and never
 on the field side, because a stair outside a town wall is a siege ramp for the
 enemy.
 
+### What that looks like at three scales
+
+Three real Fantasy Town Generator exports, built and pasted end to end. The
+numbers are what the tool actually reported, not estimates:
+
+| Town | Tiles | Buildings | Assets | Chunks | `--chunk-tiles` |
+|---|---|---|---|---|---|
+| Pelvesthollow — a hamlet in woodland | 175 × 184 | 35 | 20,647 | 9 | 64 |
+| Graybank — a river village | 434 × 305 | 150 | 91,609 | 24 | 80 |
+| East Tradebourne — a walled town | 739 × 598 | 991 | 386,562 | 114 | 112 |
+
+East Tradebourne is 38.7% of the per-board asset limit, so a town roughly two
+and a half times its size is the ceiling.
+
+**Sizing the chunks is a two-regime problem, and most people only meet the
+first.** Below about 90,000 assets the *byte cap* binds: pick a cell size whose
+largest slab lands near two thirds of 30,720, because a different seed can
+push it over. Graybank at 96 tiles is 20 chunks and 29,817 bytes — 97% of the
+cap and too close; at 80 tiles it is 24 chunks and 20,772 bytes. Above that,
+`--max-assets` binds instead and the cell size stops mattering: East
+Tradebourne at 80 / 112 / 160 tiles gives 146 / 114 / 137 chunks and all three
+land within 40 bytes of the same slab size. In that regime pick the size that
+*splits least* — 160 is worse than 112, because an oversized cell splits into
+four where a smaller one would not have split at all.
+
+### One board per town
+
+A campaign holds many boards, and `review.ps1 tiled` creates a fresh one for
+each map so nothing is ever pasted over anything:
+
+```bash
+pwsh tools/review.ps1 tiled -Name gb -Stem gb -OutDir out\graybank -ShotEvery 6
+```
+```bash
+pwsh tools/ts.ps1 rename -Text "Graybank"
+```
+
+`-ShotEvery N` thins the progress screenshots; a 114-chunk town otherwise takes
+228 of them. New boards are called `Unknown Realm N` and the numbers get
+reused, so name them. See
+[.claude/skills/talespire-boards/SKILL.md](.claude/skills/talespire-boards/SKILL.md).
+
 ---
 
 ## Outputs
@@ -240,6 +282,13 @@ The procedural path additionally writes `out/city.json` / `city.svg`,
 - **Pasting is the only ingestion path.** `talespire://` links do not import
   boards, and there is no file-drop or API. Everything goes through `Ctrl+V`.
 - **No creatures.** `creatureCount` is always 0 in the slabs we emit.
+- **A walled town currently fails one placement check.** `_lay_city_wall`
+  lays only the top course in a rampart cell walled in on all four sides —
+  nothing can see the rest — while `verify` samples the second course and so
+  reports every such cell as a hole: 732 of East Tradebourne's 2,367. The wall
+  is unbroken coursed stone from the ground to the parapet when you look at it,
+  and the void only exists where no camera can reach; but the build does print
+  `[FAIL]` and the slabs are written anyway.
 - **No interiors on the town board.** `floorplan.py` builds them, but nothing
   wires an interior onto a second board per building yet.
 - **No UI.** `cli.py` is a thin shell over the core modules; a UI would slot in
@@ -317,6 +366,8 @@ automatically (Windows only, and the game must be windowed).
   Generator schema, reverse-engineered.
 - [docs/slab-format-v2.md](docs/slab-format-v2.md) — BouncyRock's official slab
   format spec, kept alongside the implementation in `citysmith/slab.py`.
+- [.claude/skills/talespire-boards/SKILL.md](.claude/skills/talespire-boards/SKILL.md)
+  — campaigns and boards: creating, naming, switching, and a board per town.
 - [CLAUDE.md](CLAUDE.md) — internal engineering notes, module map, and a long
   record of what was tried and why it failed. Read this before changing
   generation code.

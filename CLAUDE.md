@@ -8,7 +8,8 @@ This file is the internal engineering notes. User-facing docs:
 `docs/pasting-into-talespire.md` (the paste interaction, in full),
 `docs/asset-conventions.md` (footprints, pinning, normalization, roof rotations),
 `docs/ftg-geojson-import.md` (the second import format, reverse-engineered),
-`.claude/skills/citysmith/SKILL.md` (agent driving instructions).
+`.claude/skills/citysmith/SKILL.md` (agent driving instructions),
+`.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).
 
 ## Layers
 
@@ -228,17 +229,38 @@ actually matters, all confirmed in-game:
   `scan = 0` arrives as no key at all -- Ctrl+V silently did nothing while the
   clipboard, the foreground window and the mouse all checked out. Fill it from
   `MapVirtualKey(vk, 0)`. `tools/ts.ps1` is the one implementation of all this.
-- **Two ways to move the camera, and both are about duration.**
-  A **left drag** pans, and it has to be *slow*: 60 steps of 40 ms tracks,
-  24 steps of 16 ms outruns the camera and registers as nothing, which reads
-  exactly like "pan does not work". Use it for short, precise moves.
-  **WASD** flies, and it ramps -- velocity eases up to a maximum, so the key
-  has to be *held*. A 0.4 s press crawls a few tiles, 3 s crosses the map.
-  Tapping it looks like a dead binding, which is what made me write "WASD does
-  nothing here" in this file; it does, it just needs the momentum.
-  `ts.ps1 key -Keys w -Hold 3.0`. Arrow keys are untested. The wheel only
-  zooms, and zoom-out is capped well short of a 187-tile map, so `--crop` a
-  window onto its own board is still the quick way to review one quarter.
+- **Every binding is in the table in `docs/pasting-into-talespire.md`.** Do not
+  duplicate it here; it is read off the game's own hint bar and it is the one
+  copy. What belongs here is *why* the ones that bite, bite:
+  * **Duration is a parameter, not a detail.** A left-drag pan has to be slow
+    (60 steps x 40 ms tracks; 24 x 16 ms outruns the camera and registers as
+    nothing). WASD ramps, so it has to be *held* -- 0.4 s crawls, 3 s crosses
+    a map. Tapping it is what made an earlier revision of this file claim
+    "WASD does nothing here". `ts.ps1 key -Keys w -Hold 3.0`.
+  * **The scroll modifiers retarget on whether the hand is empty**: with
+    something held, `Ctrl` is vertical and `Shift` is *horizontal*.
+    `raise`/`lower` were built on Shift, so a whole session of "nudge it down
+    a course" tests was sliding the slab sideways and reading the result as
+    evidence about height. `ts.ps1 nudge -Mode vertical|plane|rotate`.
+  * **`G` and `N` persist across new boards**, and each imitates a defect: a
+    build plane makes a chunk land a course high with nothing wrong in the
+    file, a cut box reads as a hole in the terrain. `ts.ps1 planestate` reads
+    the icon rather than trusting memory; `hold` refuses to pick up a slab
+    while the plane is up. **But the icon only exists in build mode**, and
+    outside it `planestate` was sampling the board: Graybank's grass reads
+    rgb(177,176,69), r-b = 108, a confident "ON" from a probe pointed at turf.
+    Acting on that turned the plane *on* with a toggle meant to turn it off,
+    while the reading claimed the toggle had failed -- the same
+    reading-the-board failure this file already records once, in the same
+    function. It now tests that the toolbar strip is dark and grey and that the
+    icon patch holds some near-white glyph pixels, and reports `UNKNOWN`
+    otherwise; `review.ps1` requires an explicit `off` rather than
+    "not ON", because `-match 'ON'` does not match `UNKNOWN`.
+  * **Zoom-out is capped** well short of a big map, so the right-hand height
+    slider is the only way to fit a quarter in frame -- and a high oblique
+    then shows distance fog as a hard full-width line that has twice been
+    mistaken for a chunk seam. Judge a step below the slider's midpoint, or
+    `--crop` the district onto its own board.
 - **A paste does not always land at the coordinates in the slab, and the exact
   rule is NOT settled.** What is measured: a copy-out of a region-chunked board
   carried a 3.5 relief where the source's maximum possible is 3.0, so half a
@@ -284,12 +306,6 @@ actually matters, all confirmed in-game:
   for the z=48 chunk boundary twice in one session. Overviews are for
   composition; any judgement about a step needs the camera below the slider's
   midpoint.
-- **The modifiers for a held object, from the game's own hint bar:**
-  `Ctrl`+scroll moves it **vertically**, `Shift`+scroll moves it **on the
-  plane**, `Alt`+scroll **rotates in place**. `raise`/`lower` were built on
-  Shift, which is the horizontal one -- so every "nudge it down a course" test
-  in a whole session was sliding the slab sideways and reading the result as
-  evidence about height. `ts.ps1 nudge -Mode vertical|plane|rotate`.
 - **Ctrl + right-click drag controls elevation** -- the working plane the build
   tools and the X+drag selection are cut at. `ts.ps1 elev`. Worth knowing
   before reverse-engineering anything else: several tools behave as if they are
@@ -334,16 +350,12 @@ actually matters, all confirmed in-game:
   - **While the select tool is armed the whole scene renders washed out.** It
     reads exactly like distance fog and it is not; the tool stays armed
     between selections.
-  - Do **not** drag the camera height slider: it sits close enough to the
-    screen edge that the drag opened the Windows widgets flyout over the
-    game. Raise the camera in `-DY 150` steps and check the compass after
-    each; a new board resets anything that gets stuck.
-- **The right-hand vertical track is a camera *height* slider, and it goes far
-  higher than the wheel.** Zoom-out is capped well short of a 187-tile map;
-  raising the camera is how a whole quarter fits one frame, which is what a
-  paste wants -- the chunk being placed and the chunk it must line up with both
-  on screen. `ts.ps1 camera -DY -300`. The handle moves with the height, so the
-  command scans the track column for it rather than assuming a position.
+- **`ts.ps1 camera -DY -300` drives the height slider**, scanning the track
+  column for the handle rather than assuming a position, because the handle
+  moves with the height. Never drag the track by hand: it sits close enough to
+  the screen edge that the drag once opened the Windows widgets flyout over the
+  game. Raise in `-DY 150` steps and check the compass after each; a new board
+  resets anything that gets stuck.
 - **Read the camera back rather than tracking it in your head.** Every camera
   command is a *relative* move; a session that only issues them ends up over the
   void wondering where the map went. `ts.ps1 camerastate` reports the height
@@ -399,10 +411,8 @@ actually matters, all confirmed in-game:
     order.
   * Switching to a 387k-asset board takes tens of seconds. Wait before
     clicking anything on it.
-- Bindings worth knowing: `B` build mode, `F1` help (a video overlay — it does
-  not screen-capture), `F2` recentre, `Space` menus, `Ctrl+Z` undo,
-  `X`+drag select, left-click pick up, middle-drag rotate camera, scroll zoom,
-  `Shift`+scroll raise/lower.
+- The full binding table lives in `docs/pasting-into-talespire.md`. One copy,
+  read off the hint bar; this file keeps only the reasons above.
 
 ## Chunking: layer first, region second
 

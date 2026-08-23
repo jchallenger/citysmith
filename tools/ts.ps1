@@ -355,10 +355,45 @@ switch ($Cmd) {
         $c = $bmp.GetPixel($x, $y); $r += $c.R; $g += $c.G; $b += $c.B; $n++
       }
     }
+    # **Is the toolbar even on screen?** Outside build mode it is not drawn at
+    # all, and then this samples the board instead -- Graybank's grass reads
+    # rgb(177,176,69), r-b = 108, a confident "ON" with no icon anywhere near
+    # the probe. Believing that cost a toggle in the wrong direction: the plane
+    # was off, `plane` turned it ON, and this said it had failed to turn off.
+    #
+    # Two tests, because either alone has a false positive. The strip above the
+    # icons must be dark and grey (terrain is not), and the icon patch must
+    # contain some near-white pixels (the glyph; terrain rarely does).
+    $lit = 0
+    for ($y = 0; $y -lt 40; $y += 2) {
+      for ($x = 0; $x -lt 40; $x += 2) {
+        $c = $bmp.GetPixel($x, $y)
+        if ($c.R -gt 200 -and $c.G -gt 200 -and $c.B -gt 200) { $lit++ }
+      }
+    }
+    $strip = New-Object System.Drawing.Bitmap 320,6
+    $sg = [System.Drawing.Graphics]::FromImage($strip)
+    $sg.CopyFromScreen($cl.X + 620, $cl.Y + 120, 0, 0, (New-Object System.Drawing.Size 320,6))
+    $sr = 0; $sgc = 0; $sb = 0; $sn = 0
+    for ($y = 0; $y -lt 6; $y += 2) {
+      for ($x = 0; $x -lt 320; $x += 4) {
+        $c = $strip.GetPixel($x, $y); $sr += $c.R; $sgc += $c.G; $sb += $c.B; $sn++
+      }
+    }
+    $sg.Dispose(); $strip.Dispose()
+    $sr = [int]($sr/$sn); $sgc = [int]($sgc/$sn); $sb = [int]($sb/$sn)
+    $lum = [int](($sr + $sgc + $sb)/3)
+    $grey = ([Math]::Abs($sr - $sgc) -lt 25) -and ([Math]::Abs($sgc - $sb) -lt 25)
+
     $gfx.Dispose(); $bmp.Dispose()
     $r = [int]($r/$n); $g = [int]($g/$n); $b = [int]($b/$n)
-    if ($r - $b -gt 50) { "build plane ON  (rgb($r,$g,$b)) -- a paste will snap to it, not to the ground" }
-    else                { "build plane off (rgb($r,$g,$b))" }
+
+    if (-not ($grey -and $lum -lt 70 -and $lit -ge 2)) {
+      "build plane UNKNOWN -- the build toolbar is not on screen (strip rgb($sr,$sgc,$sb), " +
+      "glyph px $lit). Press B for build mode, then read it again. Do NOT paste on this reading."
+    }
+    elseif ($r - $b -gt 50) { "build plane ON  (rgb($r,$g,$b)) -- a paste will snap to it, not to the ground" }
+    else                    { "build plane off (rgb($r,$g,$b))" }
   }
   'newboard' {
     Focus-TS
@@ -404,7 +439,13 @@ switch ($Cmd) {
     Start-Sleep -Seconds 2
     $shot = if ($Name) { $Name } else { "boards" }
     & (Join-Path $PSScriptRoot "grab.ps1") -Name $shot
-    "board list open; rows start at client y=200, 42 apart, play arrow at x=360"
+    # NOT a claim that it opened -- `Space` is a toggle, so if the HUD was
+    # already up this closed it and the click landed on the board instead.
+    # Look at the shot before trusting any row position.
+    "screenshotted after Space + board icon. CHECK THE SHOT: if the Campaign " +
+    "Boards panel is not open, Space toggled it shut -- run again. Rows start " +
+    "at client y=200, 42 apart, play arrow at x=360; the list re-sorts on every " +
+    "rename, so read them off the shot rather than reusing a position."
   }
   'shot'    { & (Join-Path $PSScriptRoot "grab.ps1") -Name $Name }
   'chord'   { Focus-TS; Send-Chord $Keys; "sent $Keys" }
