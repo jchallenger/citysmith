@@ -2267,10 +2267,14 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
 
 #: Headroom to leave under a gate lintel, in tiles. Two tiles (10 ft) was the
 #: minimum a loaded cart with a rider on top clears, and it looked like it:
-#: a 25 ft-wide mouth 10 ft high reads as a culvert, not a gate. Three tiles
-#: is 15 ft -- the proportion of a real town gate -- and still leaves three
-#: courses of wall carried over the opening.
-GATE_HEADROOM_TILES = 3.0
+#: a 25 ft-wide mouth 10 ft high reads as a culvert, not a gate.
+#:
+#: Four tiles is 20 ft, and the number is set by the *door* rather than by
+#: taste: `Door - Portcullis double` is 4 x 3.75 x 0.5, so a 15 ft opening
+#: cannot take one -- it would drive three quarters of a tile up into the
+#: lintel. At four the grille clears by a quarter tile and the wall still
+#: carries two courses over the road.
+GATE_HEADROOM_TILES = 4.0
 
 #: Extra courses on the wall flanking a gate. Without them the curtain runs
 #: over the opening at its ordinary height and nothing on the board says a
@@ -2493,12 +2497,24 @@ def _lay_town_wall(b: Builder, tm, facing, top: float,
         elif walk is not None:
             b.add(place_tile(walk, x, z, crown))
 
+    # **A cell walled in on all four sides shows nothing but its top.** The
+    # rampart is nearly three tiles thick, so 99 of its 261 body cells -- 38%
+    # -- have no face anyone can ever see, and the five courses under their
+    # walk were 495 blocks of solid nothing. Same reasoning that took out 928
+    # buried facings: only the course the walk rests on is kept. A cell next
+    # to a gate is *not* buried, because the passage below the lintel opens
+    # its side into the tunnel.
+    def entombed(x: int, z: int) -> bool:
+        return all((x + dx, z + dz) in mass and (x + dx, z + dz) not in gates
+                   for _, dx, dz in SIDE_OFFSETS)
+
     for (x, z) in sorted(mass - tower_cells):
         gate = (x, z) in gates
         if gate and lintel_from is None:
             continue
         courses = wall_height + (GATEHOUSE_RISE if (x, z) in ring else 0)
-        for level in range(lintel_from if gate else 0, courses):
+        start = lintel_from if gate else (courses - 1 if entombed(x, z) else 0)
+        for level in range(start, courses):
             b.add(place_tile(core, x, z, top + level * course))
         crown_cell(x, z, top + courses * course,
                    [s for s, dx, dz in SIDE_OFFSETS if (x + dx, z + dz) in outside])
@@ -2515,6 +2531,114 @@ def _lay_town_wall(b: Builder, tm, facing, top: float,
             crown_cell(x, z, top + courses * course,
                        [s for s, dx, dz in SIDE_OFFSETS
                         if (x + dx, z + dz) not in footprint])
+
+    _lay_wall_stairs(b, tm, towers, mass, outside, top, course, wall_height)
+    _hang_portcullises(b, tm, gates, mass, top)
+
+
+def _lay_wall_stairs(b: Builder, tm, towers, mass, outside, top: float,
+                     course: float, wall_height: int) -> int:
+    """A flight up the inside of the wall at every tower.
+
+    **Nothing could get onto the wall-walk.** The circuit carries 341 cells of
+    paved, battlemented rampart 35 ft above the street and had no stairs, no
+    ramp and no ladder anywhere on it -- a defenders' platform no defender
+    could reach, on a board whose whole point is that a party stands on it.
+    `verify` did not catch it either, because its access check asks whether
+    *buildings* can be entered, not whether the wall can.
+
+    The flight runs on the ground beside the tower, climbing towards it, one
+    tread per course, so it arrives level with the walk. It is filled solid
+    underneath -- a stair tile is a tread, not a stringer, and a run of them
+    hanging over air reads as a folded ribbon.
+    """
+    stair = b.palette.resolve("city_wall_stair")
+    core = b.palette.resolve("city_wall_core")
+    if stair is None or core is None or wall_height < 1:
+        return 0
+
+    from . import raster as R
+    blocked = {R.WATER, R.PIER, R.VOID, R.FLOOR}
+    taken: set[tuple[int, int]] = set()
+
+    def free(cell: tuple[int, int]) -> bool:
+        x, z = cell
+        if not tm.inside(x, z) or cell in mass or cell in taken:
+            return False
+        return not tm.building[z][x] and tm.surface[z][x] not in blocked
+
+    built = 0
+    for footprint in towers:
+        xs = [c[0] for c in footprint]
+        zs = [c[1] for c in footprint]
+        best = None
+        for side, dx, dz in SIDE_OFFSETS:
+            # Step off the tower's face on this side, then run outward.
+            edge = [(x, z) for (x, z) in footprint
+                    if (x + dx, z + dz) not in footprint]
+            if not edge:
+                continue
+            # One flight, on the middle cell of that face.
+            sx, sz = sorted(edge)[len(edge) // 2]
+            run = [(sx + dx * j, sz + dz * j) for j in range(1, wall_height + 1)]
+            if not all(free(c) for c in run):
+                continue
+            # Prefer the inward side: a stair on the field side of a town wall
+            # is a siege ramp for the enemy, which is the one thing it must
+            # not be.
+            inward = 0 if (sx + dx * 2, sz + dz * 2) in outside else 1
+            score = (inward, -abs(sx - sum(xs) / len(xs)) - abs(sz - sum(zs) / len(zs)))
+            if best is None or score > best[0]:
+                best = (score, side, run)
+        if best is None:
+            continue
+        _, side, run = best
+        for j, (x, z) in enumerate(run, start=1):
+            level = wall_height - j
+            for under in range(level):
+                b.add(place_tile(core, x, z, top + under * course))
+            b.add(place_tile(stair, x, z, top + level * course, _SIDE_ROT[side]))
+            taken.add((x, z))
+        built += 1
+    return built
+
+
+def _hang_portcullises(b: Builder, tm, gates, mass, top: float) -> int:
+    """Drop a grille across each gate passage.
+
+    The palette has carried `Door - Portcullis double` unused since the gates
+    were first built, because there was nowhere to hang it: the passage was
+    cleared as a *disc*, so on a diagonal circuit its jambs were a 45-degree
+    stair-step and a flat 4-wide panel has no straight line to sit on. The
+    raster cuts a square passage now (`raster._carve_gate`), so the grille
+    spans jamb to jamb in one placement.
+    """
+    grille = b.palette.resolve("city_gate")
+    if grille is None or not gates:
+        return 0
+    hung = 0
+    for passage in _components8(set(gates)):
+        xs = sorted({c[0] for c in passage})
+        zs = sorted({c[1] for c in passage})
+        # Which axis is the opening? Read it off the *jambs*, not the bounding
+        # box: a passage cut square through a band of its own width comes out
+        # 4x4, and a box that square has no long axis to pick from. The jambs
+        # are the sides the wall still stands on.
+        jamb_x = any((min(xs) - 1, z) in mass or (max(xs) + 1, z) in mass
+                     for z in zs)
+        jamb_z = any((x, min(zs) - 1) in mass or (x, max(zs) + 1) in mass
+                     for x in xs)
+        if jamb_x == jamb_z:
+            continue                      # ambiguous; leave the gate open
+        across_x = jamb_x
+        span = len(xs) if across_x else len(zs)
+        if abs(grille.size_x - span) > 0.51:
+            continue                      # the grille does not fit this mouth
+        cx = (min(xs) + max(xs) + 1) / 2.0
+        cz = (min(zs) + max(zs) + 1) / 2.0
+        b.add(place_centered(grille, cx, cz, top, 0 if across_x else _QUARTER))
+        hung += 1
+    return hung
 
 
 def _gatehouse_cells(mass: set[tuple[int, int]],

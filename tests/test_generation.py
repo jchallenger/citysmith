@@ -2282,3 +2282,101 @@ def test_a_single_storey_gets_a_lantern_and_no_porch():
     house = build_from_tilemap(_one_building("house-0003"), palette, storeys=1)
     assert [p for p in house.placements if p.asset_id == lantern.id], \
         "no lantern on a single-storey house"
+
+
+def _ring_map(w=34, d=34, edge=6, thickness=3):
+    """A square wall ring on open ground, for gate and rampart tests."""
+    from citysmith.raster import TileMap
+
+    tm = TileMap.blank(w, d)
+    for z in range(edge, d - edge):
+        for x in range(edge, w - edge):
+            if (x < edge + thickness or x >= w - edge - thickness
+                    or z < edge + thickness or z >= d - edge - thickness):
+                tm.wall[z][x] = True
+    return tm
+
+
+def test_a_gate_passage_is_square_so_a_door_can_hang_in_it():
+    """The passage used to be cleared as a disc, so on a diagonal circuit its
+    jambs were a 45-degree stair-step -- 18 cells with a 7x4 bounding box, and
+    no straight jamb-to-jamb line for the 4-wide portcullis the palette has
+    carried unused since the gates were first built."""
+    from citysmith.raster import MAIN_STREET_TILES, _carve_gate
+
+    tm = _ring_map()
+    carved = _carve_gate(tm, 17, 6, MAIN_STREET_TILES)
+    assert carved is not None, "nothing was cut"
+    cut, _, _, (lo, width) = carved
+    xs = {c[0] for c in cut}
+    zs = {c[1] for c in cut}
+    assert width == int(MAIN_STREET_TILES)
+    # A rectangle: every row of the passage is the same width, and every cell
+    # in the bounding box was cut. That is what a straight jamb means.
+    assert len(xs) * len(zs) == len(cut), (
+        f"passage is not a rectangle: {len(cut)} cells in a "
+        f"{len(xs)}x{len(zs)} box")
+    # One axis is the opening (the carriageway) and the other is the tunnel
+    # through the band -- which is shorter here, because the wall is thinner
+    # than the road is wide. The opening is the one that must match.
+    assert int(MAIN_STREET_TILES) in (len(xs), len(zs)), (
+        f"no axis of the {len(xs)}x{len(zs)} passage is the road's width")
+    assert all((x, z) in tm.gates and not tm.wall[z][x] for x, z in cut)
+
+
+def test_a_one_gate_circuit_gets_a_postern_opposite():
+    """A walled town with a single entrance is a cul-de-sac: every approach,
+    sortie and chase funnels through the same arch."""
+    import math
+
+    from citysmith.build import _components8
+    from citysmith.raster import MAIN_STREET_TILES, _add_second_gate, _carve_gate
+
+    tm = _ring_map()
+    _carve_gate(tm, 17, 6, MAIN_STREET_TILES)
+    first = {c for c in tm.gates}
+    _add_second_gate(tm, MAIN_STREET_TILES)
+    passages = _components8(set(tm.gates))
+    assert len(passages) == 2, f"expected two passages, got {len(passages)}"
+
+    def centre(cells):
+        return (sum(c[0] for c in cells) / len(cells),
+                sum(c[1] for c in cells) / len(cells))
+
+    a, b = centre(first), centre(set(tm.gates) - first)
+    # Opposite, not merely elsewhere: the two mouths should be most of the
+    # ring's width apart.
+    assert math.dist(a, b) > 15, f"postern at {b} is not opposite {a}"
+
+
+def test_the_buried_core_of_the_rampart_is_not_built():
+    """A cell walled in on all four sides shows nothing but its top. The
+    rampart is nearly three tiles thick, so 38% of its body had no face anyone
+    could ever see and five courses of solid nothing under the walk."""
+    import collections
+
+    from citysmith.build import _lay_town_wall, Builder, TOWN_WALL_TILES
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = _ring_map(thickness=3)
+    b = Builder(palette, 0)
+    _lay_town_wall(b, tm, palette.require("city_wall"), 0.5, TOWN_WALL_TILES)
+
+    core = palette.resolve("city_wall_core")
+    per_cell = collections.Counter(
+        (int(p.x), int(p.z)) for p in b.placements if p.asset_id == core.id)
+    NB = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x]} | set(tm.gates)
+    buried = [c for c in mass
+              if all((c[0] + dx, c[1] + dz) in mass and
+                     (c[0] + dx, c[1] + dz) not in tm.gates for dx, dz in NB)]
+    assert buried, "the fixture should have a buried core to test"
+    faced = [c for c in mass if c not in buried and c not in tm.gates]
+    # A buried cell carries at most the one course the walk rests on; a faced
+    # one carries the full stack. Towers stand on some cells and build higher,
+    # so compare against the *minimum* a faced cell gets.
+    assert max(per_cell[c] for c in buried) <= 1, "buried cells are still solid"
+    assert min(per_cell[c] for c in faced) > 1, "a faced cell lost its courses"

@@ -769,6 +769,42 @@ shape instead of reading it. The rules that fall out:
   (`_ridge_rotations`), and the chimney is two courses lapped `CHIMNEY_LAP`
   rather than one piece sitting on the ridge as a stub.
 
+- **A gate passage has to be cut SQUARE, or it can never have a door.** The
+  raster used to clear a *disc* of wall cells, which on a circuit that runs
+  diagonally leaves jambs that are a 45-degree stair-step: on Forest Church an
+  18-cell hole with a 7x4 bounding box. `Door - Portcullis double` is flat and
+  4 wide and had nowhere to sit, which is why "no portcullis" stood in the
+  backlog for eleven revisions as an *asset* problem when it was a *raster*
+  problem. `raster._carve_gate` cuts a rectangle along whichever cardinal is
+  closest to the wall's own normal -- measured from the band around the gate,
+  because MFCG puts this gate on a ring *vertex* and a vertex has no
+  direction. Two straight jambs, a 4-cell carriageway, one grille.
+  **Read the opening axis off the jambs, not the bounding box**: a square
+  passage through a band its own width comes out 4x4 and the box has no long
+  axis to pick from.
+  `GATE_HEADROOM_TILES` is 4.0 and the number is set by the door, not by
+  taste: the grille is 3.75 tall, so a 15 ft opening drives it three quarters
+  of a tile into the lintel.
+
+- **Nothing could get onto the wall-walk.** 341 cells of paved, battlemented
+  rampart 35 ft up, with no stair, ramp or ladder anywhere -- a defenders'
+  platform no defender could reach. `verify` did not catch it because its
+  access check asks whether *buildings* can be entered, not whether the wall
+  can. `_lay_wall_stairs` runs a flight at every tower, filled solid
+  underneath, and prefers the inward side: a stair on the field side of a town
+  wall is a siege ramp for the enemy.
+
+- **A buried rampart cell shows nothing but its top.** The wall is nearly
+  three tiles thick, so 99 of 261 body cells -- 38% -- have no face anyone can
+  see, and their five courses under the walk were 495 blocks of solid nothing.
+  Only the course the walk rests on is kept. A cell beside a gate is *not*
+  buried: the passage under the lintel opens its side into the tunnel.
+
+- **A wide gate apron paves the ground a tower needs.** The postern's approach
+  was first paved as a 5x5 halo round every gate cell; `pick_wall_towers`
+  rejects paved ground, so the circuit went from five towers to two. The
+  approach is paved along the passage line only.
+
 - **A porch needs a storey to carry it.** The hood seats at `storey_h + 0.5`,
   which on a one-storey cottage is level with its own eaves -- a second roof
   grafted onto the first. Single-storey buildings get a lantern on the
@@ -881,6 +917,13 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
   nothing wires it onto a second board per building.
 - A tapered map edge. The border ring still ends on a hard straight cut, so
   the map reads as a cropped rectangle from outside (finding 8).
+- A portcullis winch, murder holes and an arch ring. The gate has doors now
+  (the passage is cut square, so the grille finally has jambs to hang on) but
+  the opening is still a plain rectangle in the masonry.
+  `city_gate_arch` is pinned to `Castle Ruins Arch 02` and remains *unused*:
+  it is 1 x 3 x 2, so it is a tunnel segment rather than a jamb piece, and
+  four would be needed to span the carriageway. It has never been probed --
+  do that before placing it.
 - Gate doors. The gate has its towers now -- square bastions on both jambs,
   and on every corner of the ring (`pick_wall_towers`; the raster records the
   ring's vertices in `TileMap.wall_corners`) -- and three tiles of headroom

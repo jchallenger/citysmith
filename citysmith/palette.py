@@ -380,6 +380,15 @@ MEDIEVAL = Style(
             _tile(name="Door - Fancy", **_MED),
             _tile(name="Door -Peasant", **_MED),
         ],
+        #: The flight up onto the wall-walk. Same kit as the walk paving and
+        #: the crenellations (`Castle Ruins *`), so the rampart's dressing is
+        #: one family even though its mass is another. The generic `stairs`
+        #: role is no use here: it resolves to `Rural Stairs Flat`, 0.25 tall,
+        #: which would take twenty-eight treads to climb a 35 ft wall.
+        "city_wall_stair": [
+            _tile(name="Castle Ruins Stair", height=1.0, **_MED, **_UNIT),
+            _tile(name="md_stairs_01", height=1.0, **_MED, **_UNIT),
+        ],
         "city_wall": [
             _tile(name="castle wall 1x1", **_MED),
             _tile(group="wall", tags=("stone", "wall"), exclude_tags=_NOT_PLAIN_WALL,

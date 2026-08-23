@@ -955,22 +955,125 @@ def _rasterize_walls(tm: TileMap, layout: Layout, shift, width: int, depth: int)
     road_width = max(
         [r.width for r in layout.roads if r.kind == "road"] + [MAIN_STREET_TILES]
     )
-    radius = max(1, int(math.ceil(road_width / 2.0)) + 1)
     for gx, gy in layout.gates:
-        cx, cz = int(round(gx)) + 0, int(round(gy)) + 0
-        for dz in range(-radius, radius + 1):
-            for dx in range(-radius, radius + 1):
-                x, z = cx + dx, cz + dz
-                if not tm.inside(x, z):
-                    continue
-                if math.hypot(dx, dz) > radius:
-                    continue
-                if tm.wall[z][x]:
-                    tm.wall[z][x] = False
-                    tm.gates.add((x, z))
-                    if tm.surface[z][x] not in (WATER,):
-                        tm.surface[z][x] = STREET
-                        tm.street_class[z][x] = MAIN_ROAD
+        _carve_gate(tm, int(round(gx)), int(round(gy)), road_width)
+
+    _add_second_gate(tm, road_width)
+
+
+#: How far either side of a gate point to sample the wall band when working
+#: out which way the circuit runs there.
+GATE_SAMPLE = 6
+
+#: How far the postern's approach is paved beyond the passage, in cells. Kept
+#: short and on the passage line: a wide apron paves the open ground beside the
+#: wall that a mural tower needs to stand on.
+GATE_APPROACH = 4
+
+
+def _carve_gate(tm: TileMap, cx: int, cz: int, road_width: float) -> bool:
+    """Cut a straight, axis-aligned passage through the wall band.
+
+    **The passage has to be square, or the gate can never have doors.** The
+    predecessor cleared a *disc* of wall cells, which on a circuit that runs
+    diagonally leaves an opening whose jambs are a 45-degree stair-step -- on
+    Forest Church an 18-cell hole with a 7x4 bounding box. There is no
+    straight jamb-to-jamb line in that, so the flat 4-wide portcullis the
+    palette has always carried had nothing to hang on, and the gate stayed a
+    ragged notch for eleven revisions.
+
+    So the passage is cut as a rectangle along whichever cardinal is closest
+    to the wall's own normal: two straight jambs, a fixed clear width, and a
+    lintel that spans in one line. The wall's run is measured from the band
+    around the gate point rather than assumed from the ring's vertices,
+    because MFCG puts this gate *on* a vertex and a vertex has no direction.
+    """
+    band = [(x, z)
+            for z in range(max(0, cz - GATE_SAMPLE), min(tm.depth, cz + GATE_SAMPLE + 1))
+            for x in range(max(0, cx - GATE_SAMPLE), min(tm.width, cx + GATE_SAMPLE + 1))
+            if tm.wall[z][x]]
+    if not band:
+        return False
+
+    # Principal axis of the band = the direction the wall runs. The passage
+    # goes across it, snapped to a cardinal so the jambs come out straight.
+    mx = sum(x for x, _ in band) / len(band)
+    mz = sum(z for _, z in band) / len(band)
+    sxx = sum((x - mx) ** 2 for x, _ in band)
+    szz = sum((z - mz) ** 2 for _, z in band)
+    # Runs more along x than z  ->  the passage runs along z, and vice versa.
+    along_x = sxx >= szz
+    pdx, pdz = (0, 1) if along_x else (1, 0)      # passage direction
+    tdx, tdz = (1, 0) if along_x else (0, 1)      # across the passage
+
+    width = max(2, int(round(road_width)))
+    lo = -(width // 2)
+    reach = GATE_SAMPLE + 2
+
+    cut: list[tuple[int, int]] = []
+    for t in range(lo, lo + width):
+        for p in range(-reach, reach + 1):
+            x = cx + tdx * t + pdx * p
+            z = cz + tdz * t + pdz * p
+            if not tm.inside(x, z) or not tm.wall[z][x]:
+                continue
+            tm.wall[z][x] = False
+            tm.gates.add((x, z))
+            cut.append((x, z))
+            if tm.surface[z][x] not in (WATER,):
+                tm.surface[z][x] = STREET
+                tm.street_class[z][x] = MAIN_ROAD
+    return (cut, (pdx, pdz), (tdx, tdz), (lo, width)) if cut else None
+
+
+def _add_second_gate(tm: TileMap, road_width: float) -> None:
+    """Cut a postern on the far side of the circuit when the export gives one
+    gate.
+
+    A walled town with a single entrance is a cul-de-sac: every approach, every
+    sortie and every chase funnels through the same arch, and a party that
+    wants a second way in has to go over the wall -- which, until the stairs
+    went in, nothing could do. MFCG exports one gate for Forest Church, so the
+    second is cut here, diametrically opposite the first, and paved through so
+    it joins the street network on both faces.
+    """
+    if not tm.gates:
+        return
+    wall = [(x, z) for z in range(tm.depth) for x in range(tm.width) if tm.wall[z][x]]
+    if not wall:
+        return
+    gx = sum(x for x, _ in tm.gates) / len(tm.gates)
+    gz = sum(z for _, z in tm.gates) / len(tm.gates)
+    cx = sum(x for x, _ in wall) / len(wall)
+    cz = sum(z for _, z in wall) / len(wall)
+    # The point on the circuit furthest from the gate we have, measured
+    # through the ring's own centre so it lands opposite rather than merely
+    # far away along the same stretch.
+    ox, oz = 2 * cx - gx, 2 * cz - gz
+    far = min(wall, key=lambda c: (c[0] - ox) ** 2 + (c[1] - oz) ** 2)
+    carved = _carve_gate(tm, far[0], far[1], road_width)
+    if carved is None:
+        return
+    cut, (pdx, pdz), (tdx, tdz), (lo, width) = carved
+
+    # Pave the approach **along the passage line only**, not as a halo round
+    # every gate cell. A square apron reads as a yard rather than a road, and
+    # -- found the hard way -- it paves the open ground beside the wall that
+    # `pick_wall_towers` needs to stand a tower on, so widening the approach
+    # by two cells cost the circuit three of its five towers.
+    px = sum(x for x, _ in cut) / len(cut)
+    pz = sum(z for _, z in cut) / len(cut)
+    for t in range(lo, lo + width):
+        for p in range(-GATE_APPROACH, GATE_APPROACH + 1):
+            x = int(round(px)) + tdx * t + pdx * p
+            z = int(round(pz)) + tdz * t + pdz * p
+            if not tm.inside(x, z) or tm.wall[z][x] or (x, z) in tm.gates:
+                continue
+            if tm.building[z][x] or tm.surface[z][x] in (WATER, PIER):
+                continue
+            if tm.surface[z][x] == GROUND:
+                tm.surface[z][x] = LANE
+                tm.street_class[z][x] = LANE_ROAD
 
 
 def _find_perimeters(tm: TileMap, layout: Layout | None) -> None:
