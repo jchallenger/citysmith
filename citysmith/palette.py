@@ -286,17 +286,25 @@ MEDIEVAL = Style(
         # once in group Corner at 2.0 tall, once in Combinations at 2.5. The
         # 2.5 variant is the wrong height for the wall course and would lift
         # every storey above it out of line.
-        # Rural timber corner first now that the wall is timber-framed: a
-        # dungeon-brick corner on a Village panel is two materials meeting at
-        # the one place a facade cannot hide a join.
+        # **The facade's own corner, and it took an index to find it.** The
+        # wall is `Village Roof Side Wall 01/02` and the corner was
+        # `Rural Corner` -- cream timber framing meeting dark horizontal
+        # boarding at every corner of every house. Hunting a corner named
+        # "Village *" found nothing, because the kit is not in the name: the
+        # catalog's `folder` is the family, and those panels live in folder
+        # **Tavern**, which ships `Tavern no floor (1x1 a)` -- 1x1, two tiles
+        # tall, group `corner`, exactly the piece. Its name is the same one
+        # CLAUDE.md warns about for matching "floor" loosely; as a corner it
+        # is the right piece. `tools/kit_index.py` is the lookup now.
         # The wall has the same reflex problem as the roof; this is the piece
         # for it. Thin, because unlike an outside corner it does not fill a
         # cell -- it tucks into the angle.
         "wall_corner_inner": [
-            _tile(name="Rural Inner Corner", **_MED),
             _tile(name="Tavern Inner Corner 2", **_MED),
+            _tile(name="Rural Inner Corner", **_MED),
         ],
         "wall_corner": [
+            _tile(name="Tavern no floor (1x1 a)", height=2.0, **_MED, **_UNIT),
             _tile(name="Rural Corner", height=2.0, **_MED, **_UNIT),
             _tile(name=("md_wall_corner_1x1_01", "md_wall_corner_1x1_02"),
                   group="Corner", height=2.0, **_MED, **_UNIT),

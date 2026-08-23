@@ -558,6 +558,30 @@ shape instead of reading it. The rules that fall out:
   causeway read as a fortification. `bridge_deck` is pinned to
   `Harbor Middle 06`.
 
+- **The kit is `folder`. Look it up; do not read the name.** Three separate
+  wrong picks on this project were "what does this library actually contain"
+  questions answered by building the wrong thing and looking at it.
+  `tools/kit_index.py` is the lookup: it groups every tile by `folder` and
+  reports, per kit, which of the roles the generator places it can supply at
+  the right shape and height. `docs/asset-index.md` is the generated dump and
+  `--kit` / `--role` / `--complete` are the queries.
+  The three fields are not interchangeable and picking the wrong one costs
+  hours: **`pack` is the DLC** ("Medieval Fantasy" covers castle, rural,
+  tavern and thatch alike), **`group_tag` is a form** ("corner", "wall" -- the
+  same tag covers castle stone, rural boarding and a spaceship bulkhead), and
+  **`folder` is the family**, which is what the game's own asset library lists
+  down its left-hand side. The name is not the kit either: `Village Roof Side
+  Wall 02` sits in folder **Tavern**. Matching on the first word of the name
+  looked for a corner called "village *", found none, and mitred one -- while
+  `Tavern no floor (1x1 a)`, a 1x1x2.0 corner in the same kit, sat unused.
+  The Tavern kit is in fact *complete*: wall, window, corner, inner corner,
+  floor, roof, stairs and chimney, plus 2.5-tall Wall/Floor pieces that carry
+  wall and floor in one casting. So does `Castle Fortified`, which is why the
+  civic fabric already matched. Watch the classifier's one exception: those
+  Village panels are tagged `group='roof'` because they ship in a roof set,
+  and taking that at face value files the only 1-cell window in the medieval
+  set under "roof".
+
 - **A corner has to come from the wall's own kit, and sometimes there isn't
   one.** Under seed 33 the facade deals `Village Roof Side Wall 01/02` and
   every `wall_corner` variant resolved to `Rural Corner`: cream timber-framed
@@ -584,14 +608,30 @@ shape instead of reading it. The rules that fall out:
   Worth teaching the check about perpendicular corner panels before the count
   hides something real.
 
-- **An attic needs no floor.** Upper decks used to run *through* the top
-  storey, on the reasoning that the highest slab was "the ceiling the roof
-  seats on". The roof seats on the wall head, not on the slab, so all that
-  slab did was floor the roof void: a room nothing stands in, under a roof you
-  cannot see past. It is one tile per cell per building -- 1,627 of them on
-  Forest Church, and ~900 bytes off the largest chunk. Decks now run `1..floors`
-  exclusive, so a single-storey cottage gets no upper slab at all, which is
-  what a cottage is. `test_an_attic_gets_no_floor` guards it.
+- **The storey is the wall, and everything about the roof line follows.**
+  The pitch used to be wall+floor, leaving a floor-thick slot between wall
+  courses for the deck to drop into. Two defects came out of that gap, and
+  they are the same defect:
+  * **the floor showed from outside.** A deck fills its whole cell, so in that
+    slot its edge sat flush with the wall face -- a band of floorboards
+    running right round every building between storeys.
+  * **the roof floated.** The roof seats at `floors * storey_h`; the head of
+    the top wall is at `(floors-1) * storey_h + wall`. Those are equal only
+    when the storey *is* the wall. Pitched at wall+floor they differ by
+    exactly a deck, and the attic deck had been quietly filling the gap --
+    so taking the attic deck away left a half-tile of daylight under every
+    roof. (That was mine, and it shipped.)
+
+  Pitched at the wall alone the courses touch, the facade is unbroken from the
+  ground to the eaves, and the roof seats by arithmetic rather than by luck.
+  Decks go on **interior cells only** -- cells with no exposed side -- so no
+  deck ever reaches a facade; the cost is an upper floor stopping one cell
+  short of the wall, which shows only through a window. And **an attic gets no
+  floor at all**: the roof seats on the wall head, so a deck at the top storey
+  only floors the roof void. Forest Church went from 30,565 assets to 27,964.
+  `tools/storey_probe.py` puts the three stacks side by side;
+  `test_the_roof_sits_on_the_wall_head` and
+  `test_no_upper_deck_reaches_the_outside_of_a_building` guard the result.
 
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**

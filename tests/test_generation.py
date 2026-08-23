@@ -972,6 +972,78 @@ def test_an_attic_gets_no_floor():
     assert decks(3) == 2
 
 
+def test_no_upper_deck_reaches_the_outside_of_a_building():
+    """A deck fills its whole cell, so on a perimeter cell its edge lands flush
+    with the wall face and reads as a band of floorboards round the building --
+    the floor, seen from outside. Decks go on cells with no exposed side."""
+    from citysmith.build import build_from_tilemap, footprints
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    upper = palette.resolve("floor_upper") or palette.require("floor")
+
+    tm = TileMap.blank(18, 18)
+    for x in range(4, 11):
+        for z in range(4, 10):
+            tm.building[z][x] = "house-0001"
+            tm.surface[z][x] = FLOOR
+    tm.floors["house-0001"] = 3
+    _find_perimeters(tm, None)
+    _place_doors(tm, None)
+    b = build_from_tilemap(tm, palette, storeys=3, roofs=True)
+
+    edge = {(x, z) for x, z, _ in tm.perimeter["house-0001"]}
+    assert edge, "the fixture should have a perimeter"
+    on_edge = [p for p in b.placements
+               if p.asset_id == upper.id and p.y > 0.01 and (int(p.x), int(p.z)) in edge]
+    assert not on_edge, f"{len(on_edge)} upper deck tiles reach the facade"
+    inner = set(footprints(tm)["house-0001"]) - edge
+    laid = {(int(p.x), int(p.z)) for p in b.placements
+            if p.asset_id == upper.id and p.y > 0.01}
+    assert laid and laid <= inner
+
+
+def test_the_roof_sits_on_the_wall_head():
+    """The roof is seated at floors*storey_h and the top wall's head is at
+    (floors-1)*storey_h + wall. Those agree only when the storey *is* the wall;
+    pitched at wall+floor they differ by a deck, and the roof floats half a
+    tile with daylight under it all the way round."""
+    from citysmith.build import build_from_tilemap, placed_bounds
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    wall = palette.require("wall")
+    # `_lay_roofs` deals ridge, side and corner pieces, not the flat cap the
+    # "roof" role resolves to, so the roof is found by form. The Village wall
+    # panels are tagged `group='roof'` too -- they ship in a roof set -- so
+    # they have to come back out, or the wall counts as its own roof.
+    roof_ids = {a.id for a in palette.catalog.assets
+                if "roof" in (a.group_tag or "").lower()
+                and "wall" not in a.name.lower()}
+    assert roof_ids
+
+    for floors in (1, 2, 3):
+        tm = TileMap.blank(16, 16)
+        for x in range(4, 9):
+            for z in range(4, 8):
+                tm.building[z][x] = "house-0001"
+                tm.surface[z][x] = FLOOR
+        tm.floors["house-0001"] = floors
+        _find_perimeters(tm, None)
+        _place_doors(tm, None)
+        b = build_from_tilemap(tm, palette, storeys=floors, roofs=True)
+
+        heads = [p.y + wall.size_y for p in b.placements if p.asset_id == wall.id]
+        roofs = [p.y for p in b.placements if p.asset_id in roof_ids]
+        assert heads and roofs, f"{floors} storey: nothing built"
+        assert abs(min(roofs) - max(heads)) < 1e-6, (
+            f"{floors} storey: roof bottom {min(roofs)} vs wall head {max(heads)}")
+
+
 def test_per_building_emits_one_slab_per_building_and_one_for_the_wall():
     """A chunk of forty buildings lands or fails as one thing, and nothing
     about the result says which building went wrong. Cut by building instead

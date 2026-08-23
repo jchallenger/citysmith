@@ -1159,18 +1159,21 @@ def _even_ceil(v: float) -> float:
     return 2.0 * math.ceil(v / 2.0)
 
 
-def _kit_of(name: str) -> str:
-    """The kit a piece belongs to, which is only ever in its name.
+def _kit_of(asset) -> str:
+    """The kit a piece belongs to: the catalog's ``folder``.
 
-    Nothing in the catalog data separates one family from another: `group`
-    names a *form* -- "corner", "wall" -- and the same tag covers castle stone,
-    rural boarding and a spaceship bulkhead. The kit is in the name, the same
-    place `is_curtain_piece` reads "diag" and "half" from. First word, because
-    that is where every family in this catalog puts it: "Rural Corner",
-    "Brick wall corner", "castle wall corner 1x1 base", "md_wall_corner_1x1_01".
+    Not the name, and not ``pack``. ``pack`` is the DLC -- "Medieval Fantasy"
+    covers castle, rural, tavern and thatch alike -- and ``group_tag`` names a
+    *form*, so the same tag covers castle stone, rural boarding and a
+    spaceship bulkhead. ``folder`` is the family, and it is what the game's own
+    asset library lists down its left-hand side.
+
+    This was a name heuristic first, and the name lies: `Village Roof Side
+    Wall 02` sits in folder **Tavern**, so matching on the first word looked
+    for a corner called "village *", found none, and mitred one -- while
+    `Tavern no floor (1x1 a)`, the kit's own corner, sat unused.
     """
-    head = name.strip().lower().replace("-", " ").replace("_", " ").split()
-    return head[0] if head else ""
+    return (getattr(asset, "folder", "") or "").strip().lower()
 
 
 def _anchor_last(kept: list[SlabChunk], whole: Slab,
@@ -2754,9 +2757,25 @@ def build_from_tilemap(
     # floor. Pitching the storey at that leaves a floor-thick gap between wall
     # courses, and the slab drops into it touching both and intersecting
     # neither.
+    # **That gap is the thing you can see, so it is gone.** Pitching the storey
+    # at wall+floor left a floor-thick slot between wall courses, and the deck
+    # dropped into it filling its whole cell -- which means the deck's edge sat
+    # flush with the wall face, a band of floorboards running right round every
+    # building between storeys. Probed against the alternatives
+    # (`tools/storey_probe.py`): with the courses touching, the facade is
+    # unbroken from the ground to the eaves and the only horizontal line left
+    # is the panel's own frame, which is what a timber-framed wall should look
+    # like.
+    #
+    # It fixes the roof too, and by arithmetic rather than by luck. The roof is
+    # seated at `floors * storey_h`; the head of the top wall is at
+    # `(floors-1) * storey_h + wall`. Those are the same number only when the
+    # storey *is* the wall. Pitched at wall+floor they differed by exactly a
+    # deck, which is why the roofs floated a half tile once the attic deck that
+    # had been filling the gap was taken away.
     upper = palette.resolve("floor_upper")
     deck = upper.size_y if upper is not None else 0.0
-    storey_h = ext_wall.size_y + deck
+    storey_h = ext_wall.size_y
 
     # The shell, the roof and the circuit are one layer: a building is a
     # thing you stand *on* the ground, not part of it.
@@ -2815,7 +2834,7 @@ def build_from_tilemap(
             # side. That costs two wall ends in one square, which is what the
             # corner piece was introduced to avoid -- but a buried seam warns
             # where a two-material corner shows.
-            if _kit_of(asset.name) != _kit_of(wall.name):
+            if _kit_of(asset) != _kit_of(wall):
                 return None
             return asset
 
@@ -2908,11 +2927,19 @@ def build_from_tilemap(
                 # spent on a surface no one sees. A single-storey cottage now
                 # gets no upper slab at all, which is what a cottage is.
                 #
-                # Each remaining slab sits in the gap *below* its storey's wall
-                # course, resting on the wall beneath.
+                # **Interior cells only.** A deck fills its whole cell, so on a
+                # perimeter cell its edge lands flush with the outside face of
+                # the wall and reads as a band of floorboards round the
+                # building -- the floor, seen from outside, which is the one
+                # thing it should never be. Laid on the cells that have no
+                # exposed side it never reaches the facade at all. The cost is
+                # an upper floor that stops one cell short of the wall, and
+                # that shows only through a window.
+                edge = {(x, z) for x, z, _ in tm.perimeter.get(bid, ())}
+                inner = sorted(c for c in cells_xy if c not in edge)
                 for level in range(1, storeys_of(tm, bid, storeys)):
-                    y = top + level * storey_h - deck
-                    for x, z in sorted(cells_xy):
+                    y = top + level * storey_h
+                    for x, z in inner:
                         b.add(place_tile(upper, x, z, y))
 
     with b.layer(STRUCTURE):
