@@ -2170,15 +2170,18 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             if comp:
                 blocks.append((fl, comp))
 
-    side = b.palette.resolve("roof_side")
-    corner = b.palette.resolve("roof_corner")
-    inner = b.palette.resolve("roof_corner_inner")
-    cap = b.palette.resolve("roof")
-    chimney = b.palette.resolve("roof_chimney")
-    rise = side.size_y if side is not None else 1.0
+    sets = {tier: roof_set(b.palette, tier) for tier in ROOF_BY_TIER}
 
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
         b.group = tm.building[min(cells)[1]][min(cells)[0]]
+        # The material follows the block's owning building, which is the same
+        # id the group is tagged with. A terrace shares one roof, so a block
+        # spanning two tiers takes the first one's -- deliberately, because a
+        # roof that changes material mid-slope is worse than one that does not
+        # match its neighbour.
+        side, corner, inner, cap, chimney = sets[tier_of(b.group)]
+        edge_off, corner_off = roof_offsets(side)
+        rise = side.size_y if side is not None else 1.0
         roof_y = base_y + fl * storey_h
 
         # One hip per rectangular wing, not one hip forced over the whole
@@ -2209,7 +2212,8 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                 fall = tuple(s for s, dx, dz in SIDE_OFFSETS
                              if rings.get((x + dx, z + dz), -1) < r)
                 piece, rot = _roof_piece(fall, side, corner, cap, inner,
-                                         _is_reflex(rings, x, z, fall))
+                                         _is_reflex(rings, x, z, fall),
+                                         edge_off, corner_off)
                 if piece is not None:
                     b.add(place_tile(piece, x, z, y, rot))
 
@@ -2597,8 +2601,75 @@ def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
     return rings
 
 
+#: Quarter-step turns to add to the Thatched convention, per kit, as
+#: ``(edge, corner)``. Keyed on the catalog's ``folder``, because **the kit is
+#: the folder** -- the same rule that found the facade's own corner piece.
+#:
+#: The rotations in :data:`ROOF_EDGE_ROT` were read out of one community-built
+#: cottage, and that cottage is thatched. Nothing had ever checked whether
+#: another kit shares the convention, and reading a Village hip built on it as
+#: "this kit has no 1x1 hip pieces" was wrong twice over: the pieces are there,
+#: one for one with Rural's, and each kit simply authors them facing its own
+#: way. Measured with `tools/roofrot_probe.py --hips`, which lays the same hip
+#: once per offset so exactly one closes:
+#:
+#:     Rural (thatch)                  edge +0   corner +0   <- the baseline
+#:     Tavern (terracotta tile)        edge +6   corner +6
+#:     Castle Fortified (shingle)      edge +6   corner +0
+#:     Abandoned Village (slate)       edge +6   corner +0
+#:
+#: An unlisted kit gets ``(0, 0)`` and looks wrong rather than crashing, which
+#: is the right failure: it shows up in the first screenshot.
+ROOF_ROT_OFFSET: dict[str, tuple[int, int]] = {
+    "rural": (0, 0),
+    "tavern": (6, 6),
+    "castle fortified": (6, 0),
+    "abandoned village": (6, 0),
+}
+
+
+def roof_offsets(side) -> tuple[int, int]:
+    """The ``(edge, corner)`` turn for whichever kit ``side`` came from."""
+    return ROOF_ROT_OFFSET.get(_kit_of(side), (0, 0)) if side is not None else (0, 0)
+
+
+#: Roof material per building tier, as the palette-role suffix. Thatch is the
+#: bare role and stays the default, so a style that declares no second roof
+#: keeps working unchanged.
+#:
+#: The hierarchy is the real one: thatch is what a cottage and a barn are
+#: roofed in, tile is what a shop that can afford it buys, and slate is the
+#: dearest -- which is why the civic tier gets it. Before this, *every* roof on
+#: the map was `Thatched Roof 01`, because the set was resolved once for the
+#: map rather than once per building, so the temple was thatched too.
+ROOF_BY_TIER = {
+    "civic": "slate",
+    "trade": "tile",
+    "common": "",
+    "utility": "",
+}
+
+
+def roof_set(palette, tier: str):
+    """The ``(side, corner, inner, cap, chimney)`` a tier is roofed in.
+
+    Falls back a piece at a time to the thatched set, so a style that declares
+    only some of a material still builds a whole roof rather than a roof with
+    holes in it -- a missing slope is invisible in the file and a hole on the
+    board.
+    """
+    suffix = ROOF_BY_TIER.get(tier, "")
+    base = ("roof_side", "roof_corner", "roof_corner_inner", "roof",
+            "roof_chimney")
+    out = []
+    for role in base:
+        asset = palette.resolve(f"{role}_{suffix}") if suffix else None
+        out.append(asset if asset is not None else palette.resolve(role))
+    return tuple(out)
+
+
 def _roof_piece(fall: tuple[str, ...], side, corner, cap, inner=None,
-                reflex: bool = False):
+                reflex: bool = False, edge_off: int = 0, corner_off: int = 0):
     """The roof asset and rotation for a cell, given the sides it slopes to.
 
     Two adjacent falls are a corner; one is a straight slope; none is a cell
@@ -2613,16 +2684,18 @@ def _roof_piece(fall: tuple[str, ...], side, corner, cap, inner=None,
     what made the roofscape read as jumbled.
     """
     if len(fall) == 1:
-        return side, ROOF_EDGE_ROT[fall[0]]
+        return side, (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24
     if len(fall) == 2:
         which = CORNER_BY_SIDES.get(frozenset(fall))
         if which is not None:
             if reflex and inner is not None:
                 # The inner piece is authored facing into the angle, so it
                 # takes the rotation of the corner diagonally opposite.
-                return inner, ROOF_CORNER_ROT[_OPPOSITE_CORNER[which]]
-            return corner or side, ROOF_CORNER_ROT[which]
-        return side, ROOF_EDGE_ROT[fall[0]]   # opposite sides: a ridge run
+                return inner, (ROOF_CORNER_ROT[_OPPOSITE_CORNER[which]]
+                               + corner_off) % 24
+            return corner or side, (ROOF_CORNER_ROT[which] + corner_off) % 24
+        # Opposite sides: a ridge run, which is an edge piece, not a corner.
+        return side, (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24
     return cap, 0
 
 
@@ -3425,14 +3498,18 @@ def _build_porches(b: Builder, tm, grade: float,
     signs hung on the same facade -- they occupy up to 2.65, so anything
     lower would have its sign silently dropped for overlapping it.
     """
-    piece = b.palette.resolve("roof_side")
-    if piece is None:
-        return 0
     built = 0
     for bid, doors in sorted(tm.doors.items()):
         b.group = bid
         if bid.split("-")[0] not in PORCHED_KINDS or not doors:
             continue
+        # The porch is a slope off the building's own roof, so it takes that
+        # building's material and that kit's turn -- a thatched hood on a
+        # slate hall is exactly the mismatch the tiers exist to remove.
+        piece = roof_set(b.palette, tier_of(bid))[0]
+        if piece is None:
+            continue
+        edge_off, _ = roof_offsets(piece)
         x, z, side = doors[0]
         dx, dz = next((d, e) for sd, d, e in SIDE_OFFSETS if sd == side)
         ox, oz = x + dx, z + dz
@@ -3445,7 +3522,7 @@ def _build_porches(b: Builder, tm, grade: float,
             continue
         # Slopes away from the wall it is attached to.
         b.add(place_tile(piece, ox, oz, grade - drop + storey_h + 0.5,
-                         ROOF_EDGE_ROT[side]))
+                         (ROOF_EDGE_ROT[side] + edge_off) % 24))
         built += 1
     return built
 

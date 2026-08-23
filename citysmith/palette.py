@@ -268,6 +268,35 @@ MEDIEVAL = Style(
         # its position in the footprint.
         "roof_side": [_tile(name="Thatched Roof 01", **_MED)],
         "roof_corner": [_tile(name="Thatched Roof Corner 01", **_MED)],
+        # -- the other three roof materials -------------------------------
+        # Every one of these was on the shelf the whole time. `_lay_roofs`
+        # stacks a hip using rotations read out of one community-built
+        # cottage, and those are *the Thatched kit's*; dropped onto another
+        # kit's pieces they produce a rank of fins, which read as "this kit
+        # has no hip pieces". It does. `tools/roofrot_probe.py --hips` lays
+        # the same hip four times, once per quarter turn, and exactly one
+        # closes -- see `build.ROOF_ROT_OFFSET` for the measured table.
+        #
+        # Terracotta tile, the Tavern kit's own -- so a house whose walls are
+        # `Village Roof Side Wall 0x` can be roofed in its own family.
+        "roof_side_tile": [_tile(name="Village Roof Side 01", **_MED, **_UNIT)],
+        "roof_corner_tile": [_tile(name="Village Roof Corner 01", **_MED, **_UNIT)],
+        "roof_corner_inner_tile": [
+            _tile(name="Village Roof Inner Corner 01", **_MED, **_UNIT)],
+        "roof_tile": [_tile(name="Tavern Roof flat 01", **_MED, **_UNIT)],
+        "roof_chimney_tile": [_tile(name="Village Roof Side/Chimney", **_MED, **_UNIT)],
+        # Grey slate. Reads as the dearest roof on the board, which is why it
+        # goes on the civic tier: slate on dressed stone is a temple or a
+        # guildhall, and thatch on dressed stone says nothing at all.
+        "roof_side_slate": [_tile(name="Haunted roof 1x1", **_MED, **_UNIT)],
+        "roof_corner_slate": [
+            _tile(name="haunted roof corner out tip", **_MED, **_UNIT)],
+        "roof_corner_inner_slate": [
+            _tile(name="haunted roof corner inner tip", **_MED, **_UNIT)],
+        "roof_slate": [_tile(name="haunted roof 1x1 flat", **_MED, **_UNIT)],
+        #: The Abandoned Village kit ships no 1x1 chimney; the thatched one is
+        #: a chimney rather than a roof surface, so it reads fine on slate.
+        "roof_chimney_slate": [_tile(name="Thatched Chimney", **_MED, **_UNIT)],
         # A reflex corner is not an outside corner turned round -- it is its
         # own piece, and the kit ships one. Half of all corner cells on this
         # map are reflex (223 of 467), because an L-shaped plan has one at its

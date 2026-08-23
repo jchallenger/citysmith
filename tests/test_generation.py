@@ -2182,3 +2182,49 @@ def test_every_tier_turns_its_corner_in_its_own_kit():
             f"wall {wall.name!r} from {_kit_of(wall)!r}")
         checked += 1
     assert checked, "no tier placed a corner piece -- the test proved nothing"
+
+
+def test_each_roof_kit_gets_its_own_rotation():
+    """The hip rotations were read out of one thatched cottage, and no other
+    kit shares them -- dropped onto Village pieces they make a rank of fins.
+    Measured per kit with tools/roofrot_probe.py --hips."""
+    from citysmith.build import ROOF_EDGE_ROT, _roof_piece, roof_offsets
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    thatch = palette.require("roof_side")
+    tile = palette.require("roof_side_tile")
+    assert roof_offsets(thatch) == (0, 0), "thatch is the baseline convention"
+    assert roof_offsets(tile) == (6, 6), "the Tavern kit is a quarter turn on"
+
+    # The turn has to reach the placement, not just the table.
+    _, plain = _roof_piece(("n",), thatch, None, None)
+    _, turned = _roof_piece(("n",), tile, None, None, edge_off=6)
+    assert plain == ROOF_EDGE_ROT["n"]
+    assert turned == (ROOF_EDGE_ROT["n"] + 6) % 24
+
+
+def test_a_tier_is_roofed_in_its_own_material():
+    """Every roof on the map used to be Thatched Roof 01, because _lay_roofs
+    resolved the set once for the map rather than once per building -- so the
+    temple was thatched too."""
+    from citysmith.build import build_from_tilemap, roof_set
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    sets = {t: roof_set(palette, t) for t in ("civic", "trade", "common")}
+    slopes = {t: s[0].name for t, s in sets.items()}
+    assert len(set(slopes.values())) == 3, f"tiers share a roof: {slopes}"
+
+    for bid, tier in (("temple-0001", "civic"), ("tavern-0001", "trade"),
+                      ("house-0001", "common")):
+        b = build_from_tilemap(_one_building(bid), palette, storeys=2, roofs=True)
+        placed = {p.asset_id for p in b.placements}
+        assert sets[tier][0].id in placed, (
+            f"{bid}: no {slopes[tier]!r} on a {tier} building")
+        for other, s in sets.items():
+            if other != tier:
+                assert s[0].id not in placed, (
+                    f"{bid}: {tier} building roofed in {other}'s slope")

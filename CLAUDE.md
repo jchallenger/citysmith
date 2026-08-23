@@ -716,30 +716,45 @@ shape instead of reading it. The rules that fall out:
   `test_the_roof_sits_on_the_wall_head` and
   `test_no_upper_deck_reaches_the_outside_of_a_building` guard the result.
 
-- **Only the Thatched kit has a 1x1 hip vocabulary. The others are 2x2 kits
-  with 1x1 offcuts.** `_lay_roofs` stacks a hip as concentric rings using
-  rotations read out of a community-built cottage -- and nothing had ever
-  checked that another kit shares them. It does not, and rotation cannot fix
-  it, because rotation is about Y and cannot tip a slope upright.
-  `tools/roofkit_probe.py` lays each kit's slope and corner alone at rot
-  0/6/12/18 beside a 6x6 hip built the Thatched way:
-  * **Village** (`Village Roof Side 01`, 1x1x1) is a thin *blade* at every
-    rotation -- the name says so, a "Roof Side" is a gable side. Built as a
-    hip it is a rank of red fins with daylight between them.
-  * **Castle** (`Regular 1x1`) *is* a slope and the hip nearly forms; it fails
-    at the corners, because `Skirt_1x1_corner in/out` is an eave flare. The
-    kit's real corner is `Regular 2x2 corner *`, authored at 2x2.
-  * **Haunted** (`Haunted roof 1x1`, grey slate) fails the same way -- its
-    1x1 pieces are named `corner out tip` / `corner inner tip`, the *tips* of
-    a 2x2 corner.
-  So a second roof material needs either a 2x2 ring mode in `_lay_roofs`, or
-  the non-Thatched kits used for **flat parapet roofs** instead of hips --
-  which is what `_lay_towers` already does, and is architecturally right for
-  civic anyway. Do not "fix the rotations"; the pieces are not there.
-  **Run each dark kit against the tan Thatched control on its own board.**
-  Castle and Haunted are both dark weathered timber and were told apart on a
-  four-kit board only by counting a tally stack at a grazing angle -- which
-  read wrong. `--kits thatched,castle` makes identification a colour.
+- **The hip convention is PER KIT, and there are four roof materials, not
+  one.** `ROOF_EDGE_ROT` / `ROOF_CORNER_ROT` were read out of one
+  community-built cottage, and that cottage is thatched. Nothing had ever
+  checked whether another kit shares the convention. None of them does:
+  dropped onto Village pieces the Thatched rotations produce a rank of red
+  fins. Measured with `tools/roofrot_probe.py --hips`, which lays the same 6x6
+  hip four times, once per quarter turn, so exactly one closes:
+
+  | kit | edge | corner | material |
+  |---|---|---|---|
+  | `Rural` | +0 | +0 | thatch (the baseline) |
+  | `Tavern` | +6 | +6 | terracotta tile |
+  | `Castle Fortified` | +6 | +0 | brown shingle |
+  | `Abandoned Village` | +6 | +0 | grey slate |
+
+  `build.ROOF_ROT_OFFSET` holds it, keyed on `folder` -- **the kit is the
+  folder**, the same rule that found the facade's corner. `roof_set` picks the
+  material per tier and `_roof_piece` takes the turn.
+
+  **I got this wrong first and wrote the wrong thing here.** I tried one
+  guessed corner per kit (`Skirt_1x1_corner out` for Castle), saw fins, and
+  recorded "only Thatched has a 1x1 hip vocabulary; the others are 2x2 kits
+  with 1x1 offcuts; do not fix the rotations, the pieces are not there." Every
+  clause of that is false. Tavern ships the same five pieces as Rural, one for
+  one -- slope, corner, inner corner, flat cap, chimney -- and Castle has two
+  1x1 corners I never tried. **The user pushed back with "it seems to me the
+  pieces exist, but the rotations are wrong", and was right.** The failure was
+  reporting one guess as a survey; the fix was an artifact that sweeps the
+  whole space instead of asserting about it.
+
+  Two probe-reading rules came out of the same session:
+  * **Run one dark kit at a time against the tan Thatched control.** Castle
+    and Haunted are both dark weathered timber and were told apart on a
+    four-kit board only by counting a tally stack at a grazing angle, which
+    read wrong. `roofkit_probe.py --kits thatched,castle` makes it a colour.
+  * **A hip is judged in plan, so number the candidates on the ground.** A
+    vertical tally stack reads at an oblique and vanishes from overhead; a bar
+    of N cells running east is unmistakable. Zoom-out is capped, so size the
+    probe to fit one frame rather than expecting to fly around it.
 
 - **A corner piece eats the facade on a small footprint, so a glazing *rate*
   cannot say much.** Windows are dealt one-in-N per segment, and on Forest
