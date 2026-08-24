@@ -1836,7 +1836,12 @@ def test_the_fringe_is_runs_not_teeth():
     from citysmith.layout import Layout
     from citysmith.raster import rasterize
 
-    tm = rasterize(Layout.load("out/layout.json"))
+    import pathlib
+
+    src = pathlib.Path("out/layout.json")
+    if not src.exists():
+        pytest.skip("needs the imported Forest Church layout")
+    tm = rasterize(Layout.load(src))
     border, bitten = _taper_fringe(tm)
     kept = border - bitten
     assert bitten, "nothing was bitten -- the fringe is not ragged at all"
@@ -1861,7 +1866,12 @@ def test_no_road_runs_out_over_the_void():
     from citysmith.layout import Layout
     from citysmith.raster import rasterize
 
-    tm = rasterize(Layout.load("out/layout.json"))
+    import pathlib
+
+    src = pathlib.Path("out/layout.json")
+    if not src.exists():
+        pytest.skip("needs the imported Forest Church layout")
+    tm = rasterize(Layout.load(src))
     border, bitten = _taper_fringe(tm)
 
     for (bx, bz) in bitten:
@@ -1893,7 +1903,12 @@ def test_only_land_falls_away_at_the_edge():
     from citysmith.layout import Layout
     from citysmith.raster import rasterize
 
-    tm = rasterize(Layout.load("out/layout.json"))
+    import pathlib
+
+    src = pathlib.Path("out/layout.json")
+    if not src.exists():
+        pytest.skip("needs the imported Forest Church layout")
+    tm = rasterize(Layout.load(src))
     taper = edge_taper(tm)
 
     level = {R.WATER, R.STREET, R.PLAZA, R.LANE, R.PIER}
