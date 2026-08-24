@@ -10,6 +10,7 @@ This file is the internal engineering notes. User-facing docs:
 `docs/ftg-geojson-import.md` (the second import format, reverse-engineered),
 `docs/scenes.md` (one building as a board the party walks into),
 `docs/interior-slabs.md` (what hand-builders do inside a building, measured),
+`docs/fencing.md` (field walls: measured, designed, not built yet),
 `docs/branching.md` (worktrees, and the policy that closes them),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
 `.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).
