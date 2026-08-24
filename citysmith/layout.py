@@ -144,6 +144,37 @@ def distance(a: Point, b: Point) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
+def nearest_on_polyline(p: Point, points: Sequence[Point]) -> Point:
+    """The closest point on a polyline -- **not** its closest vertex.
+
+    A road here is a chain of long segments: FTG's are joined from 2-point
+    edges and MFCG's from whole streets, so a building beside the middle of a
+    straight run can be a hundred feet from either end of it. Taking the
+    nearest vertex answers "which way is the corner", which is a different
+    question and, for a house on a through road, usually the wrong one.
+    """
+    best: Point | None = None
+    best_d = math.inf
+    pts = list(points)
+    if len(pts) == 1:
+        return pts[0]
+    for i in range(len(pts) - 1):
+        (ax, ay), (bx, by) = pts[i], pts[i + 1]
+        dx, dy = bx - ax, by - ay
+        span = dx * dx + dy * dy
+        if span < 1e-12:
+            cand = (ax, ay)
+        else:
+            t = max(0.0, min(1.0, ((p[0] - ax) * dx + (p[1] - ay) * dy) / span))
+            cand = (ax + t * dx, ay + t * dy)
+        d = distance(p, cand)
+        if d < best_d:
+            best_d, best = d, cand
+    if best is None:
+        raise ValueError("nearest_on_polyline needs at least one point")
+    return best
+
+
 # -- model --------------------------------------------------------------------
 
 @dataclass

@@ -1558,14 +1558,22 @@ def build_interior(
     seed: int = 0,
     roof: bool = False,
     prop_density: float = 0.12,
+    stack: bool = True,
 ) -> Builder:
     """Build a playable interior from a :class:`~citysmith.floorplan.Floorplan`.
 
     The roof is off by default: a covered interior is nearly unusable at the
     table because the camera cannot see in.
+
+    ``stack`` is the same argument one storey further. With it on, level 1
+    sits on top of level 0, which is what a building does and what the camera
+    then cannot see into -- TaleSpire has no way to hide an upper floor. With
+    it off every level is built at ground height, and the levels are expected
+    to have already been moved apart in the plan
+    (:func:`citysmith.interior.spread_levels`), so the whole building reads
+    from directly overhead like a battle map.
     """
     b = Builder(palette, seed)
-    rect = floorplan.rect
 
     floor = palette.require("floor")
     upper = palette.resolve("floor_upper") or floor
@@ -1578,8 +1586,11 @@ def build_interior(
     level_base: list[float] = []
 
     for level in range(floorplan.levels):
+        # Each level's own footprint. Identical for every level when they are
+        # stacked; yards apart when they have been spread for play.
+        rect = floorplan.rect_on(level)
         slab_asset = floor if level == 0 else upper
-        base = level * (storey_h + slab_asset.size_y)
+        base = level * (storey_h + slab_asset.size_y) if stack else 0.0
         level_base.append(base)
 
         for tx, tz in rect.tiles():
@@ -1619,13 +1630,23 @@ def build_interior(
             break
         y = level_base[stair.from_level] + floor.size_y
         b.add(place_tile(stair_asset, stair.x, stair.z, y))
+        if not stack:
+            # Spread levels are not above each other, so one stair tile says
+            # nothing about where you come out. The pair does. The offset is
+            # read off the two levels' rects rather than from the gap, so it
+            # is right whatever the plan did with them.
+            dx = floorplan.rect_on(stair.to_level).x - floorplan.rect_on(stair.from_level).x
+            b.add(place_tile(stair_asset, stair.x + dx, stair.z,
+                             level_base[stair.to_level] + floor.size_y))
 
     if roof:
         roof_asset = palette.resolve("roof")
         if roof_asset is not None:
-            top = level_base[-1] + storey_h + floor.size_y
-            for tx, tz in rect.tiles():
-                b.add(place_tile(roof_asset, tx, tz, top))
+            levels = [floorplan.levels - 1] if stack else range(floorplan.levels)
+            for level in levels:
+                top = level_base[level] + storey_h + floor.size_y
+                for tx, tz in floorplan.rect_on(level).tiles():
+                    b.add(place_tile(roof_asset, tx, tz, top))
 
     return b
 
@@ -1633,6 +1654,7 @@ def build_interior(
 def _interior_walls(floorplan, level: int) -> set[tuple[int, int, str]]:
     """Cells+sides where two rooms meet, deduplicated so no wall is doubled."""
     rooms = floorplan.rooms_on(level)
+    shell = floorplan.rect_on(level)
     walls: set[tuple[int, int, str]] = set()
     seen_edges: set[tuple[float, float, str]] = set()
 
@@ -1647,10 +1669,10 @@ def _interior_walls(floorplan, level: int) -> set[tuple[int, int, str]]:
                     continue
                 # Skip the building's outer shell -- already built.
                 outer = (
-                    (side == "n" and tz == floorplan.rect.z)
-                    or (side == "s" and tz == floorplan.rect.z2 - 1)
-                    or (side == "w" and tx == floorplan.rect.x)
-                    or (side == "e" and tx == floorplan.rect.x2 - 1)
+                    (side == "n" and tz == shell.z)
+                    or (side == "s" and tz == shell.z2 - 1)
+                    or (side == "w" and tx == shell.x)
+                    or (side == "e" and tx == shell.x2 - 1)
                 )
                 if outer:
                     continue

@@ -82,6 +82,24 @@ class Floorplan:
     def rooms_on(self, level: int) -> list[Room]:
         return [r for r in self.rooms if r.level == level]
 
+    def rect_on(self, level: int) -> Rect:
+        """The footprint of one level, which is not always ``self.rect``.
+
+        Levels tile the same footprint when they are stacked. They do not when
+        they have been laid out side by side for play
+        (:func:`citysmith.interior.spread_levels`), and every pass that asks
+        "is this cell on the outside wall" has to ask it of the level's own
+        rect or it walls the wrong edges.
+        """
+        rooms = self.rooms_on(level)
+        if not rooms:
+            return self.rect
+        x0 = min(r.rect.x for r in rooms)
+        z0 = min(r.rect.z for r in rooms)
+        x1 = max(r.rect.x2 for r in rooms)
+        z1 = max(r.rect.z2 for r in rooms)
+        return Rect(x0, z0, x1 - x0, z1 - z0)
+
     def to_dict(self) -> dict:
         return {
             "floorplan_version": FLOORPLAN_VERSION,
