@@ -421,8 +421,9 @@ automatically (Windows only, and the game must be windowed).
   a slab into the game without fighting it.
 - [docs/asset-conventions.md](docs/asset-conventions.md) — footprint, pinning,
   normalization and roof-rotation rules.
-- [docs/asset-index.md](docs/asset-index.md) — generated index of the asset
-  library, by kit.
+- `docs/asset-index.md` — a generated index of *your* asset library, by kit.
+  Not in the repo, because it is a dump of your TaleSpire packs; run
+  `python tools/kit_index.py` to produce it locally.
 - [docs/ftg-geojson-import.md](docs/ftg-geojson-import.md) — the Fantasy Town
   Generator schema, reverse-engineered.
 - [docs/slab-format-v2.md](docs/slab-format-v2.md) — BouncyRock's official slab
@@ -441,7 +442,7 @@ automatically (Windows only, and the game must be windowed).
 python -m pytest -q
 ```
 
-208 tests. The slab codec is tested against real TaleSpire slabs in
+228 tests. The slab codec is tested against real TaleSpire slabs in
 `tests/fixtures/` — decoding and re-encoding reproduces the original binary
 byte for byte. Generator tests assert *invariants* (no overlapping buildings,
 no unreachable rooms, walls resting on floors, no window on the back of a
@@ -458,6 +459,29 @@ Emits `out/calibrate.slab.txt`: a 9×3 floor pad with four walls in the middle
 row, each hugging one named edge of its own tile. Paste it, look straight down,
 and confirm the rotation convention holds for your packs.
 
+## Third-party content
+
+citysmith **ships no TaleSpire assets and no asset data.** It reads names, tags
+and collider bounds out of the TaleSpire installation on the machine it runs
+on, at run time, into a local `catalog.json` that is not committed. The
+generated `docs/asset-index.md` is the same story and is likewise local. Slab
+files the tool emits reference assets by id — they are only meaningful to
+someone who already owns the packs.
+
+What the repo does contain, and where it came from:
+
+| | |
+|---|---|
+| `samples/forest_church.json` | A town exported from [Watabou's Medieval Fantasy City Generator][mfcg]. Kept as a worked example so the pipeline is runnable without generating your own first. |
+| `docs/images/*.jpg` | Screenshots of boards this tool built, taken in TaleSpire. They depict TaleSpire assets. |
+| `tests/fixtures/*.slab` | Real slabs, used as ground truth for the codec — a codec tested only on its own output is a codec that agrees with itself. They are data files listing asset ids and coordinates, not asset content. |
+| `docs/slab-format-v2.md` | Our own description of BouncyRock's slab format, written from the implementation. The authoritative spec is BouncyRock's and lives with TaleSpire. |
+
+TaleSpire and its asset packs are the property of BouncyRock Entertainment.
+This project is not affiliated with or endorsed by them. Using it is subject to
+whatever terms apply to your own TaleSpire licence, and that is on you.
+
 ## License
 
-MIT.
+[Apache License 2.0](LICENSE). Use it, fork it, ship it; keep the notices, and
+understand that it comes with no warranty of any kind.

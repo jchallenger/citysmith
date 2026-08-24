@@ -1,5 +1,9 @@
-# Built from the user's own TaleSpire install -- not portable, regenerate locally.
+# Built from the user's own TaleSpire install -- not portable, and not ours to
+# redistribute. Both regenerate locally in seconds:
+#   catalog.json        python -m citysmith catalog build
+#   docs/asset-index.md python tools/kit_index.py
 catalog.json
+docs/asset-index.md
 
 out/
 __pycache__/

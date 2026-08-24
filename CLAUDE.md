@@ -684,7 +684,9 @@ shape instead of reading it. The rules that fall out:
   questions answered by building the wrong thing and looking at it.
   `tools/kit_index.py` is the lookup: it groups every tile by `folder` and
   reports, per kit, which of the roles the generator places it can supply at
-  the right shape and height. `docs/asset-index.md` is the generated dump and
+  the right shape and height. `docs/asset-index.md` is the generated dump -- **regenerated locally, not
+  committed**, because it is a 99 KB extraction of whichever TaleSpire packs
+  the machine owns and is not ours to redistribute -- and
   `--kit` / `--role` / `--complete` are the queries.
   The three fields are not interchangeable and picking the wrong one costs
   hours: **`pack` is the DLC** ("Medieval Fantasy" covers castle, rural,

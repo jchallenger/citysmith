@@ -1,92 +1,64 @@
-# Slab Format V2
+# Slab format V2
 
-We will use the following types:
+The slab format is **BouncyRock's**, not ours. This file used to hold a copy of
+their published specification; it does not any more, because republishing
+someone else's document is not ours to do. What follows is our own working
+description, written from the implementation in `citysmith/slab.py` and
+verified against real slabs in `tests/fixtures/`.
 
-- u8: 8bit unsigned integer (byte in c#)
-- u16: 16bit unsigned integer (ushort in c#)
-- u32: 32bit unsigned integer (uint in c#)
-- u64: 64bit unsigned integer (ulong in c#)
-- uuid: 128bit id
+**Canonical source:** BouncyRock's own slab format documentation, published
+with TaleSpire. Go there for the authoritative wording.
 
-## String Processing
+## Shape of the thing
 
-Given a string which potentially contains a slab:
-
-- Trim whitespace from both ends
-- The string may have tripple backquotes (```) at the beginning and end, remove those if present
-- Base64 decode the string
-
-You should now have a binary array no more than 30720 byte in length
-
-## Decompress
-
-The data is gzip compressed. Decompress the array to get the slab data.
-
-For C# `new GZipStream(new MemoryStream(arr), CompressionMode.Decompress)` gives you a stream you can get the decompressed data from.
-
-## Read
-
-### Header
-
-> The first u32 will always be 0xD1CEFACE
->
-> the next u16 is the version of slab format. Will be 2 for this version
-
-### Counts
-
-> the next u16 is the number of `Layout`s. We will refer to this as `layoutCount`
->
-> the next u16 is the number of creatures and will always be zero in a v2 slab
-
-### Layouts
-
-Each Layout is 20 bytes in size and has the following form:
+A slab on the clipboard is text: base64 of a gzip stream, sometimes fenced in
+triple backticks. Decompressed it is a small binary record.
 
 ```
-Layout
-{
-    uuid AssetKindId;
-    u16 AssetCount;
-    u16 _RESERVED_;
-}
+u32  magic          0xD1CEFACE
+u16  version        2
+u16  layoutCount
+u16  creatureCount  always 0 in a v2 slab
+Layout[layoutCount] uuid assetKind (16 bytes, .NET byte order)
+                    u16  count
+                    u16  reserved
+u64[sum(counts)]    the placements, grouped by layout, in layout order
+u16  trailer        0x0000
 ```
 
-> The next (`layoutCount` * 20) bytes is packed `Layout`s data
-
-### Assets
-
-The data of assets of the same kind are packed contiguously. The layouts describe the order of the asset kinds and the number of assets of each kind.
-
-Each Asset is 8 bytes in size (`u64`) and the data is packed within it as follows:
+Each placement packs into one little-endian `u64`:
 
 ```
- most significant bits -- least significant bits
-| 5 bits | 5 bits | 18 bits | 18 bits | 18 bits |
-| unused |   rot  | scaledZ | scaledY | scaledX |
+ most significant -------------------------------- least significant
+| 5 unused | 5 rot | 18 bits z | 18 bits y | 18 bits x |
 ```
 
-The position of the asset is always >= 0 and is obtained as follows:
+## The parts that cost us time
 
-```
-x = scaledX / 100.0;
-y = scaledY / 100.0;
-z = scaledZ / 100.0;
-```
+These are the details that are easy to get wrong, and each one cost a session
+to find. They are the reason this file exists at all.
 
-The rot value is a unsigned integer greater than or equal to zero and less than 24.
+- **A position is the asset's minimum corner, after rotation** — not its
+  centre, and not its pre-rotation corner. The footprint swaps axes on odd
+  quarter turns. `build.rotated_footprint()` implements it and
+  `test_placement_matches_talespire_measurements` guards it against ground
+  truth copied out of the game.
+- **Wire value is `round(position * 100)`**, so coordinates are stored to a
+  hundredth of a tile. 1 world unit = 1 tile = 5 ft.
+- **Rotation is a step index 0..23**; degrees are `rot * 15`.
+- **The compressed payload must stay under 30,720 bytes.** This is the single
+  hardest constraint on the whole project and the reason a town is emitted as
+  chunks rather than one file.
+- **Decode → encode reproduces the original *binary* byte for byte, but not
+  the original base64.** .NET's deflate and zlib's differ in their choices.
+  That is expected and harmless; `tests/test_slab.py` asserts on the binary,
+  never on the text.
+- **The `.NET byte order` on the layout uuid is not the usual one.** The first
+  three fields of a GUID are little-endian on the wire. Reading it as a plain
+  big-endian uuid gives you a valid-looking id that matches no asset.
 
-To convert from rotation steps to degrees you do so as follows:
+## Where the numbers came from
 
-```
-degrees = rot * 15.0;
-```
-
-The remaining data after layouts is as follows:
-
-> (`layout[0].AssetCount` * 8) bytes of data for assets of kind `layout[0].AssetKindId`
->
-> (`layout[1].AssetCount` * 8) bytes of data for assets of kind `layout[1].AssetKindId`
->
-> ..
->
-> (`layout[layoutCount-1].AssetCount` * 8) bytes of data for assets of kind `layout[layoutCount-1].AssetKindId`
+`tests/fixtures/*.slab` are real slabs, and the codec is tested against them
+rather than against our own output — a codec tested only on what it wrote is a
+codec that agrees with itself. See `tests/test_slab.py`.
