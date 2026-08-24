@@ -3530,17 +3530,24 @@ TREE_CLEARANCE = 3
 
 
 def building_distance(tm, limit: int = 8) -> dict[tuple[int, int], int]:
-    """Cells out from the nearest building, breadth-first, capped at ``limit``.
+    """Cells out from the nearest **built** thing, breadth-first, capped at ``limit``.
 
     Density of anything scattered should fall off near the built-up area:
     that gradient is what makes a settlement look like it was cleared, and
     its absence is what made the woodland grow up to the doorsteps.
+
+    **The town wall counts as built.** Seeded from ``tm.building`` alone, the
+    falloff cleared woodland off every doorstep and left it growing flush
+    against the rampart -- pines standing in the ditch with their canopies
+    over the masonry, which is the one place a defender needs open ground and
+    the one structure the eye reads as a silhouette. A wall is a building for
+    this purpose even though it has no ``building`` id.
     """
     dist: dict[tuple[int, int], int] = {}
     frontier: list[tuple[int, int]] = []
     for z in range(tm.depth):
         for x in range(tm.width):
-            if tm.building[z][x]:
+            if tm.building[z][x] or tm.wall[z][x]:
                 dist[(x, z)] = 0
                 frontier.append((x, z))
     step = 0

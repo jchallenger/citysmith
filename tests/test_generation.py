@@ -2461,3 +2461,35 @@ def test_wall_stairs_are_inside_parallel_and_land_on_the_curtain():
     for c in by_height[top]:
         assert any((c[0] + dx, c[1] + dz) in curtain for _, dx, dz in SIDE_OFFSETS), (
             f"top tread {c} does not reach the curtain")
+
+
+# -- scatter clearance --------------------------------------------------------
+
+def test_the_wall_clears_woodland_the_way_a_building_does():
+    """A rampart is built, so trees fall back from it.
+
+    `building_distance` drives the density falloff for everything scattered.
+    Seeded from `tm.building` alone it cleared woodland off every doorstep and
+    left it growing flush against the town wall -- pines in the ditch with
+    their canopies over the masonry. A wall has no building id, so it has to be
+    seeded explicitly, and this is the check that it still is.
+    """
+    from citysmith import build as B
+    from citysmith import raster as R
+
+    tm = R.TileMap.blank(24, 24, "wall")
+    for x in range(4, 20):
+        tm.wall[12][x] = True
+
+    dist = B.building_distance(tm)
+    for x in range(4, 20):
+        for z in (11, 13):
+            assert dist.get((x, z)) == 1, f"({x},{z}) beside the wall is not cleared"
+    # and the falloff still reaches open country
+    assert dist.get((12, 3)) is None or dist[(12, 3)] > B.TREE_CLEARANCE
+
+
+def test_a_bare_tilemap_has_no_cleared_ground():
+    from citysmith import build as B
+    from citysmith import raster as R
+    assert B.building_distance(R.TileMap.blank(8, 8, "empty")) == {}

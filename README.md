@@ -255,6 +255,18 @@ own eaves — a second roof grafted onto the first.
 
 #### East Tradebourne — 991 buildings, walled
 
+![The town wall: coursed stone stepping diagonally, crenellated parapet and a
+square tower, thatch and terracotta roofs behind it, cleared ground
+outside](docs/images/east-tradebourne-rampart.jpg)
+
+A faced rampart, 35 ft to the wall-walk and 45 ft to the top of the merlons.
+The mass is a full-cell block with the thin curtain pieces hung on the faces
+that show — a wall built from 0.5-deep curtain pieces laid one per cell scores
+perfectly on any check that reads the tile grid while being visibly
+see-through on the board. The ground outside is clear because a rampart counts
+as *built* for the woodland falloff; seeded from buildings alone, pines grew
+flush against the masonry.
+
 ![The quay: a paved waterfront with rope-and-bollard railings along the river, a
 tall warehouse with a porch hood over its
 door](docs/images/east-tradebourne-quay.jpg)

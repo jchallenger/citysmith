@@ -348,7 +348,14 @@ switch ($Cmd) {
     $bmp = New-Object System.Drawing.Bitmap 40,40
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
     $cl = Get-Client
-    $gfx.CopyFromScreen($cl.X + 752, $cl.Y + 124, 0, 0, (New-Object System.Drawing.Size 40,40))
+    # **The build toolbar is CENTRED**, so its icons move with the client width.
+    # 752 was right for a 1600-wide window and 160px wrong the moment the window
+    # was maximised to 1920 -- the probe then sampled empty toolbar or bare
+    # board and reported UNKNOWN on a board where the plane was plainly off.
+    # Derive it from the centre, the same way every other coordinate here is
+    # derived from the rect rather than remembered.
+    $gx = $cl.X + [int]($cl.W/2) - 48
+    $gfx.CopyFromScreen($gx, $cl.Y + 124, 0, 0, (New-Object System.Drawing.Size 40,40))
     $r = 0; $g = 0; $b = 0; $n = 0
     for ($y = 0; $y -lt 40; $y += 2) {
       for ($x = 0; $x -lt 40; $x += 2) {
@@ -373,7 +380,7 @@ switch ($Cmd) {
     }
     $strip = New-Object System.Drawing.Bitmap 320,6
     $sg = [System.Drawing.Graphics]::FromImage($strip)
-    $sg.CopyFromScreen($cl.X + 620, $cl.Y + 120, 0, 0, (New-Object System.Drawing.Size 320,6))
+    $sg.CopyFromScreen($cl.X + [int]($cl.W/2) - 180, $cl.Y + 120, 0, 0, (New-Object System.Drawing.Size 320,6))
     $sr = 0; $sgc = 0; $sb = 0; $sn = 0
     for ($y = 0; $y -lt 6; $y += 2) {
       for ($x = 0; $x -lt 320; $x += 4) {
@@ -388,7 +395,7 @@ switch ($Cmd) {
     $gfx.Dispose(); $bmp.Dispose()
     $r = [int]($r/$n); $g = [int]($g/$n); $b = [int]($b/$n)
 
-    if (-not ($grey -and $lum -lt 70 -and $lit -ge 2)) {
+    if (-not ($grey -and $lum -lt 95 -and $lit -ge 2)) {
       "build plane UNKNOWN -- the build toolbar is not on screen (strip rgb($sr,$sgc,$sb), " +
       "glyph px $lit). Press B for build mode, then read it again. Do NOT paste on this reading."
     }
@@ -398,7 +405,11 @@ switch ($Cmd) {
   'newboard' {
     Focus-TS
     $cl = Get-Client
-    Press ($cl.X + 1332) ($cl.Y + 14) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    # The `+` is anchored to the RIGHT of the top bar, so its offset is from
+    # the far edge. Hardcoded at 1332 it was correct for a 1600-wide window and
+    # silently missed by 320px once the window was maximised to 1920 -- the
+    # click landed on nothing and the "new" board was the one already open.
+    Press ($cl.X + $cl.W - 268) ($cl.Y + 14) ([TSIn]::LDOWN) ([TSIn]::LUP)
     Start-Sleep -Seconds 2
     Send-Chord "b" 150                     # a fresh board opens out of build mode
     Start-Sleep -Milliseconds 600
