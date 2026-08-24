@@ -91,6 +91,15 @@ Three things about that list:
   ```bash
   pwsh tools/ts.ps1 click -X <clientX+17> -Y <clientY+57> -Hold 0.3
   ```
+- **The row you are standing on is EXPANDED**, and it pushes everything below
+  it down. The current board's row opens to show `Delete board`, `Set Folder`
+  and `Reload Board` -- about 134 px of it -- so `200 + (N-1)*42` gives the
+  wrong y for any row that sorts after the current board. Measure the y off the
+  screenshot; `scene.ps1 switch` takes `-RowY <pixels>` for exactly this.
+- **The title bar is not the list.** The bar at the top right shows far more of
+  a name than a list row does (`GRB/T123 Chapel of Hermes Int...` against
+  `GRB/T123 Chapel of He...`), so never judge whether a name fits by reading
+  the title bar.
 - **The rows are plain alphabetical.** The current board is highlighted in
   place, not floated to the top — an earlier note here said otherwise and it
   was wrong; `Pelvesthollow` merely happened to sort first. Renaming still

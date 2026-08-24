@@ -179,3 +179,27 @@ def test_two_scenes_keep_separate_records(tmp_path):
     registry.record(a, _slabs(tmp_path, a))
     registry.record(b, _slabs(tmp_path, b, (2.0, 0.0, 2.0)))
     assert len(boards.Registry.load(tmp_path / "boards.json").records) == 2
+
+
+def test_renaming_a_record_does_not_claim_a_fresh_paste(tmp_path):
+    """A naming scheme can change under a campaign that already has boards in
+    it. `record` would recompute the digest from the files on disk and quietly
+    relabel a board holding an older build as holding the current one -- which
+    is the exact thing the digest exists to notice."""
+    scene = _scene()
+    registry = boards.Registry.load(tmp_path / "boards.json")
+    registry.record(scene, _slabs(tmp_path, scene, (0.0, 0.0, 0.0)))
+    rebuilt = _slabs(tmp_path, scene, (5.0, 0.0, 5.0))
+    assert registry.status(scene, rebuilt)[0] == boards.STALE
+
+    registry.rename(scene.scene_id, "GRB/T14 The Halfling and the Fox Interior")
+    record = boards.Registry.load(tmp_path / "boards.json").get(scene.scene_id)
+    assert record.board == "GRB/T14 The Halfling and the Fox Interior"
+    assert record.superseded == [scene.board]
+    assert record.visits == 1, "a rename is not a visit"
+    assert registry.status(scene, rebuilt)[0] == boards.STALE, "still stale"
+
+
+def test_renaming_something_unrecorded_says_so(tmp_path):
+    registry = boards.Registry.load(tmp_path / "boards.json")
+    assert registry.rename("nothing-here", "X") is None

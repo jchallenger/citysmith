@@ -162,6 +162,25 @@ class Registry:
         self.save()
         return record
 
+    def rename(self, scene_id: str, board: str) -> BoardRecord | None:
+        """Point an existing record at a new board name, and nothing else.
+
+        For a board renamed in game -- a naming scheme changing under a
+        campaign that already has boards in it. **Deliberately not `record`**:
+        that one recomputes the digest from the files on disk, so using it to
+        change a name would quietly relabel a board holding an older build as
+        holding the current one. The whole point of the digest is to notice
+        that, and a rename is not a paste.
+        """
+        rec = self.records.get(scene_id)
+        if rec is None:
+            return None
+        if rec.board != board:
+            rec.superseded.append(rec.board)
+            rec.board = board
+            self.save()
+        return rec
+
     def visit(self, scene_id: str) -> BoardRecord | None:
         """Count a return trip. The board is untouched; only the record moves."""
         record = self.records.get(scene_id)

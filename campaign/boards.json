@@ -4,7 +4,7 @@
  "boards": {
   "graybank-tavern-0014": {
    "scene_id": "graybank-tavern-0014",
-   "board": "The Halfling and the Fox - Graybank interior",
+   "board": "GRB/T14 The Halfling and the Fox Interior",
    "town": "Graybank",
    "building_id": "tavern-0014",
    "centroid": [
@@ -15,11 +15,13 @@
    "created": "2026-08-24T00:32:09",
    "last_entered": "2026-08-24T00:32:09",
    "visits": 1,
-   "superseded": []
+   "superseded": [
+    "The Halfling and the Fox - Graybank interior"
+   ]
   },
   "graybank-temple-0123": {
    "scene_id": "graybank-temple-0123",
-   "board": "Chapel of Hermes - Graybank interior",
+   "board": "GRB/T123 Chapel of Hermes Interior",
    "town": "Graybank",
    "building_id": "temple-0123",
    "centroid": [
@@ -30,7 +32,9 @@
    "created": "2026-08-24T08:31:57",
    "last_entered": "2026-08-24T08:31:57",
    "visits": 1,
-   "superseded": []
+   "superseded": [
+    "Chapel of Hermes - Graybank interior"
+   ]
   }
  }
 }

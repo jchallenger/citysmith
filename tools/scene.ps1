@@ -40,6 +40,7 @@ param(
   [string]$Scene,
   [string]$Config = "config/scene.json",
   [int]$Row = 0,
+  [int]$RowY = 0,
   [switch]$Rebuild,
   [switch]$WhatIf,
   [int]$X = 0,
@@ -136,14 +137,21 @@ switch ($Cmd) {
   }
 
   'switch' {
-    if ($Row -lt 1) {
-      throw ("switch needs -Row N, read off the board-list screenshot. Rows " +
-             "start at client y=200 and are 42 apart; the play arrow is at " +
-             "x=360. The list re-sorts on every rename, so never reuse a row " +
-             "number from an earlier session.")
+    if ($Row -lt 1 -and $RowY -lt 1) {
+      throw ("switch needs -Row N or -RowY <pixels>, read off the board-list " +
+             "screenshot. Rows start at client y=200 and are 42 apart; the " +
+             "play arrow is at x=360. The list re-sorts on every rename, so " +
+             "never reuse a position from an earlier session.")
     }
     $cl = & $ts client
+    # **-Row is arithmetic and the arithmetic is not always right.** The row of
+    # the board you are standing on is EXPANDED in the list -- it shows Delete
+    # board / Set Folder / Reload Board -- which pushes every row below it down
+    # by about 134 px. So a target that sorts after the current board is not
+    # where 200 + (N-1)*42 says it is. Measure the y off the screenshot and
+    # pass -RowY when the current board sorts above your target.
     $rowY = 200 + ($Row - 1) * 42
+    if ($RowY -gt 0) { $rowY = $RowY }
     if ($WhatIf) { "would click the play arrow on row $Row (client 360,$rowY)"; break }
     TS click -X (360 + $cl.X) -Y ($rowY + $cl.Y) -Hold 0.3
     # A big board takes tens of seconds to come up. Wait, then look, before

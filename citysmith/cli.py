@@ -687,6 +687,17 @@ def cmd_boards(args) -> int:
     if not args.scene:
         raise SystemExit(f"error: boards {args.action} needs a scene id")
 
+    if args.action == "rename":
+        if not args.board:
+            raise SystemExit("error: boards rename needs --board <new name>")
+        record = registry.rename(args.scene, args.board)
+        if record is None:
+            print(f"no record of {args.scene}")
+            return 4
+        print(f"{record.scene_id} now points at {record.board!r}; "
+              "the digest is untouched, so a stale board still reads STALE")
+        return 0
+
     if args.action == "forget":
         if registry.forget(args.scene):
             print(f"forgot {args.scene}; the board itself is untouched")
@@ -1031,11 +1042,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("boards", help="which board holds which scene")
     c.add_argument("action",
-                   choices=["status", "record", "visit", "forget", "list"],
+                   choices=["status", "record", "rename", "visit", "forget", "list"],
                    help="status: what to do about this scene (exit 0 READY, "
                         "3 STALE, 4 NEW, 5 MOVED). record: note that it has "
                         "been pasted. visit: count a return trip. forget: drop "
-                        "the record for a board deleted by hand.")
+                        "the record for a board deleted by hand. rename: "
+                        "point the record at a new board name without "
+                        "claiming a fresh paste.")
     c.add_argument("scene", nargs="?", default="",
                    help="scene id, its directory, or a path to scene.json")
     c.add_argument("--board", default=None,
