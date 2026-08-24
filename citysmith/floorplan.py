@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import pathlib
 import random
 from dataclasses import asdict, dataclass, field
@@ -20,21 +21,43 @@ from .city import Building, Rect
 FLOORPLAN_VERSION = 1
 
 #: Room purposes offered per building kind, ground floor first.
+#:
+#: **Long enough for a large plan.** A hall plan on a 435-tile warehouse asks
+#: for ten service rooms, and a four-name menu answered with three Vestries and
+#: two Shrines -- numbering that reads as a bug rather than as a building.
+#: Repeats are still allowed where they are real (`Bay 2` in a warehouse is a
+#: bay), but they should be the last resort and not the third room.
 _ROOM_MENU: dict[str, list[str]] = {
-    "tavern": ["common room", "kitchen", "cellar stair", "store room", "snug", "bar"],
-    "shop": ["shop floor", "counter", "store room", "workshop"],
-    "smithy": ["forge", "workshop", "store room", "yard"],
-    "warehouse": ["main store", "loading bay", "office", "store room"],
-    "temple": ["nave", "shrine", "vestry", "store room"],
-    "guildhall": ["hall", "meeting room", "office", "store room"],
-    "barracks": ["bunk room", "armoury", "mess", "office"],
-    "house": ["living room", "kitchen", "bedroom", "store room"],
-    "manor": ["hall", "dining room", "study", "bedroom", "kitchen"],
-    "stable": ["stalls", "tack room", "feed store"],
-    "apothecary": ["shop floor", "workroom", "store room", "drying room"],
+    "tavern": ["common room", "kitchen", "bar", "snug", "cellar stair",
+               "store room", "scullery", "tap room", "pantry", "back room"],
+    "shop": ["shop floor", "counter", "store room", "workshop", "back office",
+             "strong room", "packing room", "yard door"],
+    "smithy": ["forge", "workshop", "store room", "yard", "bellows room",
+               "charcoal store", "finishing room", "tool store"],
+    "warehouse": ["main store", "loading bay", "office", "store room",
+                  "tally room", "cold store", "rope store", "cooperage",
+                  "cart bay", "counting room"],
+    "temple": ["nave", "shrine", "vestry", "store room", "sacristy",
+               "chapter room", "reliquary", "crypt stair", "almonry",
+               "side chapel"],
+    "guildhall": ["hall", "meeting room", "office", "store room",
+                  "muniment room", "clerk's room", "strong room", "kitchen",
+                  "waiting room", "master's room"],
+    "barracks": ["bunk room", "armoury", "mess", "office", "guard room",
+                 "cell", "kit store", "kitchen", "sergeant's room"],
+    "house": ["living room", "kitchen", "bedroom", "store room", "scullery",
+              "pantry", "back room", "wash house"],
+    "manor": ["hall", "dining room", "study", "bedroom", "kitchen", "parlour",
+              "pantry", "servants' hall", "muniment room", "gallery"],
+    "stable": ["stalls", "tack room", "feed store", "harness room",
+               "hay loft stair", "wash stall", "farrier's corner"],
+    "apothecary": ["shop floor", "workroom", "store room", "drying room",
+                   "still room", "herb store", "consulting room"],
 }
 
-_UPPER_ROOMS = ["bedroom", "store room", "office", "landing", "private room"]
+_UPPER_ROOMS = ["bedroom", "store room", "office", "private room", "study",
+                "guest room", "linen store", "box room", "sitting room",
+                "servant's room"]
 
 
 @dataclass
@@ -148,6 +171,166 @@ class Floorplan:
         )
 
 
+#: At or above this many tiles, a plan gets a hall whatever the building is.
+#: Below it, a BSP is the right shape: three to six rooms sharing walls is what
+#: a cottage looks like.
+#:
+#: **The number comes from what the BSP does above it.** Measured over East
+#: Tradebourne's 991 buildings, rooms per level by footprint: 3.3 at under 50
+#: tiles, 5.0 at 50-80, 6.5 at 80-120, 10.8 at 120-200 and **23.5 above 200**.
+#: A 29x15 warehouse -- 145 x 75 ft -- came out as 31 rooms of about 15x25 ft
+#: each, cycling four purpose names seven times, with no room bigger than any
+#: other and 52 doorways between them. That is a honeycomb, not a building.
+LARGE_TILES = 90
+
+#: Kinds whose whole point is one big volume with service rooms off it. These
+#: get a hall as soon as the footprint can afford one, rather than waiting for
+#: :data:`LARGE_TILES` -- a tavern whose common room is one quarter of four
+#: equal rooms is not a tavern.
+HALL_KINDS = frozenset({
+    "temple", "guildhall", "manor", "barracks", "warehouse", "tavern", "stable",
+})
+
+#: Smallest footprint that can carry a hall and anything either side of it.
+HALL_MIN = 45
+
+#: What the principal space is called, per kind. The hall is the room the
+#: building exists for, and naming it is half of what makes a plan readable.
+_PRINCIPAL: dict[str, str] = {
+    "tavern": "common room", "temple": "nave", "guildhall": "great hall",
+    "manor": "great hall", "barracks": "muster hall", "warehouse": "loading floor",
+    "stable": "stalls", "shop": "shop floor", "smithy": "forge",
+    "apothecary": "shop floor", "house": "hall",
+}
+
+#: What the hall becomes on an upper floor: a corridor with rooms off it, which
+#: is the shape of an inn's bedroom floor and of a guildhall's offices alike.
+_UPPER_PRINCIPAL = "landing"
+
+#: Rooms are cut to about this deep along the hall. Six tiles is 30 ft -- a
+#: room a party can fight in, rather than the 15x25 ft cells the BSP produced.
+ROOM_TARGET = 6
+
+#: A corridor is three tiles: two creatures can pass, and it still reads as
+#: circulation rather than as another room.
+CORRIDOR = 3
+
+
+def wants_hall(kind: str, rect: Rect) -> bool:
+    """True when this building should be planned around a principal space."""
+    if rect.area >= LARGE_TILES:
+        return True
+    return kind in HALL_KINDS and rect.area >= HALL_MIN
+
+
+def _slice_run(start: int, length: int, min_room: int) -> list[tuple[int, int]]:
+    """Cut ``length`` into rooms of about :data:`ROOM_TARGET`, none too small.
+
+    Returns ``(offset, size)`` pairs that tile the run exactly -- the builder
+    walls shared edges, so a gap between two rooms is a wall with nothing
+    either side of it.
+    """
+    n = max(1, round(length / ROOM_TARGET))
+    while n > 1 and length // n < min_room:
+        n -= 1
+    out = []
+    at = start
+    for i in range(n):
+        size = length // n + (1 if i < length % n else 0)
+        out.append((at, size))
+        at += size
+    return out
+
+
+def hall_layout(rect: Rect, entrance: str, level: int,
+                min_room: int) -> tuple[list[Rect], int]:
+    """A principal space with rooms off it. Returns the rects and the hall's index.
+
+    The hall always **touches the wall the door is in**, so the door opens onto
+    it and everything else opens off it -- which is what makes a big plan
+    legible from the threshold instead of being a maze of equal cells. Which
+    shape it takes depends on the building's proportions, and getting that
+    backwards is worth a paragraph:
+
+    * **A nave**, running from the door into the depth of the building, with
+      flanking strips either side and a band across the far end. This is the
+      right form when the building is deeper than it is wide *from the door*.
+
+    * **A broad hall**, spanning the full width against the entrance wall, with
+      the back of the building cut into rooms behind it. This is the right form
+      for a wide, shallow building -- and it is the one the first version got
+      wrong: a 29x15 warehouse entered from its long side was given a 10x10
+      nave, 23% of the floor, with 335 tiles of service rooms around it. A
+      warehouse is a loading floor with bays at the back.
+
+    On an upper level the hall narrows to a :data:`CORRIDOR`, which turns the
+    same construction into a landing with rooms off it.
+    """
+    # `along` runs into the building from the entrance; `across` is the other.
+    vertical = entrance in ("n", "s")
+    along = rect.d if vertical else rect.w
+    across = rect.w if vertical else rect.d
+    if along < min_room * 2 or across < min_room:
+        return [], -1
+
+    def place(a_off: int, a_len: int, c_off: int, c_len: int) -> Rect:
+        """Build a rect from (along, across) offsets in the building's frame."""
+        if vertical:
+            x, z, w, d = rect.x + c_off, rect.z + a_off, c_len, a_len
+        else:
+            x, z, w, d = rect.x + a_off, rect.z + c_off, a_len, c_len
+        # `along` always counts from the door, so the far side mirrors.
+        if entrance == "s":
+            z = rect.z2 - (a_off + a_len)
+        elif entrance == "e":
+            x = rect.x2 - (a_off + a_len)
+        return Rect(x, z, w, d)
+
+    # -- broad: the hall is a band along the entrance wall -------------------
+    if along < across * 0.8:
+        depth = CORRIDOR if level else max(min_room, round(along * 0.55))
+        back = along - depth
+        if back and back < min_room:          # no room for a back band
+            depth, back = along, 0
+        rects = [place(0, depth, 0, across)]
+        if back:
+            for c_off, c_len in _slice_run(0, across, min_room):
+                rects.append(place(depth, back, c_off, c_len))
+        return rects, 0
+
+    # -- nave: the hall runs in from the door -------------------------------
+    band = CORRIDOR if level else max(min_room, round(across * 0.45))
+    if across < band + min_room:
+        return [], -1
+
+    off = (across - band) // 2
+    # A flank thinner than a room is absorbed into the hall rather than left as
+    # a slot nothing fits in.
+    if off < min_room:
+        band, off = band + off, 0
+    tail = across - off - band
+    if 0 < tail < min_room:
+        band, tail = band + tail, 0
+
+    # A deep building keeps a band across the far end. Without it the flank
+    # rooms run the whole depth and every one of them is a corridor.
+    back = 0
+    if along >= 14:
+        back = max(min_room, ROOM_TARGET - 1)
+    hall_run = along - back
+
+    rects = [place(0, hall_run, off, band)]
+    for c_off, c_len in ((0, off), (off + band, tail)):
+        if c_len <= 0:
+            continue
+        for a_off, a_len in _slice_run(0, hall_run, min_room):
+            rects.append(place(a_off, a_len, c_off, c_len))
+    if back:
+        for c_off, c_len in _slice_run(0, across, min_room):
+            rects.append(place(hall_run, back, c_off, c_len))
+    return rects, 0
+
+
 def _split_rooms(rect: Rect, rng: random.Random, min_room: int, depth: int = 0) -> list[Rect]:
     """BSP a level into rooms sharing walls."""
     if depth > 5:
@@ -186,6 +369,84 @@ def _shared_edge(a: Rect, b: Rect) -> tuple[int, int, str] | None:
         if hi > lo:
             return (lo + hi) // 2, a.z, "n"
     return None
+
+
+def _title(text: str) -> str:
+    """Title case that does not capitalise after an apostrophe.
+
+    `str.title()` gives "Clerk'S Room" and "Servants' Hall" reads as a typo on
+    the GM's page.
+    """
+    return re.sub(r"(?<![A-Za-z'])[a-z]", lambda m: m.group().upper(), text)
+
+
+def _name_rooms(kind: str, menu: list[str], count: int, hall: int, level: int,
+                rng: random.Random) -> list[str]:
+    """One name per room, and **no repeats**.
+
+    The old dealer took ``purposes[i % len(purposes)]``, so a 31-room warehouse
+    floor had seven rooms called Office and seven called Loading Bay. A name
+    that appears seven times names nothing; where the menu runs out, the rooms
+    are numbered instead.
+    """
+    principal = ""
+    if hall >= 0:
+        principal = _UPPER_PRINCIPAL if level else _PRINCIPAL.get(kind, "hall")
+
+    # **The principal name is spent on the hall and never again.** Cycling the
+    # whole pool once the menu runs out put a second and third "Loading Floor"
+    # among the service rooms of a warehouse that has exactly one.
+    services = [p for p in (_UPPER_ROOMS if level else menu) if p != principal]
+    rng.shuffle(services)
+    if not services:
+        services = ["room"]
+
+    names: list[str] = []
+    used: dict[str, int] = {}
+    nxt = 0
+    for i in range(count):
+        if i == hall:
+            names.append(principal)
+            continue
+        base = services[nxt % len(services)]
+        nxt += 1
+        used[base] = used.get(base, 0) + 1
+        names.append(base if used[base] == 1 else f"{base} {used[base]}")
+    return names
+
+
+def _door_onto(rooms: list[Room], hall: Room, level: int) -> list[Door]:
+    """A doorway from every room that touches the hall, into the hall.
+
+    Anything that does not touch it -- a back-band room behind another -- is
+    joined to its neighbour instead, so the plan stays fully connected.
+    """
+    doors: list[Door] = []
+    reached = {hall.id}
+    for room in rooms:
+        if room.id == hall.id:
+            continue
+        edge = _shared_edge(room.rect, hall.rect)
+        if edge is None:
+            continue
+        dx, dz, side = edge
+        doors.append(Door(dx, dz, side, level))
+        reached.add(room.id)
+
+    # Whatever the hall could not reach, hang off something that it did.
+    stranded = [r for r in rooms if r.id not in reached]
+    for room in stranded:
+        for other in rooms:
+            if other.id == room.id or other.id not in reached:
+                continue
+            edge = _shared_edge(room.rect, other.rect)
+            if edge is None:
+                continue
+            dx, dz, side = edge
+            doors.append(Door(dx, dz, side, level))
+            reached.add(room.id)
+            break
+    return doors
 
 
 def _connect(rooms: list[Room], level: int, rng: random.Random) -> list[Door]:
@@ -261,19 +522,32 @@ def generate(
     for level in range(n_levels):
         # Interior space is inset by the wall thickness in the builder, not here;
         # rooms tile the full footprint so shared walls line up on cell edges.
-        rects = _split_rooms(rect, rng, min_room)
-        purposes = list(menu if level == 0 else _UPPER_ROOMS)
-        rng.shuffle(purposes)
+        hall = -1
+        rects: list[Rect] = []
+        if wants_hall(building.kind, rect):
+            rects, hall = hall_layout(rect, building.entrance, level, min_room)
+        if not rects:
+            rects, hall = _split_rooms(rect, rng, min_room), -1
+
+        purposes = _name_rooms(building.kind, menu, len(rects), hall, level, rng)
         for i, r in enumerate(rects):
             counter += 1
-            purpose = purposes[i % len(purposes)]
+            purpose = purposes[i]
             fp.rooms.append(
                 Room(
-                    id=f"r{counter:03d}", name=purpose.title(), purpose=purpose,
+                    id=f"r{counter:03d}", name=_title(purpose), purpose=purpose,
                     rect=r, level=level,
                 )
             )
-        fp.doors.extend(_connect(fp.rooms_on(level), level, rng))
+        rooms = fp.rooms_on(level)
+        if hall >= 0:
+            # **Every room opens onto the hall**, which is what a hall is for.
+            # The spanning tree would connect them in any order that happens to
+            # share an edge, so a temple came out with 52 doorways and rooms
+            # you reached through three other rooms.
+            fp.doors.extend(_door_onto(rooms, rooms[hall], level))
+        else:
+            fp.doors.extend(_connect(rooms, level, rng))
 
     # Exterior entrance on the side the city generator faced the building.
     side = building.entrance
@@ -287,7 +561,8 @@ def generate(
         ex, ez = rect.x2 - 1, rect.z + rect.d // 2
     fp.doors.append(Door(ex, ez, side, 0, exterior=True))
 
-    # Stairs: put them in the largest room on each level below the top.
+    # Stairs go in the largest room -- the hall, where there is one -- at the
+    # end away from the entrance, so a flight does not land in the doorway.
     for level in range(n_levels - 1):
         rooms = fp.rooms_on(level)
         if not rooms:
@@ -295,6 +570,14 @@ def generate(
         room = max(rooms, key=lambda r: r.rect.area)
         sx = room.rect.x + room.rect.w // 2
         sz = room.rect.z + room.rect.d // 2
+        if building.entrance == "n":
+            sz = room.rect.z2 - 1
+        elif building.entrance == "s":
+            sz = room.rect.z
+        elif building.entrance == "w":
+            sx = room.rect.x2 - 1
+        else:
+            sx = room.rect.x
         fp.stairs.append(Stair(sx, sz, level, level + 1))
 
     return fp
