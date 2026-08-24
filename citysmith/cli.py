@@ -586,6 +586,93 @@ def cmd_scene(args) -> int:
     return 0
 
 
+def _scene_dir(cfg, ref: str) -> pathlib.Path:
+    """A scene id, a scene directory, or a path to a scene.json -- all accepted.
+
+    The driver passes an id; a person types whatever is on their screen.
+    """
+    p = pathlib.Path(ref)
+    if p.is_file():
+        return p.parent
+    if p.is_dir() and (p / "scene.json").exists():
+        return p
+    return pathlib.Path(cfg.get("out_dir", "out/scenes")) / ref
+
+
+def cmd_boards(args) -> int:
+    """The scene -> board record. Read by tools/scene.ps1 before every paste.
+
+    Exit codes are the interface, because that is what a PowerShell driver can
+    branch on without parsing anything: 0 READY, 3 STALE, 4 NEW, 5 MOVED.
+    """
+    from . import boards
+    from .config import Config
+    from .scene import Scene
+
+    cfg = Config.load(args.config)
+    registry = boards.Registry.load(cfg.get("registry", "out/scenes/boards.json"))
+
+    if args.action == "list":
+        if not registry.records:
+            print(f"No boards recorded in {registry.path}.")
+            return 0
+        print(f"{len(registry.records)} board(s) in {registry.path}:\n")
+        for r in sorted(registry.records.values(), key=lambda r: r.board):
+            visits = f"{r.visits} visit(s)"
+            print(f"  {r.board}")
+            print(f"    {r.scene_id}  {visits}, last {r.last_entered or 'never'}")
+            for old in r.superseded:
+                print(f"    superseded: {old}")
+        return 0
+
+    if not args.scene:
+        raise SystemExit(f"error: boards {args.action} needs a scene id")
+
+    if args.action == "forget":
+        if registry.forget(args.scene):
+            print(f"forgot {args.scene}; the board itself is untouched")
+            return 0
+        print(f"no record of {args.scene}")
+        return 4
+
+    directory = _scene_dir(cfg, args.scene)
+    manifest = directory / "scene.json"
+    if not manifest.exists():
+        raise SystemExit(
+            f"error: no scene at {manifest}. Build it with `citysmith scene`."
+        )
+    scene = Scene.load(manifest)
+    digest = boards.digest_of_scene(directory, scene)
+
+    if args.action == "record":
+        record = registry.record(scene, digest, board=args.board or scene.board)
+        print(f"recorded {record.scene_id} on board {record.board!r} "
+              f"({record.visits} visit(s))")
+        return 0
+
+    if args.action == "visit":
+        record = registry.visit(scene.scene_id)
+        if record is None:
+            print(f"NEW {scene.board}")
+            return 4
+        print(f"visited {record.board!r} ({record.visits} visit(s))")
+        return 0
+
+    status, record = registry.status(scene, digest)
+    board = record.board if record else scene.board
+    print(f"{status} {board}")
+    if status == boards.STALE:
+        print(f"  the board holds the build of {record.last_entered}; the files "
+              f"on disk have changed since.")
+        print("  Reuse it as it is, or -Rebuild onto a second board. Nothing "
+              "here deletes the first.")
+    if status == boards.MOVED:
+        print(f"  recorded at {record.centroid}, this scene is at "
+              f"{scene.centroid} -- the town was re-imported and "
+              f"{scene.building_id!r} may not be the same building.")
+    return {boards.READY: 0, boards.STALE: 3, boards.NEW: 4, boards.MOVED: 5}[status]
+
+
 SCENE_HELP = """PUT IT ON A BOARD:
 
     .\\tools\\scene.ps1 enter -Scene {scene_id}
@@ -874,6 +961,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help="a JSON sidecar of real occupants keyed by building "
                         "id; it wins over the derived ones")
     c.set_defaults(func=cmd_scene)
+
+    c = sub.add_parser("boards", help="which board holds which scene")
+    c.add_argument("action",
+                   choices=["status", "record", "visit", "forget", "list"],
+                   help="status: what to do about this scene (exit 0 READY, "
+                        "3 STALE, 4 NEW, 5 MOVED). record: note that it has "
+                        "been pasted. visit: count a return trip. forget: drop "
+                        "the record for a board deleted by hand.")
+    c.add_argument("scene", nargs="?", default="",
+                   help="scene id, its directory, or a path to scene.json")
+    c.add_argument("--board", default=None,
+                   help="with record, the board name actually used")
+    c.add_argument("--config", default=None)
+    c.set_defaults(func=cmd_boards)
 
     c = sub.add_parser("verify", help="check a layout plays well, without building it")
     c.add_argument("layout")
