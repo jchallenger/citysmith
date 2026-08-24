@@ -42,17 +42,24 @@ DEFAULTS: dict[str, Any] = {
     # once already, to a worktree being removed.
     "registry": "campaign/boards.json",
     "board": {
-        # **The building goes first, and that is measured rather than chosen.**
-        # The campaign board list clips a row at SIXTEEN capital letters --
-        # renamed to `ABCDEFGHIJKLMNOPQRSTUVWXYZabc...`, a board renders in the
-        # list as `ABCDEFGHIJKLMNOP...`. So `Interior - Graybank - <anything>`
-        # is one row repeated, in the one list that is the only thing TaleSpire
-        # will tell you about a board. Whatever identifies the room has to be at
-        # the front; a grouping prefix is not worth the characters it costs.
-        # `scene.VISIBLE_CHARS` and `scene.board_name` are where this lives.
+        # `GRB/T14 The Halfling and the Fox Interior`.
+        #
+        # **The town and the code come first because they are the part that
+        # survives.** The campaign board list clips a row at SIXTEEN capital
+        # letters -- renamed to `ABCDEFGHIJKLMNOPQRSTUVWXYZabc...`, a board
+        # renders as `ABCDEFGHIJKLMNOP...` -- and it is the only thing
+        # TaleSpire will tell you about a board. `GRB/T14 The Half...` fits the
+        # town, a unique code and the start of the name inside that; anything
+        # identifying at the end is invisible.
+        #
+        # Placeholders: {town_code} {code} {building} {town} {prefix}.
         "prefix": "",
-        "name_template": "{prefix}{building} - {town} interior",
+        "name_template": "{town_code}/{code} {building} Interior",
         "max_name": 60,
+        # Town -> tag, where the derivation reads badly or two towns collide.
+        # Derived otherwise: initials for a multi-word name, first letter plus
+        # the next two consonants for a single word.
+        "town_codes": {},
     },
     "interior": {
         # Three, because the layout says three for 30% of buildings (352 of

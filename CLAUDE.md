@@ -1082,14 +1082,18 @@ Three things the first scene on a board showed, in the order they were found:
   `Interior - Graybank - <anything>` is one row repeated, in the one list that
   is the only thing TaleSpire will tell you about a board.
 
-  The building goes first (`{building} - {town} interior`), and **a
-  discriminator goes in FRONT of it**: an id appended to the end is an id
-  nobody can see. It is added only where the name does not identify the
-  building inside the visible prefix, and that is the common case, not the
-  rare one -- **44% to 77% of buildings in the three towns share their first
-  sixteen characters with a neighbour**. `Residence` occurs 129 times in East
-  Tradebourne. With the number in front, all 1,176 buildings across the three
-  towns produce distinguishable rows and the named places keep clean names.
+  So the name leads with a town tag and a building code:
+  `GRB/T14 The Halfling and the Fox Interior`, which the list shows as
+  `GRB/T14 The Half...`. The tag is three letters derived from the town name;
+  the code is the kind's initial and the building's number, and **the number
+  alone is already unique** -- both importers number every footprint from one
+  global counter, so `tavern-0014` and `temple-0014` cannot coexist. Zero
+  clashes across all 1,227 buildings in the four towns here.
+
+  What that replaced added a number only when two buildings shared a *name*,
+  and appended it. Both halves were wrong: 44% to 77% of buildings in a town
+  share their first sixteen characters (`Residence` occurs 129 times in East
+  Tradebourne), and an identifier at the end is one the list never shows.
   `scene.VISIBLE_CHARS`, and `docs/scenes.md` has the whole scheme in a table.
 
 - **The same plan did not build the same board twice.** `_interior_walls`

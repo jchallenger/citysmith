@@ -49,18 +49,91 @@ def _built(town, cfg, palette, ref="tavern-0014"):
 # -- identity -----------------------------------------------------------------
 
 def test_the_same_building_gives_the_same_scene_id_and_board(town, cfg):
-    """Reuse is built on this. If the id moves, the second visit to a room
+    """Reuse is built on this. If either moves, the second visit to a room
     builds a second board and the first one is orphaned."""
     b = interior.find(town, "tavern-0014")
     assert scene_mod.scene_id(town.name, b) == "graybank-tavern-0014"
-    assert scene_mod.scene_id(town.name, b) == scene_mod.scene_id(town.name, b)
-    assert scene_mod.board_name(cfg, town, b) == \
-        "The Halfling and the Fox - Graybank interior"
+    assert scene_mod.board_name(cfg, town, b) ==         "GRB/T14 The Halfling and the Fox Interior"
+    assert scene_mod.board_name(cfg, town, b) == scene_mod.board_name(cfg, town, b)
 
 
 def test_two_buildings_never_share_a_scene_id(town, cfg):
     ids = {scene_mod.scene_id(town.name, b) for b in town.buildings}
     assert len(ids) == len(town.buildings)
+
+
+# -- the town tag and the building code ---------------------------------------
+
+@pytest.mark.parametrize("name,code", [
+    ("Graybank", "GRB"),               # one word: first letter, then consonants
+    ("Pelvesthollow", "PLV"),
+    ("East Tradebourne", "ETR"),       # initials, padded from the last word
+    ("Forest Church", "FCH"),
+    ("Ys", "YSX"),                     # too short to fill: padded, never shorter
+    ("42", "TWN"),                     # nothing to work with
+])
+def test_a_town_abbreviates_to_three_letters(name, code):
+    assert scene_mod.town_code(name) == code
+
+
+def test_a_town_tag_can_be_overridden(cfg):
+    """Where the derivation reads badly, or two towns in one campaign collide,
+    one line of config settles it."""
+    assert scene_mod.town_code("Pelvesthollow", {"Pelvesthollow": "PEL"}) == "PEL"
+    assert scene_mod.town_code("pelvesthollow", {"Pelvesthollow": "PEL"}) == "PEL"
+
+
+@pytest.mark.parametrize("bid,kind,code", [
+    ("tavern-0014", "tavern", "T14"),
+    ("temple-0123", "temple", "T123"),
+    ("warehouse-0669", "warehouse", "W669"),
+    ("guildhall-0001", "guildhall", "G01"),   # two digits minimum
+])
+def test_a_building_gets_a_short_code(bid, kind, code):
+    b = LayoutBuilding(id=bid, ring=_square(0, 0, 6, 5), kind=kind)
+    assert scene_mod.building_code(b) == code
+
+
+def test_the_number_alone_is_what_makes_the_code_unique(town, cfg):
+    """Both importers number every footprint from one global counter, so
+    `tavern-0014` and `temple-0014` cannot both exist. The kind's initial is
+    there to be read, not to disambiguate -- which is why tavern and temple
+    sharing a T does not matter."""
+    lay = Layout(name="Graybank", source="ftg")
+    lay.buildings = [
+        LayoutBuilding(id="tavern-0014", ring=_square(0, 0, 6, 5), kind="tavern"),
+        LayoutBuilding(id="temple-0015", ring=_square(9, 0, 6, 5), kind="temple"),
+    ]
+    codes = {scene_mod.building_code(b) for b in lay.buildings}
+    assert codes == {"T14", "T15"}
+
+
+# -- and the reason the code goes first ---------------------------------------
+
+def test_every_board_in_a_town_is_distinguishable_inside_the_visible_prefix(cfg):
+    """The campaign list clips at sixteen capitals and shows nothing else about
+    a board. Forty buildings all called `Residence` used to render as forty
+    identical rows; with the code in front they cannot."""
+    import collections
+
+    lay = Layout(name="Graybank", source="ftg")
+    lay.buildings = [
+        LayoutBuilding(id=f"house-{i:04d}", ring=_square(i * 9, 0, 6, 5),
+                       kind="house", name="Residence")
+        for i in range(1, 41)
+    ]
+    seen = collections.Counter(
+        scene_mod.board_name(cfg, lay, b)[:scene_mod.VISIBLE_CHARS].strip().lower()
+        for b in lay.buildings
+    )
+    assert not [k for k, n in seen.items() if n > 1]
+
+
+def test_the_town_and_the_code_both_survive_the_clip(cfg, town):
+    b = interior.find(town, "tavern-0014")
+    shown = scene_mod.board_name(cfg, town, b)[:scene_mod.VISIBLE_CHARS]
+    assert shown.startswith("GRB/T14 ")
+    assert len(shown.split()[1]) > 0, "the name is cut off entirely"
 
 
 def test_a_nameless_building_still_gets_a_name_of_its_own(town, cfg):
@@ -71,68 +144,8 @@ def test_a_nameless_building_still_gets_a_name_of_its_own(town, cfg):
     lay = Layout(name="Forest Church", source="mfcg")
     lay.buildings = [b]
     name = scene_mod.board_name(cfg, lay, b)
-    assert name.endswith(" - Forest Church interior")
+    assert name.startswith("FCH/H42 ") and name.endswith(" Interior")
     assert scene_mod.board_name(cfg, lay, b) == name
-
-
-def test_a_name_that_does_not_identify_the_building_gets_a_number_IN_FRONT(town, cfg):
-    """`Residence` occurs 129 times in East Tradebourne and `The Clayclub
-    Residence` eleven times in Pelvesthollow. The discriminator has to be
-    inside the visible prefix, which is why it goes at the front: an id
-    appended to the end is an id the list never shows."""
-    lay = Layout(name="Graybank", source="ftg")
-    lay.buildings = [
-        LayoutBuilding(id="stable-0003", ring=_square(0, 0, 6, 5), kind="stable",
-                       name="Farm"),
-        LayoutBuilding(id="stable-0004", ring=_square(9, 0, 6, 5), kind="stable",
-                       name="Farm"),
-    ]
-    names = {scene_mod.board_name(cfg, lay, b) for b in lay.buildings}
-    assert names == {"3 Farm - Graybank interior", "4 Farm - Graybank interior"}
-
-
-def test_a_name_that_does_identify_the_building_is_left_alone(town, cfg):
-    lay = Layout(name="Graybank", source="ftg")
-    lay.buildings = [
-        LayoutBuilding(id="tavern-0014", ring=_square(0, 0, 8, 7), kind="tavern",
-                       name="The Halfling and the Fox"),
-        LayoutBuilding(id="temple-0123", ring=_square(9, 0, 8, 7), kind="temple",
-                       name="Chapel of Hermes"),
-    ]
-    assert scene_mod.board_name(cfg, lay, lay.buildings[1]) ==         "Chapel of Hermes - Graybank interior"
-
-
-def test_names_that_only_differ_past_the_clip_are_still_told_apart(town, cfg):
-    """Two inns whose names run together for the first sixteen characters are
-    two rows the campaign list renders identically."""
-    lay = Layout(name="Graybank", source="ftg")
-    lay.buildings = [
-        LayoutBuilding(id="tavern-0001", ring=_square(0, 0, 8, 7), kind="tavern",
-                       name="The Clayclub Residence"),
-        LayoutBuilding(id="tavern-0002", ring=_square(9, 0, 8, 7), kind="tavern",
-                       name="The Clayclub Rooms"),
-    ]
-    shown = {scene_mod.board_name(cfg, lay, b)[:scene_mod.VISIBLE_CHARS]
-             for b in lay.buildings}
-    assert len(shown) == 2, f"both rows read as {shown}"
-
-
-def test_every_board_in_a_real_town_is_distinguishable_on_sight(cfg):
-    """The whole point, over the whole population rather than a fixture: 1,176
-    buildings across three towns, and no two rows that read the same."""
-    import collections
-
-    lay = Layout(name="Graybank", source="ftg")
-    lay.buildings = [
-        LayoutBuilding(id=f"house-{i:04d}", ring=_square(i * 9, 0, 6, 5),
-                       kind="house", name="Residence")
-        for i in range(40)
-    ]
-    seen = collections.Counter(
-        scene_mod.board_name(cfg, lay, b)[:scene_mod.VISIBLE_CHARS].strip().lower()
-        for b in lay.buildings
-    )
-    assert not [k for k, n in seen.items() if n > 1]
 
 
 def test_a_long_board_name_is_truncated_not_rejected(town, cfg):
@@ -142,6 +155,7 @@ def test_a_long_board_name_is_truncated_not_rejected(town, cfg):
     lay.buildings = [b]
     name = scene_mod.board_name(cfg, lay, b)
     assert len(name) <= int(cfg.get("board.max_name"))
+    assert name.startswith("GRB/T01 ")
 
 
 # -- where the party stands ---------------------------------------------------
@@ -353,7 +367,7 @@ def test_defaults_work_with_no_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     cfg = Config.load()
     assert cfg.get("party.size") == 4
-    assert cfg.get("board.name_template") == "{prefix}{building} - {town} interior"
+    assert cfg.get("board.name_template") == "{town_code}/{code} {building} Interior"
 
 
 def test_a_named_config_that_is_missing_is_an_error(tmp_path):

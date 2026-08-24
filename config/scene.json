@@ -17,10 +17,11 @@
   "registry": "campaign/boards.json",
 
   "board": {
-    "_comment": "The building goes FIRST. The campaign board list clips a row at sixteen capital letters (measured), so a `Interior - Graybank - ` prefix renders every interior in a town as the same row. A building whose name does not identify it inside that width gets its number in front -- 44-77% of them do, since `Residence` occurs 129 times in one town.",
+    "_comment": "GRB/T14 The Halfling and the Fox Interior. The town tag and the building code come FIRST: the campaign list clips a row at sixteen capital letters (measured) and tells you nothing else about a board, so anything identifying at the end is invisible. The code is the kind's initial and the building's number, which is unique on its own. Placeholders: {town_code} {code} {building} {town} {prefix}.",
     "prefix": "",
-    "name_template": "{prefix}{building} - {town} interior",
-    "max_name": 60
+    "name_template": "{town_code}/{code} {building} Interior",
+    "max_name": 60,
+    "town_codes": {}
   },
 
   "interior": {

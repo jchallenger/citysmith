@@ -221,8 +221,7 @@ Settled, and the whole of it:
 | What | Form | Example |
 |---|---|---|
 | Town board | `<Town>` | `Graybank` |
-| Interior board | `<building> - <town> interior` | `The Halfling and the Fox - Graybank interior` |
-| ...when the name does not identify it | `<n> <building> - <town> interior` | `94 Residence - Graybank interior` |
+| **Interior board** | `<TWN>/<code> <building> Interior` | `GRB/T14 The Halfling and the Fox Interior` |
 | Throwaway board | `Probe - <what>` | `Probe - Halfling old partitions` |
 | Scene id | `<town-slug>-<building-id>` | `graybank-tavern-0014` |
 | Scene directory | `out/scenes/<scene-id>/` | |
@@ -238,20 +237,30 @@ estimated: a board renamed to `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop`
 renders in the list as `ABCDEFGHIJKLMNOP…`. The clip is on pixel width and the
 list is set in small capitals, so ordinary mixed-case prose gets a little
 further — `The Halfling and the Fox - Graybank interior` shows as
-`The Halfling and the F…` — but sixteen is the number to design to.
+`The Halfling and the F…` — but sixteen is the number to design to. It is also
+the *only* thing TaleSpire will tell you about a board: no size, no date, no
+contents, no API.
 
-So: **the building goes first, and where a discriminator is needed it goes in
-front of the building, not behind it.** An id appended to the end is an id the
-list never shows.
+So the town tag and the building code come **first**, and what the list shows
+is `GRB/T14 The Half…` — which town, which building, and enough of the name to
+recognise it.
 
-A number is added only where the name does not pick the building out of its
-town within those sixteen characters — which is not the edge case it sounds
-like. Counted over the three towns, **44% to 77% of buildings share their
-visible prefix with another building in the same town**: `Residence` occurs 129
-times in East Tradebourne and `The Clayclub Residence` eleven times in
-Pelvesthollow. With the rule applied, all 1,176 buildings across the three
-towns produce distinguishable rows, and the named places — `Chapel of Hermes`,
-`The Halfling and the Fox` — keep their names clean.
+- **The town tag** is three letters, derived: initials for a multi-word name
+  (`East Tradebourne` → `ETR`), first letter plus the next two consonants for a
+  single word (`Graybank` → `GRB`, `Pelvesthollow` → `PLV`). Set
+  `board.town_codes` to override one.
+- **The building code** is the kind's initial and the building's number:
+  `tavern-0014` → `T14`. **The number alone is already unique** — both
+  importers number every footprint from one global counter, so `tavern-0014`
+  and `temple-0014` cannot both exist. Checked across all 1,227 buildings in
+  the four towns here: zero clashes. The letter is there to be read, not to
+  disambiguate, which is why tavern and temple sharing a `T` does not matter.
+
+That makes every row distinct by construction. The rule this replaced added a
+number only when two buildings shared a name, and appended it — testing the
+wrong condition (44% to 77% of buildings in a town share their first sixteen
+characters; `Residence` occurs 129 times in East Tradebourne) and writing the
+answer where the list could not show it.
 
 ---
 

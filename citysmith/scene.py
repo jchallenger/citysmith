@@ -144,64 +144,103 @@ def display_name(building: LayoutBuilding) -> str:
 
 #: How much of a board name the campaign list actually shows. **Measured, not
 #: estimated**: a board renamed to `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop`
-#: renders in that list as `ABCDEFGHIJKLMNOP…` -- sixteen. The row clips on
+#: renders in that list as `ABCDEFGHIJKLMNOP...` -- sixteen. The row clips on
 #: *pixel* width and the list is set in small capitals, so mixed case gets
-#: further: `The Halfling and the Fox - Graybank interior` shows as
-#: `The Halfling and the F…`, twenty-two. Sixteen is the worst case and the one
-#: worth designing to.
+#: further -- `The Halfling and the Fox - Graybank interior` shows as
+#: `The Halfling and the F...`, twenty-two -- but sixteen is the worst case and
+#: the one worth designing to.
+#:
+#: `GRB/T14 The Half...` fits the town, the code and the start of the name
+#: inside it, which is the whole reason the code comes first.
 VISIBLE_CHARS = 16
 
-
-def _building_number(building: LayoutBuilding) -> str:
-    """The numeric tail of a building id: `tavern-0014` -> `14`."""
-    tail = building.id.rsplit("-", 1)[-1]
-    if not tail.isdigit():
-        return building.id
-    return tail.lstrip("0") or "0"
+#: Treated as vowels when abbreviating a town. `y` is here because it is one in
+#: the names that matter: Graybank abbreviates to GRB, not GRY.
+_VOWELS = frozenset("aeiouy")
 
 
-def _identifies(layout: Layout, name: str) -> bool:
-    """True when this name picks one building out of its town *on sight*.
+def town_code(town: str, overrides: dict[str, str] | None = None) -> str:
+    """A three-letter tag for a town: `Graybank` -> `GRB`.
 
-    Compared over the visible prefix, and against every building rather than
-    only the ones that have boards: which buildings get boards is not knowable
-    when the name is chosen, and a name that would collide later is a name that
-    is already wrong.
+    Initials for a multi-word name, then padded from the last word; for a
+    single word, its first letter and the next two consonants. Vowels are only
+    used when there are not enough consonants, because a consonant skeleton is
+    what makes a three-letter tag readable back as the name.
+
+    It is derived rather than allocated, so it needs no state and cannot drift
+    -- and `board.town_codes` overrides it per town where the derivation reads
+    badly or two towns in one campaign collide.
     """
-    key = name[:VISIBLE_CHARS].strip().lower()
-    seen = 0
-    for other in layout.buildings:
-        if display_name(other)[:VISIBLE_CHARS].strip().lower() == key:
-            seen += 1
-            if seen > 1:
-                return False
-    return True
+    for name, code in (overrides or {}).items():
+        if name.strip().lower() == town.strip().lower():
+            return str(code).upper()[:4]
+
+    words = re.findall(r"[A-Za-z]+", town)
+    if not words:
+        return "TWN"
+    if len(words) > 1:
+        code, tail = "".join(w[0] for w in words)[:3].upper(), words[-1][1:]
+    else:
+        code, tail = words[0][0].upper(), words[0][1:]
+
+    for wanted_consonant in (True, False):
+        for ch in tail:
+            if len(code) >= 3:
+                break
+            if (ch.lower() not in _VOWELS) == wanted_consonant:
+                code += ch.upper()
+        if len(code) >= 3:
+            break
+    return code.ljust(3, "X")[:3]
+
+
+def building_code(building: LayoutBuilding) -> str:
+    """A short unique tag for one building: `tavern-0014` -> `T14`.
+
+    The kind's initial and the building's number. **The number alone is already
+    unique** -- both importers number every footprint from one global counter,
+    so `tavern-0014` and `temple-0014` cannot both exist; checked across all
+    1,227 buildings in the four towns on this machine, zero code clashes. The
+    letter is there to be read, not to disambiguate, which is why it does not
+    matter that tavern and temple share a T.
+
+    Two digits minimum, so a small town's codes line up.
+    """
+    tail = building.id.rsplit("-", 1)[-1]
+    letter = (building.kind or "b")[0].upper()
+    if not tail.isdigit():
+        return f"{letter}{slug(tail).upper()}"
+    return f"{letter}{int(tail):02d}"
+
+
+def display_name(building: LayoutBuilding) -> str:
+    """What to call the building. Authored where there is one, invented where
+    there is not -- MFCG exports geometry only, so half the towns have none."""
+    return building.name.strip() or interior._fallback_name(building)
 
 
 def board_name(cfg: Config, layout: Layout, building: LayoutBuilding) -> str:
     """What the board is called in the campaign list.
 
-    **The building goes first, and a discriminator goes in front of it rather
-    than behind**, because the list clips at :data:`VISIBLE_CHARS` and tells
-    you nothing else about a board -- no size, no date, no contents. An id
-    appended to the end is an id nobody can see.
+    `GRB/T14 The Halfling and the Fox Interior`. **The town and the code come
+    first because they are the part that survives**: the list clips at
+    :data:`VISIBLE_CHARS` and tells you nothing else about a board -- no size,
+    no date, no contents -- so an identifier at the end is an identifier nobody
+    can see.
 
-    The number is added only where the name does not identify the building on
-    its own, which is not the rare case it sounds like. Counted over the three
-    towns: **44% to 77% of buildings share their first sixteen characters with
-    another building in the same town**. `Residence` occurs 129 times in East
-    Tradebourne and `The Clayclub Residence` eleven times in Pelvesthollow. The
-    rule this replaces fired only on an exact duplicate name and appended the
-    id -- testing the wrong condition, and writing the answer where it could
-    not be read.
+    The code makes every row unique by construction. What it replaces was a
+    number added only when two buildings shared a name, appended at the end;
+    that tested the wrong condition (44% to 77% of buildings in a town share
+    their first sixteen characters -- `Residence` occurs 129 times in East
+    Tradebourne) and wrote the answer where the list could not show it.
     """
-    name = display_name(building)
-    if not _identifies(layout, name):
-        name = f"{_building_number(building)} {name}"
-
     template = cfg.get("board.name_template")
     full = template.format(
-        prefix=cfg.get("board.prefix", ""), town=layout.name, building=name,
+        prefix=cfg.get("board.prefix", ""),
+        town=layout.name,
+        town_code=town_code(layout.name, cfg.get("board.town_codes")),
+        code=building_code(building),
+        building=display_name(building),
     )
     limit = int(cfg.get("board.max_name", 60))
     return full if len(full) <= limit else full[: limit - 1].rstrip() + "…"
