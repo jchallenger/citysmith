@@ -346,6 +346,18 @@ def place_tile(asset: Asset, tx: int, tz: int, y: float = 0.0, rot: int = 0) -> 
     return place_centered(asset, tx + asset.size_x / 2, tz + asset.size_z / 2, y, rot)
 
 
+def cell_of(placement: Placement, asset: Asset) -> tuple[int, int]:
+    """Which grid cell a placement's collider centre sits in.
+
+    The inverse of :func:`place_centered`, and it has to go through the collider
+    offset for the same reason that one does: a tile stores its min corner and a
+    prop stores its centre, so reading ``placement.x`` as a cell number is right
+    for half the board and half a footprint out for the rest.
+    """
+    return (int(math.floor(placement.x + (asset.off_x or 0.0))),
+            int(math.floor(placement.z + (asset.off_z or 0.0))))
+
+
 def is_curtain_piece(asset: Asset) -> bool:
     """True when an asset is thinner than a cell and so belongs on its edge.
 
@@ -501,6 +513,44 @@ class Builder:
         r = self.rng.randrange(24) if rot is None else rot
         self.add(place_centered(asset, cx, cz, y, r), prop=True)
         return True
+
+    def clear_cells(self, cells: set[tuple[int, int]], *,
+                    below: float | None = None, props: bool = True) -> int:
+        """Take back what has been placed in ``cells``; returns how many.
+
+        For anything that needs a square to be *empty* -- a party mark, a
+        stairhead, a trapdoor. ``below`` restricts it to geometry whose top is
+        at or under that height, which is how the floor tile comes up while the
+        wall on the same cell's edge stays: a wall's origin lands inside the
+        cell it belongs to, so a cell-only filter would demolish it.
+
+        The three parallel lists have to stay parallel -- layer and group are
+        recorded per placement at ``add`` time and there is no way to recover
+        either afterwards.
+        """
+        keep_p, keep_l, keep_g = [], [], []
+        removed = 0
+        for p, layer, group in zip(self.placements, self.layer_of, self.group_of):
+            asset = self.byid.get(p.asset_id)
+            drop = False
+            if asset is not None and cell_of(p, asset) in cells:
+                is_prop = p.asset_id in self.prop_ids
+                if is_prop:
+                    drop = props
+                elif below is None or p.y + asset.size_y <= below:
+                    drop = True
+            if drop:
+                removed += 1
+                if p.asset_id in self.prop_ids:
+                    self.stats.props -= 1
+                else:
+                    self.stats.tiles -= 1
+                continue
+            keep_p.append(p)
+            keep_l.append(layer)
+            keep_g.append(group)
+        self.placements, self.layer_of, self.group_of = keep_p, keep_l, keep_g
+        return removed
 
     def to_slab(self) -> Slab:
         return _normalized_whole_tiles(Slab(list(self.placements)), self.byid)

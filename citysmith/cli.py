@@ -524,6 +524,81 @@ def cmd_build(args) -> int:
     return 2 if report.failed else 0
 
 
+def cmd_scene(args) -> int:
+    """Prepare one building as the board a party walks onto."""
+    from . import interior, scene as scene_mod
+    from .config import Config
+    from .layout import Layout
+
+    try:
+        cfg = Config.load(args.config)
+    except (FileNotFoundError, ValueError) as exc:
+        raise SystemExit(f"error: {exc}") from exc
+    for key in cfg.unknown:
+        print(f"  WARNING: {cfg.path}: unknown setting {key!r} -- it does nothing")
+
+    # Command line beats config file beats default, for the few that overlap.
+    for flag, key in (("seed", "seed"), ("style", "style"),
+                      ("party_size", "party.size"), ("hour", "occupants.hour"),
+                      ("roster", "occupants.roster")):
+        value = getattr(args, flag, None)
+        if value is not None:
+            node, _, leaf = key.rpartition(".")
+            (cfg.section(node) if node else cfg.data)[leaf] = value
+
+    layout = Layout.load(args.layout)
+
+    if args.list:
+        print(f"{layout.name}: {len(layout.buildings)} buildings\n")
+        for b in interior.candidates(layout, kind=args.kind or "", limit=args.top):
+            long_side, short_side = b.extent
+            print(f"  {b.id:16} {b.kind:10} {long_side:4.0f}x{short_side:<4.0f} tiles"
+                  f"  {b.name}")
+        return 0
+
+    try:
+        building = interior.find(layout, args.building)
+    except interior.InteriorError as exc:
+        raise SystemExit(f"error: {exc}") from exc
+
+    catalog = _catalog(args)
+    palette = _palette(args, catalog, cfg.get("style"), int(cfg.get("seed")))
+
+    sc, builder, fp = scene_mod.build(layout, building, palette, cfg)
+    out_dir = pathlib.Path(cfg.get("out_dir", "out/scenes")) / sc.scene_id
+    try:
+        written = scene_mod.write(sc, builder, fp, out_dir, cfg)
+    except SlabError as exc:
+        raise SystemExit(f"Could not encode slab: {exc}") from exc
+
+    print(sc.summary())
+    print(f"\n  hook: {sc.hook}")
+    for p in sc.occupants:
+        print(f"    {p['name']}, {p['role']} -- {p.get('doing', '')}"
+              f" ({p.get('room', '')})")
+    print()
+    for p in written:
+        print(f"  wrote {p}")
+    print(f"  wrote {out_dir / 'scene.json'}")
+    print(f"  wrote {out_dir / 'brief.md'}")
+    print(f"  wrote {out_dir / 'plan.svg'}")
+    print("\n" + SCENE_HELP.format(scene_id=sc.scene_id, board=sc.board))
+    return 0
+
+
+SCENE_HELP = """PUT IT ON A BOARD:
+
+    .\\tools\\scene.ps1 enter -Scene {scene_id}
+
+which reuses the board named "{board}" if this building has been visited
+before, and makes one if it has not. Nothing is ever deleted.
+
+By hand: new board, camera straight down, paste the slab(s) in the order in
+the paste-order file at one cursor cell, then rename the board. The marks in
+the floor by the door are where the four tokens go -- a slab cannot carry
+creatures, so the minis are dropped on by hand."""
+
+
 def cmd_verify(args) -> int:
     """Check a rasterised city for playability without building assets."""
     from .layout import Layout
@@ -775,6 +850,30 @@ def build_parser() -> argparse.ArgumentParser:
                    help="build only this tile region, for a staged in-game test")
     c.add_argument("--stem", default="city", help="output filename stem")
     c.set_defaults(func=cmd_build)
+
+    c = sub.add_parser("scene", help="prepare one building as a board to play in")
+    c.add_argument("layout", help="path to layout.json from `citysmith import`")
+    c.add_argument("building", nargs="?", default="",
+                   help="building id ('tavern-0014'), an unambiguous piece of "
+                        "its name ('halfling'), or 'kind:tavern' for the "
+                        "biggest of a kind")
+    c.add_argument("--list", action="store_true",
+                   help="list the buildings worth walking into and stop")
+    c.add_argument("--kind", default=None, help="with --list, only this kind")
+    c.add_argument("--top", type=int, default=20, help="with --list, how many")
+    c.add_argument("--config", default=None,
+                   help="settings file (default config/scene.json, and every "
+                        "key has a working default if it is missing)")
+    c.add_argument("--seed", type=int, default=None)
+    c.add_argument("--style", default=None, choices=sorted(STYLES))
+    c.add_argument("--party-size", type=int, default=None,
+                   help="how many marks to put on the floor")
+    c.add_argument("--hour", default=None, choices=["day", "night"],
+                   help="night thins the room")
+    c.add_argument("--roster", default=None,
+                   help="a JSON sidecar of real occupants keyed by building "
+                        "id; it wins over the derived ones")
+    c.set_defaults(func=cmd_scene)
 
     c = sub.add_parser("verify", help="check a layout plays well, without building it")
     c.add_argument("layout")

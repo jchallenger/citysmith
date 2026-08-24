@@ -302,8 +302,18 @@ def layout_svg(layout, *, scale: float = 4.0, labels: bool = True) -> str:
     return "\n".join(p)
 
 
-def floorplan_svg(fp: Floorplan, *, scale: int = 28) -> str:
-    """Render every level of a floorplan side by side, with a tile grid."""
+def floorplan_svg(fp: Floorplan, *, scale: int = 28, marks=None) -> str:
+    """Render every level of a floorplan side by side, with a tile grid.
+
+    ``marks`` are the party's starting cells (``citysmith.scene.Mark``), drawn
+    where the tokens go -- this sheet is what gets looked at while the board is
+    loading.
+
+    Every coordinate is taken relative to the level's **own** rect. The levels
+    are already drawn in their own translated groups, so measuring from the
+    building's rect put every room of a plan whose levels had been spread for
+    play (`interior.spread_levels`) a panel-width outside its own panel.
+    """
     pad = 30
     gap = 30
     lw = fp.rect.w * scale
@@ -320,6 +330,7 @@ def floorplan_svg(fp: Floorplan, *, scale: int = 28) -> str:
     ]
 
     for level in range(fp.levels):
+        lr = fp.rect_on(level)
         ox = pad + level * (lw + gap)
         oy = pad + 8
         parts.append(f'<g transform="translate({ox},{oy})">')
@@ -327,8 +338,8 @@ def floorplan_svg(fp: Floorplan, *, scale: int = 28) -> str:
 
         for room in fp.rooms_on(level):
             r = room.rect
-            rx = (r.x - fp.rect.x) * scale
-            ry = (r.z - fp.rect.z) * scale
+            rx = (r.x - lr.x) * scale
+            ry = (r.z - lr.z) * scale
             parts.append(
                 f'<rect x="{rx}" y="{ry}" width="{r.w * scale}" height="{r.d * scale}" '
                 f'fill="#2f3742" stroke="#0d0f12" stroke-width="1"/>'
@@ -356,8 +367,8 @@ def floorplan_svg(fp: Floorplan, *, scale: int = 28) -> str:
         for d in fp.doors:
             if d.level != level:
                 continue
-            dx = (d.x - fp.rect.x) * scale
-            dz = (d.z - fp.rect.z) * scale
+            dx = (d.x - lr.x) * scale
+            dz = (d.z - lr.z) * scale
             colour = "#ffd166" if d.exterior else "#8fd694"
             if d.side == "n":
                 x1, y1, x2, y2 = dx + 4, dz, dx + scale - 4, dz
@@ -375,13 +386,25 @@ def floorplan_svg(fp: Floorplan, *, scale: int = 28) -> str:
         for s in fp.stairs:
             if s.from_level != level:
                 continue
-            sx = (s.x - fp.rect.x) * scale
-            sz = (s.z - fp.rect.z) * scale
+            sx = (s.x - lr.x) * scale
+            sz = (s.z - lr.z) * scale
             parts.append(
                 f'<rect x="{sx + 3}" y="{sz + 3}" width="{scale - 6}" height="{scale - 6}" '
                 f'fill="none" stroke="#79c0ff" stroke-width="2"/>'
                 f'<text x="{sx + scale / 2}" y="{sz + scale / 2 + 4}" font-size="11" '
                 f'font-family="sans-serif" fill="#79c0ff" text-anchor="middle">S</text>'
+            )
+
+        for m in (marks or ()):
+            if getattr(m, "level", 0) != level:
+                continue
+            mx = (m.x - lr.x) * scale
+            mz = (m.z - lr.z) * scale
+            parts.append(
+                f'<rect x="{mx + 2}" y="{mz + 2}" width="{scale - 4}" '
+                f'height="{scale - 4}" fill="#c1443c" fill-opacity="0.55" '
+                f'stroke="#f0857c" stroke-width="1.5"/>'
+                f'<title>{_esc(m.name)}</title>'
             )
 
         parts.append(

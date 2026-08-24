@@ -204,6 +204,19 @@ MEDIEVAL = Style(
             _tile(group="grassland", exclude=_TRIM_NAME_EXCLUDE + ("road",),
                   **_MED, **_FLOOR_H, **_UNIT),
         ],
+        #: Where a character stands when the scene opens. It has to read as
+        #: deliberate from directly overhead and be exactly one cell, because
+        #: it *replaces* the floor tile under it rather than sitting on it --
+        #: two coplanar surfaces in one cell is the seam that shifts with the
+        #: camera. There is no marker asset in this pack (no rune, no circle,
+        #: no chalk -- all searched), so it is a contrasting floor: a square of
+        #: carpet on boards. The Moorgoth kit is normally excluded by
+        #: ``_WRONG_SETTING`` and is pinned by name here on purpose, because
+        #: what is wanted is precisely a tile that does not match the room.
+        "party_mark": [
+            _tile(name="Moorgoth Floor - Carpet Centre", **_MED, **_UNIT),
+            _tile(name="CobbleStone Floor Small", **_MED, **_UNIT),
+        ],
         #: 2x2 twin of ``ground``. Open country is tiled with these first and
         #: only edged in 1x1, which cuts the tile count for a field of grass by
         #: about four -- the difference between a village fitting the board
@@ -652,6 +665,14 @@ CYBERPUNK = Style(
         "ground": [
             _tile(name="concrete floor 1x1", **_SCIFI),
             _tile(group="floor", any_tags=("concrete",), **_SCIFI, **_UNIT),
+            _tile(group="floor", **_SCIFI, **_UNIT),
+        ],
+        #: Declared for the same reason the landscape roles below are: the
+        #: undeclared-role fallback is a bare name search with no pack filter,
+        #: and "party_mark" would find whatever happens to be named like it.
+        #: A lit grate reads as a spot to stand on under a sci-fi floor.
+        "party_mark": [
+            _tile(group="floor", any_tags=("metal", "grate"), **_SCIFI, **_UNIT),
             _tile(group="floor", **_SCIFI, **_UNIT),
         ],
         # -- landscape ----------------------------------------------------

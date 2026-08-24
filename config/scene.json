@@ -1,0 +1,59 @@
+{
+  "config_version": 1,
+
+  "_comment": [
+    "One config, read by both halves: `citysmith scene` builds from it and",
+    "tools/scene.ps1 drives TaleSpire from it. Anything you want to change",
+    "between campaigns is here rather than in code. Delete a key to get the",
+    "default back -- citysmith/config.py holds the same values and merges this",
+    "file over them, and it reports any key it does not recognise instead of",
+    "ignoring it."
+  ],
+
+  "style": "medieval",
+  "seed": 33,
+  "out_dir": "out/scenes",
+  "registry": "out/scenes/boards.json",
+
+  "board": {
+    "_comment": "Interior boards are prefixed so they sort together in the campaign list, the way `Probe - ` does. The town's own board keeps its bare name.",
+    "prefix": "Interior - ",
+    "name_template": "{prefix}{town} - {building}",
+    "max_name": 60
+  },
+
+  "interior": {
+    "_comment": "max_levels caps storeys. spread lays them side by side instead of stacking, because TaleSpire cannot hide an upper floor. pad is the ring of ground round the shell so the door opens onto something.",
+    "max_levels": 2,
+    "min_room": 3,
+    "spread_levels": true,
+    "level_gap": 2,
+    "prop_density": 0.12,
+    "roof": false,
+    "pad": 3,
+    "max_assets": 4000
+  },
+
+  "party": {
+    "_comment": "Where the party is standing when the scene opens. Name the members and the brief names them; leave names empty and they are Party 1..N. arrival is `inside` (just through the door) or `outside` (on the approach).",
+    "size": 4,
+    "names": [],
+    "arrival": "inside",
+    "mark_role": "party_mark"
+  },
+
+  "occupants": {
+    "_comment": "The export carries no occupants, so these are derived from the trade, the authored name and the footprint. roster points at a sidecar of real ones, keyed by building id, which wins where it has an entry. hour thins the room at night.",
+    "roster": "",
+    "hour": "day"
+  },
+
+  "paste": {
+    "_comment": "Timings for tools/scene.ps1. pitch_down is the camera drag that puts the view straight down before a paste -- the anchor is the cursor's ray hit, and only a vertical camera makes that hit stay put.",
+    "pitch_down": 250,
+    "hold_seconds": 3,
+    "commit_seconds": 4,
+    "settle_seconds": 2,
+    "shot_every": 1
+  }
+}

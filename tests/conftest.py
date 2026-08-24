@@ -38,10 +38,15 @@ STAIRS = _asset("f", "Stairs Wood 01", "tile", 1.0, 1.0, 1.0, "stairs")
 STOOL = _asset("0", "stool wood 01", "prop", 0.5, 0.3, 0.3, "chair")
 MARK = _asset("1", "Moorgoth Floor - Carpet Centre", "tile", 1.0, 0.5, 1.0, "floor")
 GROUND = _asset("2", "Grass 1x1", "tile", 1.0, 0.5, 1.0, "grassland")
+#: Cobble really is 0.25 thick where grass is 0.5, and that difference is the
+#: whole reason `Builder.surface` places by top height -- laid from a common
+#: bottom it is a 15 inch kerb. Stubbing them the same thickness would make
+#: the tests agree with a board the game will not produce.
+STREET = _asset("3", "CobbleStone Floor Small", "tile", 1.0, 0.25, 1.0, "floor")
 
 
 class StubCatalog:
-    assets = [FLOOR, UPPER, WALL, INNER, DOOR, STAIRS, STOOL, MARK, GROUND]
+    assets = [FLOOR, UPPER, WALL, INNER, DOOR, STAIRS, STOOL, MARK, GROUND, STREET]
 
 
 class StubPalette:
@@ -50,7 +55,7 @@ class StubPalette:
     _ROLES = {
         "floor": FLOOR, "floor_upper": UPPER, "wall": WALL,
         "wall_interior": INNER, "door": DOOR, "stairs": STAIRS,
-        "party_mark": MARK, "ground": GROUND, "street": GROUND,
+        "party_mark": MARK, "ground": GROUND, "street": STREET,
     }
 
     def __init__(self) -> None:

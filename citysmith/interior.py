@@ -227,6 +227,27 @@ def plan(
     return spread_levels(fp, gap) if spread and fp.levels > 1 else fp
 
 
+def translate(fp: Floorplan, dx: int, dz: int) -> Floorplan:
+    """Move a whole plan, every level of it, by ``(dx, dz)`` tiles.
+
+    Used to hold a scene off the origin by the width of its apron, so nothing
+    in it has a negative coordinate. A slab cannot store one; the encoder
+    shifts the whole board to fix it, which works but means the tile numbers in
+    the manifest stop matching the tile numbers on the board.
+    """
+    for room in fp.rooms:
+        r = room.rect
+        room.rect = Rect(r.x + dx, r.z + dz, r.w, r.d)
+    for door in fp.doors:
+        door.x += dx
+        door.z += dz
+    for stair in fp.stairs:
+        stair.x += dx
+        stair.z += dz
+    fp.rect = Rect(fp.rect.x + dx, fp.rect.z + dz, fp.rect.w, fp.rect.d)
+    return fp
+
+
 def spread_levels(fp: Floorplan, gap: int = LEVEL_GAP) -> Floorplan:
     """Translate each level sideways so they sit in a row, not a stack.
 
@@ -269,23 +290,36 @@ class Occupant:
         return f"{self.name}, {self.role}{doing}"
 
 
-#: kind -> (the person in charge, the people who work there, the people who are
-#: just here). Counts are scaled by footprint in :func:`occupants`.
-_STAFF: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
+#: kind -> (the person in charge, the people who work there -- **each once**,
+#: the people who are just here, and what anyone past both is). Counts are
+#: scaled by footprint in :func:`occupants`.
+#:
+#: The three-way split is what stops a room reading as a bug: staff are dealt
+#: once each, because a tavern has one cook, and the overflow role exists so
+#: that a big house does not come out with two spouses.
+_STAFF: dict[str, tuple[str, tuple[str, ...], tuple[str, ...], str]] = {
     "tavern": ("innkeeper", ("cook", "pot boy", "serving girl"),
                ("drover", "carter", "off-duty guard", "travelling pedlar",
-                "farmhand", "local drunk")),
-    "shop": ("shopkeeper", ("apprentice",), ("customer", "haggling neighbour")),
-    "smithy": ("smith", ("striker", "apprentice"), ("customer waiting on a repair",)),
-    "warehouse": ("warehouse keeper", ("porter", "tally clerk"), ("carter",)),
-    "temple": ("priest", ("acolyte", "sexton"), ("penitent", "mourner")),
-    "guildhall": ("guild clerk", ("scribe", "steward"), ("petitioner",)),
-    "barracks": ("watch sergeant", ("watchman",), ("prisoner in the back room",)),
-    "manor": ("householder", ("cook", "maid", "groom"), ("guest",)),
-    "stable": ("ostler", ("stable hand",), ("traveller seeing to a horse",)),
-    "apothecary": ("apothecary", ("assistant",), ("patient",)),
-    "house": ("householder", ("spouse", "grown child", "child", "elderly parent"), ()),
-    "shed": ("", (), ()),
+                "farmhand", "local drunk"), "drinker"),
+    "shop": ("shopkeeper", ("apprentice",),
+             ("customer", "haggling neighbour"), "customer"),
+    "smithy": ("smith", ("striker", "apprentice"),
+               ("customer waiting on a repair",), "customer"),
+    "warehouse": ("warehouse keeper", ("porter", "tally clerk"),
+                  ("carter",), "porter"),
+    "temple": ("priest", ("acolyte", "sexton"),
+               ("penitent", "mourner"), "worshipper"),
+    "guildhall": ("guild clerk", ("scribe", "steward"),
+                  ("petitioner",), "petitioner"),
+    "barracks": ("watch sergeant", ("watchman",),
+                 ("prisoner in the back room",), "watchman"),
+    "manor": ("householder", ("cook", "maid", "groom"), ("guest",), "servant"),
+    "stable": ("ostler", ("stable hand",),
+               ("traveller seeing to a horse",), "stable hand"),
+    "apothecary": ("apothecary", ("assistant",), ("patient",), "patient"),
+    "house": ("householder", ("spouse", "grown child", "child", "elderly parent"),
+              (), "lodger"),
+    "shed": ("", (), (), ""),
 }
 
 #: Roughly one person per this many tiles of floor, on top of whoever runs the
@@ -325,7 +359,7 @@ def occupants(
         ]
 
     rng = random.Random(f"{seed}:occupants:{building.id}")
-    keeper_role, staff_roles, visitor_roles = _STAFF.get(
+    keeper_role, staff_roles, visitor_roles, overflow = _STAFF.get(
         building.kind, _STAFF["house"]
     )
     if not keeper_role:
@@ -338,11 +372,13 @@ def occupants(
         heads = max(1, heads // 2)
 
     people = [Occupant(names.person_name(rng), keeper_role, _doing(rng, keeper_role))]
-    pool = list(staff_roles) + list(visitor_roles)
-    if not pool:
-        pool = ["visitor"]
     for i in range(heads - 1):
-        role = pool[i % len(pool)] if i < len(staff_roles) else rng.choice(pool)
+        if i < len(staff_roles):
+            role = staff_roles[i]          # one cook, one pot boy, one of each
+        elif visitor_roles:
+            role = rng.choice(visitor_roles)
+        else:
+            role = overflow or "resident"
         people.append(Occupant(names.person_name(rng), role, _doing(rng, role)))
     return people
 
