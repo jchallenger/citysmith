@@ -27,6 +27,14 @@ Usage -- the point is to be searched, not read end to end::
 `--complete` is the one that answers the question that keeps coming up: which
 kits ship a wall *and* a matching corner *and* a window at the sizes the
 generator places, so a facade can be one material all the way round.
+
+This is only half the lookup. It answers *what shape is this piece*, from the
+collider -- and three of this project's worst picks were pieces whose collider
+was honest and whose **appearance** was not (a hoarding tagged `merlon`, ruined
+masonry full of holes, a blade measuring a full cell). `tools/asset_shots.py`
+is the other half: same query surface, but it prints the Tales Tavern archive
+page for each candidate, so a render rules the wrong ones out before a probe
+slab is ever built.
 """
 
 from __future__ import annotations

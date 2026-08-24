@@ -973,6 +973,57 @@ is listed as planned).
 breaks on game updates, and a colleague cloning this should not have to mod
 their game to see a town. None of the registration machinery is deleted.
 
+### The asset archive is now wired in (2026-08-24)
+
+That paragraph named Tales Tavern and then did nothing about it for months,
+which is the same failure it is warning about. `tools/asset_shots.py` closes
+it: give it a role, a kit or a name and it prints the archive page for each
+candidate beside the catalog's own dimensions.
+
+- **The slug rule, measured against the site's sitemap (3,596 pages).** Name
+  lowercased, runs of non-alphanumerics to one hyphen, **underscores kept**.
+  That exception is the whole thing -- `castle merlon 1x1` ->
+  `castle-merlon-1x1` but `md_wall_1x1_diag_01` -> `md_wall_1x1_diag_01`.
+  Hyphenating underscores too resolves 77.2% of the catalog; keeping them
+  resolves **95.9%**, and **100% of every kit the generator builds from**
+  (Rural, Tavern, Castle Fortified, Abandoned Village, MegaDungeon,
+  CastleRuins, Harbor, Furniture, Food & Drink). The 131 misses are creature
+  minis and twelve oddly-punctuated Doors.
+- **The link is self-verifying, which is the only reason a slug rule is
+  allowed.** Each page carries the asset's UUID *in our own namespace* --
+  `castle-merlon-1x1` reports `fc6e9582-...`, exactly what our catalog holds --
+  so `--verify` checks the link landed on the asset we meant instead of
+  trusting the rule.
+- **It reproduces two of this file's own hard-won findings from the render
+  alone.** `castle merlon 1x1` is visibly boarded timber on a stone base -- the
+  hoarding that crowned the circuit in crates for eleven revisions.
+  `md_tower_wall_01` is visibly a curved quarter-arc -- the "quarter of an 8x8
+  drum" that `tower_probe.py` was built to establish.
+- **371 of 3,200 assets share a name with another asset** (139 names, up to
+  nine deep -- `Aberration Floor 2x2` spans 2x0.5x2 to 2x2.5x2). Of the pieces
+  the generator pins, only `md_wall_1x1_diag_01` is ambiguous, and it is
+  already rejected -- but this is the quantified form of "asset names are
+  inconsistent", and it is why nothing should be keyed on a name. `--verify`
+  prints AMBIGUOUS for a duplicated name and MISMATCH when the page's UUID is
+  the *other* one, which is exactly what it does on that asset today.
+- **It emits links; it does not mirror.** `docs/asset-index.md` is regenerated
+  rather than committed because it is an extraction of someone else's packs,
+  and someone else's renders are more so. The site's REST API is closed to
+  unauthenticated callers and nothing here goes near it; `robots.txt` is
+  `Disallow:` (empty) and advertises the sitemap, which is the sanctioned
+  route, used one polite request at a time behind `--verify`.
+
+**This does not replace a single probe, and none was deleted.** A render
+answers *what is this piece*; it cannot answer which quarter turn closes a hip
+(`roofrot_probe.py`), how a bed reads through translucent water
+(`water_probe.py`), or whether a run one cell thick shows daylight
+(`wall_probe.py`) -- and "a probe read from one angle is a probe that lies"
+applies to a render read from one angle most of all. The archive is the
+**shortlist**, the probe is the **verification**, and the standard above --
+orbit four sides plus overhead, keep known-bad pieces as controls -- is
+unchanged. What it buys is probing three candidates instead of eight, and never
+building a slab for a piece a picture rules out in a second.
+
 ## Metrics must read the artifact, not the plan
 
 This has now bitten four times, and each time the report said the map was
