@@ -212,6 +212,19 @@ Branch policy (docs/branching.md is the long form)
     if ($ahead -eq 0) {
       "$branch has nothing $Trunk does not already have -- removing it."
     } else {
+      # Rebase FIRST, then test. Rebase rather than merge because this repo's
+      # history is linear and a fast-forward is the only merge that keeps it
+      # that way -- and first, because what has to pass is the code that is
+      # about to be on trunk, not the branch as it was before trunk moved.
+      # Tested the other way round, this refused to land a good branch over a
+      # test fix that was already sitting on main.
+      if ([int]$parts[0] -gt 0) {
+        "rebasing $branch onto $Trunk ($($parts[0]) commit(s) behind) ..."
+        & git -C $dir rebase $Trunk
+        if ($LASTEXITCODE -ne 0) {
+          throw "rebase of $branch onto $Trunk stopped; resolve it in $dir, then land again"
+        }
+      }
       if (-not $NoTest) {
         # From *inside* the worktree. citysmith is not pip-installed, so
         # `import citysmith` resolves against the current directory: running
@@ -225,15 +238,6 @@ Branch policy (docs/branching.md is the long form)
           $failed = ($LASTEXITCODE -ne 0)
         } finally { Pop-Location }
         if ($failed) { throw "tests failed in $branch -- not landing it" }
-      }
-      # Rebase rather than merge: this repo's history is linear, and a
-      # fast-forward is the only merge that keeps it that way.
-      if ([int]$parts[0] -gt 0) {
-        "rebasing $branch onto $Trunk ($($parts[0]) commit(s) behind) ..."
-        & git -C $dir rebase $Trunk
-        if ($LASTEXITCODE -ne 0) {
-          throw "rebase of $branch onto $Trunk stopped; resolve it in $dir, then land again"
-        }
       }
       Git-Or-Throw @('merge','--ff-only',$branch) | Out-Null
       "merged $branch into $Trunk (fast-forward)"
