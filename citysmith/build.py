@@ -358,6 +358,85 @@ def cell_of(placement: Placement, asset: Asset) -> tuple[int, int]:
             int(math.floor(placement.z + (asset.off_z or 0.0))))
 
 
+#: How long a fence piece is, in tiles. Every candidate in the `Fences` kit is
+#: 2.0 long (`docs/fencing.md` §3), which is what lets one run-the-line routine
+#: serve drystone, paling and hedge alike.
+FENCE_MODULE = 2.0
+
+#: A segment shorter than this gets a joint and no panel: a full-length piece
+#: laid on a stub overhangs both its ends and reads as a fence pointing the
+#: wrong way.
+FENCE_MIN_SEGMENT = FENCE_MODULE * 0.5
+
+
+def bearing_rot(dx: float, dz: float) -> int:
+    """The rotation step whose long axis lies closest to ``(dx, dz)``.
+
+    A piece authored along x sits along x at ``rot=0``, and the rotation runs
+    the *other* way from the tile-coordinate angle: :data:`ROOF_EDGE_ROT` maps
+    the four cardinals to ``e=0, s=18, w=12, n=6``, so a quarter turn from east
+    towards south costs six steps *down*, not up. Reading that sign off the
+    roof table rather than guessing is the difference between a panel lying
+    along its fence and one crossing it at twice the bearing.
+
+    Steps are 15 degrees, which is the finest turn TaleSpire has. Snapping the
+    surveyed bearings in the three FTG exports to that grid costs at most 7.41
+    degrees -- 0.26 tiles of drift across one panel, which a joint covers.
+    """
+    return int(round(-math.degrees(math.atan2(dz, dx)) / 15.0)) % 24
+
+
+def run_along_polyline(points: list[tuple[float, float]],
+                       module: float = FENCE_MODULE
+                       ) -> tuple[list[tuple[float, float, int]],
+                                  list[tuple[float, float, float]]]:
+    """Lay a polyline out as panels along it and joints at its turns.
+
+    Returns ``(panels, joints)``. A panel is ``(cx, cz, rot)`` -- a collider
+    centre and a rotation step. A joint is ``(cx, cz, turn)``, the turn being
+    the angle in degrees the line breaks through there, so the caller can put a
+    post on every vertex or only on the sharp ones. Both ends of the run come
+    back as joints with a turn of 180: an end is a full stop.
+
+    **Panels are laid per segment, never across a vertex.** Walking the whole
+    polyline by arc length is simpler and puts a rigid 2-tile piece straddling
+    every corner, cutting it. Within a segment the spacing is the segment's
+    own length divided by a whole number of panels, so a run closes exactly on
+    its ends and any error is spread as a slight lap between panels rather
+    than collected into a gap at one end. A lap is invisible; a gap is
+    daylight.
+    """
+    panels: list[tuple[float, float, int]] = []
+    joints: list[tuple[float, float, float]] = []
+    if len(points) < 2:
+        return panels, joints
+
+    for a, b in zip(points, points[1:]):
+        dx, dz = b[0] - a[0], b[1] - a[1]
+        length = math.hypot(dx, dz)
+        if length < FENCE_MIN_SEGMENT:
+            continue
+        rot = bearing_rot(dx, dz)
+        count = max(1, int(round(length / module)))
+        step = length / count
+        ux, uz = dx / length, dz / length
+        for i in range(count):
+            along = (i + 0.5) * step
+            panels.append((a[0] + ux * along, a[1] + uz * along, rot))
+
+    joints.append((points[0][0], points[0][1], 180.0))
+    for p, q, r in zip(points, points[1:], points[2:]):
+        v1 = (q[0] - p[0], q[1] - p[1])
+        v2 = (r[0] - q[0], r[1] - q[1])
+        m1, m2 = math.hypot(*v1), math.hypot(*v2)
+        if m1 < 1e-9 or m2 < 1e-9:
+            continue
+        cos = (v1[0] * v2[0] + v1[1] * v2[1]) / (m1 * m2)
+        joints.append((q[0], q[1], math.degrees(math.acos(max(-1.0, min(1.0, cos))))))
+    joints.append((points[-1][0], points[-1][1], 180.0))
+    return panels, joints
+
+
 def is_curtain_piece(asset: Asset) -> bool:
     """True when an asset is thinner than a cell and so belongs on its edge.
 
@@ -2265,6 +2344,186 @@ def _lay_quays(b: Builder, tm, grade: float,
                     b.add(place_wall(rail, x, z, side, grade - drop))
 
 
+@dataclass(frozen=True)
+class FenceStyle:
+    """One way of building a field boundary.
+
+    The geometry is fixed -- every style is the same run of 2-tile pieces along
+    the same surveyed line -- so a style is entirely a question of which pieces
+    and which joint policy. That is what makes them comparable on a board.
+    """
+
+    #: Palette role for the pieces along the run.
+    panel: str
+    #: Palette role for the joints, or None to leave the run bare.
+    post: str | None = None
+    #: Only joint a vertex whose turn exceeds this, in degrees. 0 posts every
+    #: vertex; 30 posts only real corners; ends are always jointed when a post
+    #: role is set.
+    post_min_turn: float = 0.0
+    #: Chance a panel is simply left out, for a boundary that has been standing
+    #: a while.
+    gap: float = 0.0
+    #: Lateral wander either side of the line, in tiles, plus or minus one
+    #: rotation step. A surveyed line built exactly is an extruded ribbon; a
+    #: hedge in particular wants to have grown rather than been placed.
+    jitter: float = 0.0
+
+
+#: The designs. Named so `--fence-style` reads as a choice about the map
+#: rather than about the code.
+FENCE_STYLES: dict[str, FenceStyle] = {
+    # Drystone field wall, jointed at every vertex. The default, and what the
+    # FTG `STONE_FENCE` edge type actually describes.
+    "drystone": FenceStyle("field_wall", "field_wall_post"),
+    # The same wall with nothing at the joints, to answer whether a post at a
+    # 5-degree vertex reads as a gate post or as clutter. 48% of vertices turn
+    # less than 5 degrees, so this is not a small question.
+    "drystone-plain": FenceStyle("field_wall", None),
+    # Posts only where the line really turns a corner.
+    "drystone-corner": FenceStyle("field_wall", "field_wall_post",
+                                  post_min_turn=30.0),
+    # Heavier and 7 ft tall: an estate wall rather than a field one.
+    "drystone-tall": FenceStyle("field_wall_tall", "field_wall_post"),
+    # Timber paling, cornered from its own kit at hard turns only -- the piece
+    # is an L and there is nothing else in that kit to joint with.
+    "paling": FenceStyle("yard_fence", "yard_fence_corner", post_min_turn=45.0),
+    # A hedge built exactly like the wall, to see whether a living boundary
+    # survives being laid on a survey line.
+    "hedge": FenceStyle("field_hedge", None),
+    # The same hedge with gaps and wander. If the regular one reads as extruded
+    # green plastic, this is why.
+    "hedgerow": FenceStyle("field_hedge", None, gap=0.10, jitter=0.30),
+}
+
+#: Default when nothing asks for another.
+DEFAULT_FENCE_STYLE = "drystone"
+
+
+def _lay_fences(b: Builder, tm, grade: float,
+                taper: dict[tuple[int, int], float | None],
+                scatter: "Scatter | None" = None,
+                style: str = DEFAULT_FENCE_STYLE) -> int:
+    """Build the field boundaries along their surveyed lines.
+
+    This is the one pass that does not work in cells, and `docs/fencing.md` §4
+    is the argument for it: 97-100% of fence segments run off-axis, a fence is
+    one piece thick with nothing behind it, and a stair-stepped run of thin
+    pieces is the failure this project has already shipped three times.
+
+    **It cannot go through `Scatter`, and that is measured rather than
+    assumed.** `Scatter._clear` tests axis-aligned bounding boxes, and two
+    2-tile panels butted end to end on any off-axis bearing overlap as boxes
+    while their meshes are disjoint -- +0.29 on both axes at 45 degrees. Laid
+    through the scatter, every second panel of every fence on the map would be
+    dropped, silently, and reported only as a `rejected` count. The run knows
+    its own panels are collinear and end to end, so it does its own
+    bookkeeping; the boxes are then handed to the scatter so that *trees* still
+    keep clear of the fence, which is the direction of the test that matters.
+
+    Returns the number of pieces laid.
+    """
+    from . import raster as R
+
+    spec = FENCE_STYLES.get(style)
+    if spec is None:
+        raise ValueError(f"unknown fence style {style!r}; "
+                         f"expected one of {sorted(FENCE_STYLES)}")
+    panel_asset = b.palette.resolve(spec.panel)
+    if panel_asset is None:
+        return 0
+    post_asset = b.palette.resolve(spec.post) if spec.post else None
+
+    # A fence across a carriageway is a line through the one thing the map
+    # exists to let people walk down, so the road takes a gate out of the wall.
+    #
+    # **The gap is the road's own width, measured, not a fixed spread.** The
+    # first rule here suppressed the panel on the paving plus one either side,
+    # which is right for a boundary that crosses a road once and catastrophic
+    # for one that runs beside it: section C of `tools/fence_sections.py` is a
+    # 48-tile boundary grazing a winding road six times, and a three-panel
+    # demolition per graze left 9 panels of 24 standing. Testing each panel at
+    # its centre *and both ends* instead opens exactly as much wall as the
+    # paving actually covers -- a wide road takes several panels, a graze takes
+    # none -- and needs no number to tune.
+    paved = frozenset({R.STREET, R.PLAZA, R.LANE, R.PIER})
+    rng = random.Random(f"fences:{style}")
+    laid = 0
+
+    for run in tm.fences:
+        panels, joints = run_along_polyline(run)
+        if not panels:
+            continue
+
+        # A panel is out if any part of it stands on paving or in a building.
+        # Sampled at the centre and both ends rather than the centre alone,
+        # so the gap a road opens is as wide as the road.
+        half = FENCE_MODULE / 2.0
+        blocked = [False] * len(panels)
+        for i, (cx, cz, rot) in enumerate(panels):
+            theta = math.radians(-rot * 15.0)
+            ux, uz = math.cos(theta) * half, math.sin(theta) * half
+            for px, pz in ((cx, cz), (cx - ux, cz - uz), (cx + ux, cz + uz)):
+                x, z = int(math.floor(px)), int(math.floor(pz))
+                if (not tm.inside(x, z) or tm.surface[z][x] in paved
+                        or tm.building[z][x]):
+                    blocked[i] = True
+                    break
+
+        for i, (cx, cz, rot) in enumerate(panels):
+            if blocked[i]:
+                continue
+            if spec.gap and rng.random() < spec.gap:
+                continue
+            if spec.jitter:
+                cx += rng.uniform(-spec.jitter, spec.jitter)
+                cz += rng.uniform(-spec.jitter, spec.jitter)
+                rot = (rot + rng.choice((-1, 0, 0, 1))) % 24
+            here = _fence_ground(tm, taper, grade, cx, cz)
+            if here is None:
+                continue
+            b.add(place_centered(panel_asset, cx, cz, here, rot), prop=True)
+            laid += 1
+            if scatter is not None:
+                scatter.reserve(panel_asset, cx, cz, here, rot)
+
+        if post_asset is None:
+            continue
+        for jx, jz, turn in joints:
+            if turn < spec.post_min_turn:
+                continue
+            here = _fence_ground(tm, taper, grade, jx, jz)
+            if here is None:
+                continue
+            x, z = int(math.floor(jx)), int(math.floor(jz))
+            if not tm.inside(x, z) or tm.surface[z][x] in paved or tm.building[z][x]:
+                continue
+            b.add(place_centered(post_asset, jx, jz, here, rng.randrange(24)),
+                  prop=True)
+            laid += 1
+            if scatter is not None:
+                scatter.reserve(post_asset, jx, jz, here, 0)
+    return laid
+
+
+def _fence_ground(tm, taper: dict[tuple[int, int], float | None], grade: float,
+                  cx: float, cz: float) -> float | None:
+    """The height to stand a fence piece at, or None where nothing is built.
+
+    Fences run out across open country, which is exactly where the edge taper
+    drops the ground away -- so a fence that ignores it walks out over the
+    falloff on stilts. Same rule every other landscape pass follows: read the
+    taper, and where it is None the ground was never laid and nor is this.
+    """
+    x, z = int(math.floor(cx)), int(math.floor(cz))
+    if not tm.inside(x, z):
+        return None
+    drop = taper.get((x, z), 0.0)
+    if drop is None:
+        return None
+    return grade - drop
+
+
 def _lay_bridges(b: Builder, tm, grade: float,
                  taper: dict[tuple[int, int], float | None]) -> int:
     """Deck and rail the planks MFCG draws across the river.
@@ -3323,6 +3582,7 @@ def build_from_tilemap(
     roofs: bool = True,
     wall_tiles: float = TOWN_WALL_TILES,
     seed: int = 0,
+    fence_style: str = DEFAULT_FENCE_STYLE,
 ) -> Builder:
     """Build a TaleSpire city board from a rasterised :class:`~citysmith.raster.TileMap`.
 
@@ -3612,7 +3872,8 @@ def build_from_tilemap(
         _lay_town_wall(b, tm, town_wall, top, wall_tiles)
 
     b.group = ""
-    _dress_districts(b, tm, grade=floor.size_y, taper=taper, storeys=storeys)
+    _dress_districts(b, tm, grade=floor.size_y, taper=taper, storeys=storeys,
+                     fence_style=fence_style)
 
     return b
 
@@ -3676,6 +3937,18 @@ class Scatter:
             self.b.add(place_centered(asset, cx, cz, y, rot), prop=True)
             self._record(bx)
         return True
+
+    def reserve(self, asset: Asset, cx: float, cz: float, y: float,
+                rot: int) -> None:
+        """Record a box without placing anything, so scenery keeps clear of it.
+
+        For geometry laid outside the scatter's own collision test -- a fence
+        run, whose consecutive panels overlap as bounding boxes while their
+        meshes are disjoint (`_lay_fences`). The test is wrong in that
+        direction and right in this one: a pine has no business growing through
+        a field wall, and a box is exactly the shape a canopy should avoid.
+        """
+        self._record(self.box(asset, cx, cz, y, rot))
 
     def one(self, asset, cx: float, cz: float, y: float, rot: int) -> bool:
         return self.place([(asset, cx, cz, y, rot)])
@@ -4066,7 +4339,8 @@ def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
 
 def _dress_districts(b: Builder, tm, grade: float,
                      taper: dict[tuple[int, int], float | None],
-                     storeys: int = 3) -> None:
+                     storeys: int = 3,
+                     fence_style: str = DEFAULT_FENCE_STYLE) -> None:
     """Scatter district-appropriate props so each quarter reads as itself.
 
     Bare surfaces carry no story: a field of Tilled Earth is just brown, a
@@ -4096,6 +4370,13 @@ def _dress_districts(b: Builder, tm, grade: float,
 
     rng = random.Random("dress:stable")  # deterministic across rebuilds
     scatter = Scatter(b)
+
+    # Fences first, and the order is the point: a field wall is surveyed
+    # geometry and a pine is dressing, so the wall is laid and its boxes
+    # reserved before anything is planted. Planting first would put trees in
+    # the line of the boundary and then reject the wall panels that hit them.
+    with b.layer(LANDSCAPE):
+        _lay_fences(b, tm, grade, taper, scatter, fence_style)
     #: Where a tree stands, so a *felled* stump is never dropped beside one.
     #: A cut stump within a canopy's reach reads as that tree's trunk, badly
     #: aligned -- which is what "trees that do not match their trunks" turned

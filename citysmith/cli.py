@@ -19,6 +19,7 @@ import argparse
 import pathlib
 import sys
 
+from . import build
 from . import floorplan as floorplan_mod
 from . import render, sites
 from .build import DEFAULT_CHUNK_TILES, build_city_board, build_interior
@@ -499,7 +500,8 @@ def cmd_build(args) -> int:
     catalog = _catalog(args)
     palette = _palette(args, catalog, args.style, args.seed)
     builder = build_from_tilemap(
-        tm, palette, storeys=args.storeys, roofs=not args.no_roofs, seed=args.seed
+        tm, palette, storeys=args.storeys, roofs=not args.no_roofs, seed=args.seed,
+        fence_style=args.fence_style,
     )
     plan = builder.chunk_plan(
         max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
@@ -1011,6 +1013,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "over anything, which is what stops a chunk inheriting "
                         "the height of what is under the cursor")
     c.add_argument("--scale", type=int, default=3, help="raster SVG pixels per tile")
+    c.add_argument("--fence-style", default=build.DEFAULT_FENCE_STYLE,
+                   choices=sorted(build.FENCE_STYLES),
+                   help="how field boundaries are built; see docs/fencing.md "
+                        f"(default {build.DEFAULT_FENCE_STYLE})")
     c.add_argument("--crop", default=None, metavar="X,Z,W,D",
                    help="build only this tile region, for a staged in-game test")
     c.add_argument("--stem", default="city", help="output filename stem")

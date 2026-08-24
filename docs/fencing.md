@@ -211,10 +211,21 @@ What follows from the decision:
 - **Post at every vertex, and at both ends of every run.** §2.3. Ends matter as
   much as turns: `chain_segments` stops at junctions, so a fork is two runs whose
   shared endpoint needs a post that reads as one.
-- **Gap at a road crossing.** Suppress panels whose midpoint lands on `STREET`,
-  `PLAZA` or `LANE`, plus one panel either side, and post the two new ends. That
-  is a field gate without needing a gate asset, and it is the whole of the
-  intersection rule (§2.4).
+- **Gap at a road crossing, and the gap is the road's own width.** Test each
+  panel at its centre *and both ends*; drop it if any of the three stands on
+  paving or in a building. That is a field gate without needing a gate asset,
+  and it is the whole of the intersection rule (§2.4).
+
+  **The first rule here was a fixed spread and it was wrong -- caught by the
+  preview, not by reasoning.** Suppressing the panel on the paving plus one
+  either side is right for a boundary that crosses a road once and ruinous for
+  one that runs beside it. Section C of `tools/fence_sections.py` is a 48-tile
+  boundary grazing a winding road six times; the three-panel demolition per
+  graze left **9 of 24 panels standing**, which is not a wall with gates in it,
+  it is a row of stubs. Sampling the panel's own extent instead opens exactly
+  as much wall as the paving covers -- a wide road takes several panels, a
+  graze takes none -- and it needs no number to tune. Section C now stands at
+  17 of 24, and the 7 missing are the crossings.
 - **Follow the ground.** Fences run across open country where the edge taper
   applies. Take `y` from the same `taper` dict every other landscape pass reads,
   and skip a panel whose cell tapers to `None`, exactly as `_dress_seams` does.
@@ -348,3 +359,83 @@ faces, overhead and eye level, and it is a continuous wall rather than a dashed
 one or a stair-step.
 
 `--no-fences` is already wired and needs no work. The cap is dropped (§2.1).
+
+## 9. The preview, and what to look at
+
+Stages 1-4 are built. `--fence-style` selects one of seven designs, and
+`tools/fence_sections.py` writes each of three sections of East Tradebourne
+once per style, so they can be pasted in a row and compared on identical
+ground. Nothing has been on a board yet; what follows is what to look for.
+
+    python tools/fence_sections.py --layout out/tradebourne/layout.json
+
+| section | crop | what it is for |
+|---|---|---|
+| A | `288,120,48,48` | four runs, ten vertices, one turning 135 degrees, no buildings — the joint policy with nothing to distract from it |
+| B | `648,480,48,48` | nine buildings, a waterfront, 212 paved cells — whether a boundary reads at town scale |
+| C | `0,514,48,48` | a road crossing one 48-tile run six times — the gate rule |
+
+| slab | assets | fence pieces | bytes | files |
+|---|---|---|---|---|
+| `A-drystone` | 1,205 | 64 | 6,296 | 1 |
+| `A-drystone-plain` | 1,195 | 49 | 6,232 | 1 |
+| `A-drystone-corner` | 1,201 | 57 | 6,272 | 1 |
+| `A-drystone-tall` | 1,205 | 64 | 6,296 | 1 |
+| `A-paling` | 1,202 | 56 | 6,312 | 1 |
+| `A-hedge` | 1,188 | 49 | 6,160 | 1 |
+| `A-hedgerow` | 1,181 | 42 | 6,112 | 1 |
+| `B-drystone` | 2,823 | 64 | 12,776 | 2 |
+| `B-paling` | 2,818 | 58 | 12,760 | 2 |
+| `B-hedgerow` | 2,804 | 50 | 12,548 | 2 |
+| `C-drystone` | 1,031 | 17 | 5,308 | 1 |
+
+Every slab is far under the 30,720-byte cap; section B splits in two because
+props on the crop's edge overhang it, which is the ordinary behaviour and not a
+fence problem.
+
+**Paste `out/fence/spacing-probe.slab.txt` first.** It is the one thing that
+gates the rest (§4.1): five runs of eight panels on a pad, labelled by a bar of
+N cells running east, at bearings and spacings chosen so that counting the
+panels says whether TaleSpire's drop test is on the bounding box or on the real
+collider.
+
+| row | bearing | spacing | AABB | boxes overlap? |
+|---|---|---|---|---|
+| 1 | 45° | 2.00 | 1.70 x 1.70 | yes — **the question** |
+| 2 | 45° | 2.20 | 1.70 x 1.70 | yes |
+| 3 | 45° | 2.41 | 1.70 x 1.70 | no |
+| 4 | 15° | 2.00 | 2.02 x 0.93 | yes |
+| 5 | 0° | 2.00 | 1.98 x 0.43 | no — control |
+
+Eight panels in every row is the correct answer. **Count them from overhead** —
+a gap in a diagonal run is invisible end-on, because the next panel covers it,
+which is the trap that cost this project three wall picks. If row 1 is whole,
+the collider is oriented, the design stands, and `verify._prop_collisions` can
+be taught to exempt collinear fence panels *with evidence*. If row 1 is gappy
+and row 3 is whole, the run has to be spaced and every diagonal wall will be
+visibly dashed unless a post plugs each joint.
+
+Until that is answered the builds report `[FAIL] placements: N props overlap`,
+and the check now names how many of those pairs are consecutive fence panels so
+the failure is not misread as a scatter regression. On `A-drystone` it is 33 of
+307, and **every one is fence-against-fence** — zero fence-against-scenery,
+which is the reservation in `Scatter.reserve` doing its job.
+
+What the styles are actually asking, in the order worth answering:
+
+- **`drystone` vs `drystone-plain` vs `drystone-corner`** — the joint policy.
+  48% of vertices turn less than 5 degrees, so `drystone` puts a post at a great
+  many places where the line barely bends. Does that read as a gate post or as
+  clutter? Judge from eye level; from overhead a post is always defensible.
+- **`hedge` vs `hedgerow`** — whether a living boundary survives being laid on a
+  survey line. The regular one is the same geometry as the wall; the jittered
+  one wanders 0.3 tiles and drops one piece in ten. If the regular hedge reads
+  as extruded green plastic, that is the answer, and it is worth knowing whether
+  the same jitter would help the *wall* too.
+- **`drystone` vs `drystone-tall`** — 5 ft against 7 ft. The tall one is an
+  estate wall; on a field boundary it should read as too much.
+- **`paling`** — timber at 3.5 ft, cornered only at hard turns. The one style
+  with no joint at gentle vertices, so it doubles as a second read on the post
+  question.
+- **`C-drystone`** — the gate rule, and the only thing to check there is whether
+  the gaps land on the road rather than beside it.

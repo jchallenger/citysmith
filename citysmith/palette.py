@@ -499,6 +499,52 @@ MEDIEVAL = Style(
             _prop(name=("bush_reg_01", "bush_wild_01", "bush_berry_01",
                         "Bush - Medium", "bush_thorns_01"), **_MED),
         ],
+        # Field boundaries, laid along their true bearing by `_lay_fences`
+        # rather than stroked into cells. Every piece here is 2.0 tiles long,
+        # which is the module the run steps at -- swapping a style is a change
+        # of asset, never a change of geometry.
+        #
+        # **The kit is `Fences`** (Medieval Fantasy), and everything in it is a
+        # *prop*, so these store a collider centre and go down through
+        # `place_centered`, not `place_tile`.
+        #
+        # Careful with `Harbor Fence 02`: the name exists TWICE, as a `Harbor`
+        # tile (0.5 x 0.5 x 1.0) and as a `Fences` prop (0.98 x 0.48 x 0.20).
+        # `quay_rail` below pins the tile. A `_prop` query for that name here
+        # would silently take the other one.
+        "field_wall": [
+            _prop(name=("Stone Wall 01", "Stone fence 02"), **_MED),
+        ],
+        # 1.39 tall against the field wall's 1.00, and half as thick again:
+        # an estate or churchyard wall rather than a boundary between fields.
+        "field_wall_tall": [
+            _prop(name=("Stone Wall 02", "Stone Wall 01"), **_MED),
+        ],
+        # The joint. 0.51 square and 1.02 tall -- a hair proud of the wall it
+        # ends, which is what a gate post does. 72% of fence vertices turn less
+        # than 20 degrees (`docs/fencing.md` §2.3), so a post is the piece that
+        # fits the whole distribution; the kit's corner pieces are authored at
+        # 90 degrees and suit one vertex in eight.
+        "field_wall_post": [
+            _prop(name=("Stone fence 01", "Stone Wall 01"), **_MED),
+        ],
+        # Timber paling at 3.5 ft: a paddock or a yard boundary, not a field.
+        "yard_fence": [
+            _prop(name=("Wooden Fence",), **_MED),
+        ],
+        # The same kit's corner, for the one vertex in eight that really does
+        # turn a right angle. Authored as an L, so it is only ever placed where
+        # the turn is hard enough to fill.
+        "yard_fence_corner": [
+            _prop(name=("Wooden Fence Corner",), **_MED),
+        ],
+        # A living boundary on the same 2.0-tile module as the walls, so one
+        # run-the-line pass serves both. `Nature` kit rather than `Fences`,
+        # which is the one deliberate kit crossing here -- a hedge is not
+        # masonry and is not trying to match it.
+        "field_hedge": [
+            _prop(name=("hedge_piece_01",), **_MED),
+        ],
         "quay_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),

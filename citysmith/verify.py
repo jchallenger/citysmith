@@ -524,13 +524,22 @@ def _prop_collisions(builder) -> list[str]:
     from .build import placed_bounds
 
     catalog = builder.palette.catalog
+    from .build import FENCE_STYLES
+
+    fence_roles = {r for spec in FENCE_STYLES.values()
+                   for r in (spec.panel, spec.post) if r}
+    fence_ids = {a.id for r in fence_roles
+                 for a in (builder.palette.resolve(r),) if a is not None}
+
     boxes: list[tuple[float, ...]] = []
+    is_fence: list[bool] = []
     for p in builder.placements:
         asset = catalog.by_id(p.asset_id)
         if asset is None or asset.kind != "prop":
             continue
         x0, z0, x1, z1 = placed_bounds(asset, p)
         boxes.append((x0, z0, p.y, x1, z1, p.y + asset.size_y))
+        is_fence.append(p.asset_id in fence_ids)
 
     at: dict[tuple[int, int], list[int]] = {}
     for i, bx in enumerate(boxes):
@@ -540,6 +549,7 @@ def _prop_collisions(builder) -> list[str]:
 
     e = 1e-6
     clashing: set[int] = set()
+    fence_only: set[tuple[int, int]] = set()
     for ids in at.values():
         for a in range(len(ids)):
             for b in range(a + 1, len(ids)):
@@ -548,13 +558,32 @@ def _prop_collisions(builder) -> list[str]:
                         and p[1] < q[4] - e and q[1] < p[4] - e
                         and p[2] < q[5] - e and q[2] < p[5] - e):
                     clashing.update((ids[a], ids[b]))
+                    if is_fence[ids[a]] and is_fence[ids[b]]:
+                        fence_only.add((min(ids[a], ids[b]), max(ids[a], ids[b])))
+    fence_pairs = len(fence_only)
     if not clashing:
         return []
-    return [
+    msg = [
         f"{len(clashing)} of {len(boxes)} props overlap another prop "
         f"({100 * len(clashing) / len(boxes):.0f}%) -- TaleSpire drops these "
         "silently on paste, so they will be missing from the board"
     ]
+    # A fence run is the one place this test is known to be pessimistic, and
+    # saying so is the difference between a diagnosable failure and a mystery.
+    # The boxes here are axis-aligned; two 2-tile fence panels butted end to
+    # end on an off-axis bearing overlap as boxes while their meshes are
+    # disjoint -- +0.29 on both axes at 45 degrees, and 97-100% of surveyed
+    # fence lines are off-axis. **Whether TaleSpire's own drop test is on the
+    # box or on the oriented collider is NOT known** (`docs/fencing.md` §4.1),
+    # so this still fails: if it is the box, these panels really are missing.
+    # It is called out separately so a fenced map's failure is not read as a
+    # scenery-scatter regression, which is what this check normally catches.
+    if fence_pairs:
+        msg.append(
+            f"    of those, {fence_pairs} pair(s) are consecutive fence panels, "
+            "which overlap as boxes but not as meshes -- see docs/fencing.md 4.1"
+        )
+    return msg
 
 
 class _Occupancy:

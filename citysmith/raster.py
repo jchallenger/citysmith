@@ -114,6 +114,13 @@ class TileMap:
     #: cells with no memory of where the polygon turned, and a turn is where a
     #: mural tower goes; the builder cannot recover that from the band.
     wall_corners: list[tuple[int, int]] = field(default_factory=list)
+    #: Field boundaries as polylines in tile coordinates, clipped to the map.
+    #: Carried here for the same reason as ``wall_corners``: the builder needs
+    #: geometry the cell grid cannot express. 97-100% of these run off-axis
+    #: (`docs/fencing.md` §2.2), so stroking them into cells would stair-step
+    #: every field wall on the map -- they are laid along their true bearing
+    #: instead, and a bearing does not survive rasterisation.
+    fences: list[list[Point]] = field(default_factory=list)
 
     @classmethod
     def blank(cls, width: int, depth: int, name: str = "") -> "TileMap":
@@ -167,6 +174,15 @@ class TileMap:
         out.wall_corners = [
             (x - x0, z - z0) for x, z in self.wall_corners
             if x0 <= x < x0 + width and z0 <= z < z0 + depth
+        ]
+        # Re-clipped rather than filtered: a fence run is a line, not a point,
+        # so a crop cuts through the middle of one and the part that survives
+        # needs its own ends. Filtering by vertex would drop a boundary that
+        # crosses the crop without having a vertex inside it.
+        out.fences = [
+            run for line in self.fences
+            for run in clip_polyline([(x - x0, z - z0) for x, z in line],
+                                     0.0, 0.0, float(width), float(depth))
         ]
         # Storey counts must survive the crop, or every building in a staged
         # test comes out single-storey -- which silently defeats the point of
@@ -302,6 +318,77 @@ COLLECTOR_DEGREE = 2
 
 #: How close two roads must come to count as meeting.
 JUNCTION_TILES = 2.0
+
+
+def clip_polyline(points: list[Point], x0: float, z0: float,
+                  x1: float, z1: float) -> list[list[Point]]:
+    """Split a polyline into the runs of it that lie inside a rectangle.
+
+    **Everything else in this module clips for free and that is why this is
+    needed.** ``_fill_polygon`` and ``_stroke_line`` write into a bounded grid,
+    so whatever falls outside it is simply never written; areas overhang the
+    map by up to 784 tiles today and nothing has ever noticed. A fence is laid
+    as props along its true line, which has no grid to fall off the edge of --
+    and a quarter of every fence line lies outside the crop window, reaching
+    188 tiles past it on East Tradebourne, because ``ftg.inside_window`` keeps
+    a whole segment that merely clips a corner (`docs/fencing.md` §2.4).
+
+    An off-map prop is not a cosmetic problem: it drags the build's bounding
+    box, and the bounding box is what every registration marker and chunk
+    anchor is measured against.
+
+    A polyline may leave and re-enter, so this returns a *list* of runs; each
+    is laid as its own fence with its own end posts.
+    """
+    runs: list[list[Point]] = []
+    current: list[Point] = []
+    for a, b in zip(points, points[1:]):
+        piece = _clip_segment(a, b, x0, z0, x1, z1)
+        if piece is None:
+            if len(current) > 1:
+                runs.append(current)
+            current = []
+            continue
+        pa, pb = piece
+        if current and _same_point(current[-1], pa):
+            current.append(pb)
+        else:
+            if len(current) > 1:
+                runs.append(current)
+            current = [pa, pb]
+    if len(current) > 1:
+        runs.append(current)
+    return runs
+
+
+def _same_point(a: Point, b: Point) -> bool:
+    return abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[1]) < 1e-9
+
+
+def _clip_segment(a: Point, b: Point, x0: float, z0: float,
+                  x1: float, z1: float) -> tuple[Point, Point] | None:
+    """Liang-Barsky: the part of ``a``-``b`` inside the rectangle, or None."""
+    dx, dz = b[0] - a[0], b[1] - a[1]
+    t0, t1 = 0.0, 1.0
+    for p, q in ((-dx, a[0] - x0), (dx, x1 - a[0]),
+                 (-dz, a[1] - z0), (dz, z1 - a[1])):
+        if abs(p) < 1e-12:
+            if q < 0.0:
+                return None      # parallel to this edge and outside it
+            continue
+        t = q / p
+        if p < 0.0:
+            if t > t1:
+                return None
+            t0 = max(t0, t)
+        else:
+            if t < t0:
+                return None
+            t1 = min(t1, t)
+    if t1 - t0 < 1e-9:
+        return None              # touches a corner; nothing to build
+    return ((a[0] + t0 * dx, a[1] + t0 * dz),
+            (a[0] + t1 * dx, a[1] + t1 * dz))
 
 
 def _point_segment_distance(p: Point, a: Point, b: Point) -> float:
@@ -498,6 +585,13 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
             tm.building[z][x] = b.id
             tm.surface[z][x] = FLOOR
         tm.floors[b.id] = max(1, b.floors)
+
+    # Field boundaries ride through as geometry rather than as cells, clipped
+    # to the board here so nothing downstream has to think about the overhang.
+    tm.fences = [
+        run for line in layout.fences
+        for run in clip_polyline(shift(line), 0.0, 0.0, float(width), float(depth))
+    ]
 
     _regularise_buildings(tm)
     _notch_buildings(tm)
