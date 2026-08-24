@@ -8,8 +8,10 @@ making another is both a waste of a paste and a way to lose the first.
 board list is a list of names -- no size, no date, no contents, and no API of
 any kind -- so a board is identified by the name we gave it and by nothing
 else. This file is therefore the record, and it is the only record:
-`out/scenes/boards.json`, one entry per scene, written after a paste lands and
-read before the next one starts.
+`campaign/boards.json`, one entry per scene, written after a paste lands and
+read before the next one starts. **Not under `out/`**: that is gitignored build
+output and gets cleared wholesale, and this file cannot be regenerated from
+anything -- it was lost once that way already.
 
 Four states, and each one has a different right answer:
 

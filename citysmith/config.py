@@ -36,7 +36,11 @@ DEFAULTS: dict[str, Any] = {
     "style": "medieval",
     "seed": 33,
     "out_dir": "out/scenes",
-    "registry": "out/scenes/boards.json",
+    # **Not under out/.** That directory is gitignored build output and gets
+    # cleared wholesale; this file is the only record of which board holds
+    # which scene, and it cannot be regenerated from anything. It was lost
+    # once already, to a worktree being removed.
+    "registry": "campaign/boards.json",
     "board": {
         # **The building goes first, and that is measured rather than chosen.**
         # The campaign board list clips a row at about two dozen characters, so

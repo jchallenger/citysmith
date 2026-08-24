@@ -116,10 +116,11 @@ starts at the door rather than through it.
 
 ## The board, and why nothing gets deleted
 
-`out/scenes/boards.json` records which board holds which scene. **It is the
+`campaign/boards.json` records which board holds which scene. **It is the
 only record there can be**: the TaleSpire campaign list shows a name and
 nothing else — no size, no date, no contents, no API — so a board cannot be
-asked what is on it.
+asked what is on it. It lives in `campaign/`, not `out/` -- build output is
+regenerable and this is not.
 
 `scene.ps1 enter` looks the scene up and takes one of four routes:
 

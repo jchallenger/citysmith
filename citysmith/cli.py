@@ -610,7 +610,7 @@ def cmd_boards(args) -> int:
     from .scene import Scene
 
     cfg = Config.load(args.config)
-    registry = boards.Registry.load(cfg.get("registry", "out/scenes/boards.json"))
+    registry = boards.Registry.load(cfg.get("registry", "campaign/boards.json"))
 
     if args.action == "list":
         if not registry.records:

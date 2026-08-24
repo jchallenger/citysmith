@@ -183,7 +183,9 @@ them apart.
 ### A board per building, and going back into one
 
 `citysmith` keeps its own record of which board holds which scene, because the
-list cannot be asked: `out/scenes/boards.json`, written after a paste lands.
+list cannot be asked: `campaign/boards.json`, written after a paste lands.
+Not under `out/` -- that is gitignored build output and this record cannot be
+regenerated from anything.
 
 ```powershell
 .\tools\scene.ps1 enter -Scene graybank-tavern-0014

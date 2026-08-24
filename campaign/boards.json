@@ -1,0 +1,21 @@
+{
+ "registry_version": 1,
+ "campaign": "",
+ "boards": {
+  "graybank-tavern-0014": {
+   "scene_id": "graybank-tavern-0014",
+   "board": "The Halfling and the Fox - Graybank interior",
+   "town": "Graybank",
+   "building_id": "tavern-0014",
+   "centroid": [
+    169.03,
+    168.09
+   ],
+   "digest": "sha256:53da7247ed227a90",
+   "created": "2026-08-24T00:32:09",
+   "last_entered": "2026-08-24T00:32:09",
+   "visits": 1,
+   "superseded": []
+  }
+ }
+}

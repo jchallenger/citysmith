@@ -12,8 +12,9 @@
 
   "style": "medieval",
   "seed": 33,
+  "_out_dir_note": "out_dir is build output and can be deleted; registry is the campaign's memory of which board holds which scene and cannot be regenerated.",
   "out_dir": "out/scenes",
-  "registry": "out/scenes/boards.json",
+  "registry": "campaign/boards.json",
 
   "board": {
     "_comment": "The building goes FIRST. The campaign board list clips a row at about two dozen characters, so a `Interior - Graybank - ` prefix renders every interior in a town as the same row. Whatever identifies the room has to be at the front.",
