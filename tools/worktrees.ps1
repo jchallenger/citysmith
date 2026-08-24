@@ -54,9 +54,14 @@ function Git-Or-Throw([string[]]$gitArgs) {
   return $out
 }
 
-$root = (& git rev-parse --show-toplevel)
+# The MAIN worktree's root, not the current one. `--show-toplevel` answers
+# "which checkout am I standing in", so running this from inside a worktree
+# made it look for .claude/worktrees *under that worktree* and report no
+# worktrees at all. `--git-common-dir` is shared by every worktree of a repo,
+# and its parent is the main checkout.
+$common = (& git rev-parse --path-format=absolute --git-common-dir)
 if ($LASTEXITCODE -ne 0) { throw "not a git repository" }
-$root = $root.Trim()
+$root = (Resolve-Path (Split-Path $common.Trim() -Parent)).Path
 # Worktrees live under .claude/worktrees, which is already gitignored -- so a
 # worktree never shows up as untracked junk in the parent's status.
 $treeRoot = Join-Path $root ".claude/worktrees"
@@ -120,7 +125,7 @@ function Show-List {
     $label = $w.Branch
     if (-not $label) { $label = "(detached)" }
     if ($w.IsMain) { $label = "$label [trunk]" }
-    $rel = $w.Path.Replace($root, ".").Replace("\", "/")
+    $rel = $w.Path.Replace("\", "/").Replace($root.Replace("\", "/"), ".")
     "{0,-28} {1,-44} {2,6} {3,7} {4,6} {5}" -f $label, $rel, $w.Ahead, $w.Behind, $w.Dirty, $w.AgeDays
   }
   ""
