@@ -9,6 +9,7 @@ This file is the internal engineering notes. User-facing docs:
 `docs/asset-conventions.md` (footprints, pinning, normalization, roof rotations),
 `docs/ftg-geojson-import.md` (the second import format, reverse-engineered),
 `docs/scenes.md` (one building as a board the party walks into),
+`docs/interior-slabs.md` (what hand-builders do inside a building, measured),
 `docs/branching.md` (worktrees, and the policy that closes them),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
 `.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).
@@ -1141,6 +1142,21 @@ and no API. Four states -- NEW pastes, READY switches, STALE *still reuses*
 makes a second board and leaves the first), MOVED reports that a re-import may
 have renumbered the building underneath the id. Nothing in this deletes a
 board.
+
+**Furnishing is measured but not done, and `docs/interior-slabs.md` is the
+evidence.** Decoded from the community slabs in `library/` (2,382 interior-kit
+props) plus two published interiors: **0.1% of hand-placed interior props sit
+on a cell centre** and **84% are on a quarter turn**, against our 100% centred
+and uniformly random over 24 steps. One placed prop in five spans more than a
+cell -- 67% of the `Furniture` kit does -- while `_dress` centres every prop in
+one cell at a random angle, which is the prop version of the shape-assumption
+rule this file states for tiles, and the likeliest cause of furniture reading
+as debris. Props also *stack*: two thirds of them sit on a table or a shelf
+rather than the floor, and `Food & Drink` is 44/45 smaller than a cell because
+it is tabletop dressing. Density runs 0.41-0.66 per cell against our 0.12.
+
+Worth knowing before spending a session on it: **an unfurnished interior with
+named rooms is one of the two forms people publish**, not a failure state.
 
 ## Testing
 
