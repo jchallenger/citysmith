@@ -53,10 +53,39 @@ python -m citysmith design out/tavern-015.plan.json
 `pipeline` runs all four in one command. `board` builds the coarse 3D city shell
 from a `city.json`.
 
-**"I want an interior battle map for the tavern"**
-→ `plan` then `design`. `design --roof` includes a roof (which hides the
-interior — usually not what they want for a battle map); `--prop-density`
-defaults to 0.12.
+**"Take the party into the tavern" / "I need the inside of that building"**
+→ `scene`, for a building from an **imported** town. It writes the interior, an
+apron of ground, four marks where the tokens go, a manifest, a GM brief and a
+plan — one slab, one paste.
+```bash
+python -m citysmith scene out/graybank/layout.json --list      # what is worth entering
+python -m citysmith scene out/graybank/layout.json "halfling"  # -> out/scenes/<id>/
+```
+```powershell
+.\tools\scene.ps1 enter -Scene graybank-tavern-0014
+```
+Name the building by id, by an unambiguous piece of its name, or `kind:tavern`.
+An ambiguous name is refused rather than guessed — FTG calls six of Graybank's
+buildings `Farm`.
+
+Three things to say to the user rather than let them discover:
+- **The minis are not in the slab and cannot be.** A v2 slab's creature count is
+  always zero. The four marks are contrasting floor tiles inside the door; the
+  tokens get dropped on them by hand.
+- **The occupants are derived, not exported.** The GeoJSON names buildings and
+  gives their trade and carries no people at all (checked across all three FTG
+  exports). `--roster <file>` replaces them with real ones, keyed on building id.
+- **The board is reused, never rebuilt over.** Second visit switches to the
+  board that is already there. `-Rebuild` makes a *second* board and leaves the
+  first alone, because there is no erase in TaleSpire.
+
+Settings live in `config/scene.json` — party size and names, storeys, apron,
+prop density, board naming. `docs/scenes.md` is the full guide.
+
+**"I want an interior battle map for a procedurally generated town"**
+→ `plan` then `design` (the `city.json` path, not the imported one).
+`design --roof` includes a roof (which hides the interior — usually not what
+they want for a battle map); `--prop-density` defaults to 0.12.
 
 **"Which building should the encounter be in?"**
 → `sites` — it prints the score and the reasoning per building, so the ranking

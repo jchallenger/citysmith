@@ -159,13 +159,49 @@ name you care about.
 
 ### Naming conventions
 
+**The list clips a row at about two dozen characters, so what identifies the
+board has to be in the first two dozen.** Measured on the real list: two
+interiors named `Interior - Graybank - The Halfling and the Fox` and
+`Interior - Graybank - The Baron's Rabbit` both render as
+`INTERIOR - GRAYBANK - T...`. Two boards, one visible name, in the only list
+there is. A prefix that groups is worth nothing if it eats the part that tells
+them apart.
+
 - A location board gets the location's name, exactly as the source calls it:
   `Graybank`, `East Tradebourne`. It has to match what the GM will say at the
   table and what the export is filed under.
+- An interior board leads with the **building**:
+  `The Halfling and the Fox - Graybank interior`. A name the export repeats, or
+  one that had to be invented because MFCG supplied none, carries its building
+  id too: `Farm (stable-0003) - Graybank interior`. `citysmith scene` does this
+  from `config/scene.json`.
 - A throwaway gets a `Probe - ` prefix: `Probe - East Tradebourne rampart`.
-  That sorts them together in the list and makes them obviously deletable.
+  Short enough to survive the clipping, and it makes them obviously deletable.
 - Leave `Unknown Realm N` alone on boards you did not make. One of them is the
   campaign's default empty board and others may be someone's work in progress.
+
+### A board per building, and going back into one
+
+`citysmith` keeps its own record of which board holds which scene, because the
+list cannot be asked: `out/scenes/boards.json`, written after a paste lands.
+
+```powershell
+.\tools\scene.ps1 enter -Scene graybank-tavern-0014
+```
+
+First visit: new board, paste, rename, record. Every visit after: it opens the
+board list, screenshots it, and stops -- **it will not guess a row**, because
+the list re-sorts alphabetically on every rename and nothing can read text off
+the screen. Read the row off `out/flyby/scene-boards.jpg`, then:
+
+```powershell
+.\tools\scene.ps1 switch -Scene graybank-tavern-0014 -Row 3
+```
+
+If the scene has been rebuilt since the board was pasted it reports `STALE` and
+**still reuses the board**. A board is where something happened, a paste cannot
+replace what is already on it, and `-Rebuild` therefore makes a second board
+rather than touching the first. Nothing in that script deletes anything.
 
 ## Verifying a board holds what you think
 

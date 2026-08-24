@@ -8,6 +8,8 @@ This file is the internal engineering notes. User-facing docs:
 `docs/pasting-into-talespire.md` (the paste interaction, in full),
 `docs/asset-conventions.md` (footprints, pinning, normalization, roof rotations),
 `docs/ftg-geojson-import.md` (the second import format, reverse-engineered),
+`docs/scenes.md` (one building as a board the party walks into),
+`docs/branching.md` (worktrees, and the policy that closes them),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
 `.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).
 
@@ -27,6 +29,10 @@ This file is the internal engineering notes. User-facing docs:
 | `city.py` | BSP city generation: streets, blocks, plots, buildings, districts. |
 | `sites.py` | Scores buildings by encounter potential, with reasons. |
 | `floorplan.py` | Interior rooms, doors, stairs for one building. |
+| `interior.py` | One imported building -> a plan, a door side, its occupants. |
+| `scene.py` | A scene: interior + apron + party marks + manifest + brief. |
+| `boards.py` | Which TaleSpire board holds which scene. The only record. |
+| `config.py` | `config/scene.json`: defaults in code, the file overlays. |
 | `build.py` | Geometry -> `Placement`s -> slabs. All offsets derived from bounds. |
 | `render.py` | Hand-written SVG for city and floorplan reference maps. |
 | `ai.py` | Claude translation layer. Optional; never emits geometry. |
@@ -993,6 +999,69 @@ artifacts before debugging the code.** A tree-species count read 80/15/5
 against a 62/30/8 target purely because a previous build's chunk files were
 still in `out/`.
 
+
+## Scenes: one building, and the board the party stands on
+
+`citysmith scene` takes one building out of an imported town and builds the
+board a session happens on -- the interior, an apron of ground, four marks on
+the floor where the tokens go, a manifest, and a GM brief.
+`docs/scenes.md` is the user-facing guide; what belongs here is what the first
+one on a real board taught, because none of it was visible from the files.
+
+**The export has no occupants, and that was checked rather than assumed.**
+Across all three FTG exports every `BUILDING` feature carries exactly `id`,
+`type`, `name`, `buildingType` and `material` -- 1,007 of them in East
+Tradebourne, no sixth key. MFCG has no names at all. So a roster is *derived*
+from the trade, the authored name and the footprint, stably per seed, and the
+brief says so on the page rather than presenting it as exported. An authored
+sidecar keyed on building id (`interior.load_roster`) wins where it has an
+entry.
+
+**Levels go side by side, not stacked.** Same argument as the roof being off:
+TaleSpire cannot hide an upper floor, so a stacked inn is one visible attic and
+two rooms the camera has to be flown inside to use. `Floorplan.rect_on(level)`
+is what makes it work -- every pass that asks "is this cell on the outside
+wall" now asks it of the level's own rect, and `build_interior(stack=False)`
+builds each at ground height.
+
+Three things the first scene on a board showed, in the order they were found:
+
+- **`wall_interior` was the last place `md_wall_1x1_02` survived.** MegaDungeon
+  masonry -- the same deep-relief blocks taken off the facade for leaving a
+  jumbled seam at every join. Read from overhead, the four rooms of a cream
+  timber-framed tavern were a heap of pale rubble filling the floor. It could
+  not have shown up before: a town's partitions are inside a closed shell with
+  a roof on. It is `Village Roof Side Wall 01` now, the facade's own panel.
+  **The kit rule reaches inside the building too.**
+
+- **The campaign board list clips a row at about two dozen characters.**
+  `Interior - Graybank - The Halfling and the Fox` and
+  `Interior - Graybank - The Baron's Rabbit` both render as
+  `INTERIOR - GRAYBANK - T...`. Two boards, one visible name, in the one list
+  that is the only thing TaleSpire will tell you about a board. The building
+  goes first now (`{building} - {town} interior`), and a name that repeats or
+  had to be invented carries its building id. Grouping by prefix is not worth
+  the characters when the characters are what identify the room.
+
+- **The same plan did not build the same board twice.** `_interior_walls`
+  returns a set keyed partly on a string; Python randomises string hashing per
+  process, so the partitions were emitted in a different order every run --
+  231 placements, identical multiset, different bytes. Every scene therefore
+  read STALE after a rebuild that changed nothing. Sorted at the source, and
+  `boards.digest_of` hashes the decoded placements rather than the file,
+  because a digest that holds only while every set happens to iterate the same
+  way will lie again later. **A process fixes its hash seed once, so the whole
+  suite was blind to this**; `tests/test_determinism.py` builds in two
+  subprocesses with different `PYTHONHASHSEED`.
+
+**`out/scenes/boards.json` is the only record of which board holds what**, and
+there cannot be another: the campaign list has no size, no date, no contents
+and no API. Four states -- NEW pastes, READY switches, STALE *still reuses*
+(a board is where something happened, and there is no erase, so `-Rebuild`
+makes a second board and leaves the first), MOVED reports that a re-import may
+have renumbered the building underneath the id. Nothing in this deletes a
+board.
+
 ## Testing
 
 `python -m pytest -q`. Tests assert invariants (no overlapping buildings, no
@@ -1004,10 +1073,13 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
 
 - Local UI. Deliberately deferred; `cli.py` is a thin shell over the core
   modules so a UI can be added without touching generation code.
-- Creature/mini placement (`creatureCount` is always 0 in a v2 slab).
-- Interiors. Footprints are now ~650 sq ft, which is finally big enough for
-  rooms to be worth generating; `floorplan.py` already does the geometry, but
-  nothing wires it onto a second board per building.
+- Creature/mini placement (`creatureCount` is always 0 in a v2 slab). This is
+  why a scene pastes *marks* rather than a party: four contrasting floor tiles
+  by the door, and the minis go on them by hand.
+- Switching to an existing board, unattended. `scene.ps1 enter` drives
+  everything else and stops at exactly one place, because the campaign list
+  re-sorts on every rename and nothing here can read text off the screen. Needs
+  either OCR or a keybind we have not found.
 - A tapered map edge. The border ring still ends on a hard straight cut, so
   the map reads as a cropped rectangle from outside (finding 8).
 - A portcullis winch, murder holes and an arch ring. The gate has doors now

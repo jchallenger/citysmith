@@ -357,6 +357,36 @@ The procedural path additionally writes `out/city.json` / `city.svg`,
 
 ---
 
+## Walking the party into a building
+
+A town board is where the party travels; a **scene** is where they play. One
+building out of the town, opened up, with the people who are in it and four
+marks on the floor for the tokens.
+
+```bash
+python -m citysmith scene out/graybank/layout.json "halfling"
+```
+```powershell
+.\tools\scene.ps1 enter -Scene graybank-tavern-0014
+```
+
+The first writes the board (231 assets, one paste). The second puts it in
+TaleSpire -- making a board the first time and **switching to the one that is
+already there** every time after. Nothing is ever deleted.
+
+You get the slab, a manifest, a GM brief naming who is inside and why the room
+is worth playing in, and a floorplan with the party's starting squares drawn on
+it. Occupants are *derived* -- the export names buildings and trades and
+carries no people at all -- but a roster you write yourself wins over them.
+
+**Tokens cannot be pasted**: a v2 slab's creature count is always zero. What is
+pasted is the marks, and the minis go on them by hand.
+
+[docs/scenes.md](docs/scenes.md) is the full guide, including the four states
+of the board record and why a rebuild never overwrites a board.
+
+---
+
 ## The other pipeline: procedural city + interiors
 
 Generates a town from a seed instead of importing one, then builds a battle-map
@@ -424,6 +454,9 @@ automatically (Windows only, and the game must be windowed).
 - `docs/asset-index.md` — a generated index of *your* asset library, by kit.
   Not in the repo, because it is a dump of your TaleSpire packs; run
   `python tools/kit_index.py` to produce it locally.
+- [docs/scenes.md](docs/scenes.md) — one building as a board the party walks
+  into: what is derived and what is exported, where the tokens go, and why a
+  board is reused rather than rebuilt.
 - [docs/ftg-geojson-import.md](docs/ftg-geojson-import.md) — the Fantasy Town
   Generator schema, reverse-engineered.
 - [docs/slab-format-v2.md](docs/slab-format-v2.md) — BouncyRock's official slab
