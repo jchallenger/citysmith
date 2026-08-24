@@ -69,6 +69,26 @@ $treeRoot = Join-Path $root ".claude/worktrees"
 function Branch-Of([string]$category) { "$Prefix/$category" }
 function Dir-Of([string]$category)    { Join-Path $treeRoot "$Prefix/$category" }
 
+function Remove-Worktree([string]$dir) {
+  # Windows will not delete a directory something is *sitting in*, and the
+  # something is usually you: a shell whose current directory is the worktree,
+  # a test run, an editor. The first `land` on this tool hit exactly that --
+  # `remove` deleted most of the tree, failed on one path, and left a branch
+  # that was already merged plus a directory git no longer recognised as a
+  # worktree. So: try, force, then clean up by hand, and only give up after
+  # all three.
+  & git worktree remove $dir
+  if ($LASTEXITCODE -eq 0) { return }
+  & git worktree remove --force $dir
+  if ($LASTEXITCODE -eq 0) { return }
+  Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
+  & git worktree prune
+  if (Test-Path $dir) {
+    throw ("could not remove $dir -- something has a file open in it. Close " +
+           "any shell or editor sitting there and run: git worktree prune")
+  }
+}
+
 function Get-Worktrees {
   # `git worktree list --porcelain` emits a blank-line separated record per
   # worktree. Parsed rather than the human format, whose columns move.
@@ -243,7 +263,7 @@ Branch policy (docs/branching.md is the long form)
       "merged $branch into $Trunk (fast-forward)"
     }
 
-    Git-Or-Throw @('worktree','remove',$dir) | Out-Null
+    Remove-Worktree $dir
     Git-Or-Throw @('branch','-d',$branch) | Out-Null
     "landed and removed $branch"
     Show-List
@@ -267,8 +287,7 @@ Branch policy (docs/branching.md is the long form)
         "would remove $($w.Branch) at $($w.Path)  (merged into $Trunk)"
         continue
       }
-      & git worktree remove --force $w.Path
-      if ($LASTEXITCODE -ne 0) { "  could not remove $($w.Path)"; continue }
+      try { Remove-Worktree $w.Path } catch { "  $_"; continue }
       & git branch -d $w.Branch | Out-Null
       "removed $($w.Branch)"
       $n++
