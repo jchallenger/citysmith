@@ -16,6 +16,21 @@
    "last_entered": "2026-08-24T00:32:09",
    "visits": 1,
    "superseded": []
+  },
+  "graybank-temple-0123": {
+   "scene_id": "graybank-temple-0123",
+   "board": "Chapel of Hermes - Graybank interior",
+   "town": "Graybank",
+   "building_id": "temple-0123",
+   "centroid": [
+    291.7,
+    210.24
+   ],
+   "digest": "sha256:8cfec6c577c8fdd0",
+   "created": "2026-08-24T08:31:57",
+   "last_entered": "2026-08-24T08:31:57",
+   "visits": 1,
+   "superseded": []
   }
  }
 }

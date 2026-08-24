@@ -49,6 +49,28 @@ resolves assets needs `--catalog ../../../../catalog.json` or an absolute path
 to the parent's copy. Without it the catalog is rebuilt from the install, which
 works but takes a minute and writes a second copy.
 
+## Never `git add -A` in a checkout somebody else is using
+
+This is not hypothetical. A docs commit made with `git add -A` on `main` swept
+up an in-progress multi-slab feature -- `slab.py`, `cli.py` and a test -- that
+the repo's owner had open at that moment, and committed it under a message
+about documentation. It was split back out with
+
+```bash
+git reset --soft HEAD~1
+```
+
+and then `git restore --staged` on the files that were not mine, but the
+uncommitted work had already been staged by the sweep, so its staged/unstaged
+split did not survive exactly.
+
+**Stage by path.** `git add docs/scenes.md CLAUDE.md`, and read
+`git status --short` before committing: anything modified that you did not
+touch belongs to whoever else is in the tree. This is the same failure the
+worktree layout guards against, arriving from the other direction -- the
+gitignored `.claude/worktrees` path stops the parent sweeping a worktree, and
+nothing but care stops a commit sweeping a colleague.
+
 ## Commands
 
 ```powershell

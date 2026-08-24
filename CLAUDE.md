@@ -1064,6 +1064,33 @@ Three things the first scene on a board showed, in the order they were found:
   suite was blind to this**; `tests/test_determinism.py` builds in two
   subprocesses with different `PYTHONHASHSEED`.
 
+**A big building needs a different plan, and the BSP does not scale.** Rooms
+per level over East Tradebourne's 991 buildings, by footprint: 3.3 under 50
+tiles, 5.0 at 50-80, 6.5 at 80-120, 10.8 at 120-200 and **23.5 above 200**. A
+29x15 warehouse -- 145 x 75 ft -- was 31 rooms of about 15x25 ft, four purpose
+names cycled seven times each, 52 doorways, no room bigger than any other.
+`floorplan.hall_layout` plans around a principal space instead, and **which
+form it takes depends on the proportions, which is the part I got wrong
+first**: a nave running in from the door suits a deep building, but a wide
+shallow one wants a broad hall spanning the entrance wall. Entered from its
+long side, the warehouse was given a 10x10 nave -- 23% of the floor, ringed by
+335 tiles of service rooms. Either form touches the wall the door is in, so
+everything else opens off it; an upper level narrows the hall to a
+`CORRIDOR` and becomes a landing. Doors follow (every room onto the hall: 52
+became 8), and names follow (`purposes[i % len]` gave a floor seven Offices;
+the principal name is spent once and the menus are long enough for a hall
+plan). After: 6.5 rooms above 200 tiles, biggest room 49% of the floor, and
+every room name unique within its level across all 1,176 buildings.
+
+**The tier picks the whole interior fabric, not just the wall.**
+`build_interior` read `wall` and `wall_interior` and nothing else, so a
+dressed-stone temple had Village partitions on Rural planking -- three kits in
+one room, which is the facade rule unlearned indoors. `interior_fabric()` is
+the per-tier set, and it added `floor_civic` because the floor was the one
+surface the kit rule had never reached. Windows were missing entirely: every
+interior wall blind, on a board whose purpose is being looked into. Storeys
+were capped at 2 while 352 of 1,176 buildings have three.
+
 **`campaign/boards.json` is the only record of which board holds what**, and
 there cannot be another: the campaign list has no size, no date, no contents
 and no API. Four states -- NEW pastes, READY switches, STALE *still reuses*

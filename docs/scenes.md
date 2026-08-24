@@ -114,6 +114,65 @@ starts at the door rather than through it.
 
 ---
 
+## What the plan looks like
+
+Two shapes, chosen by size and by what the building is for.
+
+**A cottage gets a BSP** — three to six rooms sharing walls, which is what a
+cottage is. Below 90 tiles, and outside the kinds whose whole point is one big
+volume, that is the right answer and nothing else is tried.
+
+**Everything else gets a hall**: a principal space with rooms off it, and the
+door opening onto the hall so the plan is legible from the threshold. Which
+form depends on the proportions:
+
+- **A nave** running in from the door, flanks either side, a band of rooms
+  across the far end — for a building deeper than it is wide from the door.
+- **A broad hall** spanning the full width against the entrance wall, with the
+  back cut into rooms — for a wide, shallow one.
+
+On an upper level the hall narrows to a three-tile corridor, which turns the
+same construction into a landing with rooms off it: an inn's bedroom floor.
+
+The principal room is named for the trade — `Nave`, `Great Hall`,
+`Loading Floor`, `Common Room` — once, and no room on a level repeats another's
+name.
+
+**Why this exists.** The BSP does not scale, and the numbers said where it
+stopped: rooms per level ran 3.3 under 50 tiles and **23.5 above 200**. A 29x15
+warehouse — 145 x 75 ft — came out as 31 rooms of about 15x25 ft, four names
+cycled seven times each, and 52 doorways. Now it is a 120x35 ft loading floor
+with a counting room, a rope store, a cooperage, a cold store and six bays off
+it.
+
+---
+
+## What it is built from
+
+The **tier** picks the whole set — wall, partition, floor, window, door,
+corner — because a building that changes material at the corner reads as a
+mistake rather than as variety.
+
+| Tier | Kinds | Fabric |
+|---|---|---|
+| civic | temple, guildhall, manor, barracks, **and anything stone** | dressed stone, arched windows, a fancy door |
+| trade | tavern, shop, apothecary, smithy | the house wall, told apart by its door |
+| common | house, and anything unrecognised | timber-framed panels |
+| utility | warehouse, stable, shed | boarding, one storey, **no glass** |
+
+FTG marks some buildings `material: STONE_BRICK`, and stone wins: a stone shop
+is a stone building whatever is sold in it.
+
+Windows follow the same rule the town facades use — dense at the front, sparse
+on the flank, **never on the back**, one fewer on the ground floor. A barn has
+none at all, and the kit it is built from does not have one to give it.
+
+Storeys come from the layout, capped by `interior.max_levels` (three), except
+that a warehouse or stable is **one** however many the layout invented: those
+are sheds with one big volume.
+
+---
+
 ## The board, and why nothing gets deleted
 
 `campaign/boards.json` records which board holds which scene. **It is the
