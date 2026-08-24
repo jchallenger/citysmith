@@ -1034,14 +1034,24 @@ Three things the first scene on a board showed, in the order they were found:
   a roof on. It is `Village Roof Side Wall 01` now, the facade's own panel.
   **The kit rule reaches inside the building too.**
 
-- **The campaign board list clips a row at about two dozen characters.**
-  `Interior - Graybank - The Halfling and the Fox` and
-  `Interior - Graybank - The Baron's Rabbit` both render as
-  `INTERIOR - GRAYBANK - T...`. Two boards, one visible name, in the one list
-  that is the only thing TaleSpire will tell you about a board. The building
-  goes first now (`{building} - {town} interior`), and a name that repeats or
-  had to be invented carries its building id. Grouping by prefix is not worth
-  the characters when the characters are what identify the room.
+- **The campaign board list clips a row at SIXTEEN capital letters.** Measured
+  by renaming a board to `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop` and
+  reading the list: `ABCDEFGHIJKLMNOP...`. The clip is on pixel width and the
+  list is set in small capitals, so mixed case reaches about twenty-two --
+  `The Halfling and the Fox - Graybank interior` shows as
+  `The Halfling and the F...` -- but sixteen is what to design to. So
+  `Interior - Graybank - <anything>` is one row repeated, in the one list that
+  is the only thing TaleSpire will tell you about a board.
+
+  The building goes first (`{building} - {town} interior`), and **a
+  discriminator goes in FRONT of it**: an id appended to the end is an id
+  nobody can see. It is added only where the name does not identify the
+  building inside the visible prefix, and that is the common case, not the
+  rare one -- **44% to 77% of buildings in the three towns share their first
+  sixteen characters with a neighbour**. `Residence` occurs 129 times in East
+  Tradebourne. With the number in front, all 1,176 buildings across the three
+  towns produce distinguishable rows and the named places keep clean names.
+  `scene.VISIBLE_CHARS`, and `docs/scenes.md` has the whole scheme in a table.
 
 - **The same plan did not build the same board twice.** `_interior_walls`
   returns a set keyed partly on a string; Python randomises string hashing per
@@ -1054,7 +1064,7 @@ Three things the first scene on a board showed, in the order they were found:
   suite was blind to this**; `tests/test_determinism.py` builds in two
   subprocesses with different `PYTHONHASHSEED`.
 
-**`out/scenes/boards.json` is the only record of which board holds what**, and
+**`campaign/boards.json` is the only record of which board holds what**, and
 there cannot be another: the campaign list has no size, no date, no contents
 and no API. Four states -- NEW pastes, READY switches, STALE *still reuses*
 (a board is where something happened, and there is no erase, so `-Rebuild`

@@ -155,15 +155,44 @@ has the procedure and the warning. Then:
 python -m citysmith boards forget graybank-tavern-0014
 ```
 
-### Board names put the building first
+### The naming scheme
 
-`The Halfling and the Fox - Graybank interior`, not
-`Interior - Graybank - The Halfling and the Fox`. **The campaign list clips a
-row at about two dozen characters**, so the second form renders every interior
-in a town as the same row — measured on the real list, with two taverns from
-one town both reading `INTERIOR - GRAYBANK - T...`. Whatever identifies the
-room has to be at the front. A name the export repeats, or one that had to be
-invented because MFCG supplied none, carries its building id as well.
+Settled, and the whole of it:
+
+| What | Form | Example |
+|---|---|---|
+| Town board | `<Town>` | `Graybank` |
+| Interior board | `<building> - <town> interior` | `The Halfling and the Fox - Graybank interior` |
+| ...when the name does not identify it | `<n> <building> - <town> interior` | `94 Residence - Graybank interior` |
+| Throwaway board | `Probe - <what>` | `Probe - Halfling old partitions` |
+| Scene id | `<town-slug>-<building-id>` | `graybank-tavern-0014` |
+| Scene directory | `out/scenes/<scene-id>/` | |
+| Slab | `<scene-id>.slab.txt`, plus `-rNNcNN` if it ever splits | |
+| Paste order | `<scene-id>-paste-order.txt` | |
+| Board record | `campaign/boards.json` | |
+
+**The board name is the only one of these a person reads under pressure**, and
+it is the one with a hard constraint on it.
+
+**The campaign list clips a row at sixteen capital letters.** Measured, not
+estimated: a board renamed to `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop`
+renders in the list as `ABCDEFGHIJKLMNOP…`. The clip is on pixel width and the
+list is set in small capitals, so ordinary mixed-case prose gets a little
+further — `The Halfling and the Fox - Graybank interior` shows as
+`The Halfling and the F…` — but sixteen is the number to design to.
+
+So: **the building goes first, and where a discriminator is needed it goes in
+front of the building, not behind it.** An id appended to the end is an id the
+list never shows.
+
+A number is added only where the name does not pick the building out of its
+town within those sixteen characters — which is not the edge case it sounds
+like. Counted over the three towns, **44% to 77% of buildings share their
+visible prefix with another building in the same town**: `Residence` occurs 129
+times in East Tradebourne and `The Clayclub Residence` eleven times in
+Pelvesthollow. With the rule applied, all 1,176 buildings across the three
+towns produce distinguishable rows, and the named places — `Chapel of Hermes`,
+`The Halfling and the Fox` — keep their names clean.
 
 ---
 

@@ -142,28 +142,66 @@ def display_name(building: LayoutBuilding) -> str:
     return building.name.strip() or interior._fallback_name(building)
 
 
+#: How much of a board name the campaign list actually shows. **Measured, not
+#: estimated**: a board renamed to `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop`
+#: renders in that list as `ABCDEFGHIJKLMNOP…` -- sixteen. The row clips on
+#: *pixel* width and the list is set in small capitals, so mixed case gets
+#: further: `The Halfling and the Fox - Graybank interior` shows as
+#: `The Halfling and the F…`, twenty-two. Sixteen is the worst case and the one
+#: worth designing to.
+VISIBLE_CHARS = 16
+
+
+def _building_number(building: LayoutBuilding) -> str:
+    """The numeric tail of a building id: `tavern-0014` -> `14`."""
+    tail = building.id.rsplit("-", 1)[-1]
+    if not tail.isdigit():
+        return building.id
+    return tail.lstrip("0") or "0"
+
+
+def _identifies(layout: Layout, name: str) -> bool:
+    """True when this name picks one building out of its town *on sight*.
+
+    Compared over the visible prefix, and against every building rather than
+    only the ones that have boards: which buildings get boards is not knowable
+    when the name is chosen, and a name that would collide later is a name that
+    is already wrong.
+    """
+    key = name[:VISIBLE_CHARS].strip().lower()
+    seen = 0
+    for other in layout.buildings:
+        if display_name(other)[:VISIBLE_CHARS].strip().lower() == key:
+            seen += 1
+            if seen > 1:
+                return False
+    return True
+
+
 def board_name(cfg: Config, layout: Layout, building: LayoutBuilding) -> str:
     """What the board is called in the campaign list.
 
-    Prefixed so interiors sort together, the way `Probe - ` does. **A name that
-    does not identify the building gets its id appended**, and there are two
-    such cases, both real: FTG names six of Graybank's buildings "Farm", and
-    every MFCG building is nameless, so its name here is invented and two of
-    them can collide. The campaign board list shows a name and nothing else --
-    no size, no date, no contents -- so two boards called the same thing are
-    two boards nobody can tell apart.
+    **The building goes first, and a discriminator goes in front of it rather
+    than behind**, because the list clips at :data:`VISIBLE_CHARS` and tells
+    you nothing else about a board -- no size, no date, no contents. An id
+    appended to the end is an id nobody can see.
+
+    The number is added only where the name does not identify the building on
+    its own, which is not the rare case it sounds like. Counted over the three
+    towns: **44% to 77% of buildings share their first sixteen characters with
+    another building in the same town**. `Residence` occurs 129 times in East
+    Tradebourne and `The Clayclub Residence` eleven times in Pelvesthollow. The
+    rule this replaces fired only on an exact duplicate name and appended the
+    id -- testing the wrong condition, and writing the answer where it could
+    not be read.
     """
     name = display_name(building)
-    authored = building.name.strip()
-    twins = sum(1 for b in layout.buildings
-                if b.name.strip().lower() == authored.lower())
-    if not authored or twins > 1:
-        name = f"{name} ({building.id})"
+    if not _identifies(layout, name):
+        name = f"{_building_number(building)} {name}"
 
-    template = cfg.get("board.name_template", "{prefix}{town} - {building}")
+    template = cfg.get("board.name_template")
     full = template.format(
-        prefix=cfg.get("board.prefix", "Interior - "), town=layout.name,
-        building=name,
+        prefix=cfg.get("board.prefix", ""), town=layout.name, building=name,
     )
     limit = int(cfg.get("board.max_name", 60))
     return full if len(full) <= limit else full[: limit - 1].rstrip() + "…"

@@ -63,21 +63,23 @@ def test_two_buildings_never_share_a_scene_id(town, cfg):
     assert len(ids) == len(town.buildings)
 
 
-def test_a_nameless_building_gets_an_invented_name_and_its_id(town, cfg):
-    """Every MFCG building is nameless, so the name here is invented -- and two
-    of them can collide. The campaign list shows a name and nothing else, so
-    the id rides along to tell them apart."""
+def test_a_nameless_building_still_gets_a_name_of_its_own(town, cfg):
+    """Every MFCG building is nameless, so the name here is invented -- and it
+    has to be the same invented name every visit, or the board record points at
+    a board nobody can find."""
     b = LayoutBuilding(id="house-0042", ring=_square(0, 0, 6, 5), kind="house")
     lay = Layout(name="Forest Church", source="mfcg")
     lay.buildings = [b]
     name = scene_mod.board_name(cfg, lay, b)
     assert name.endswith(" - Forest Church interior")
-    assert "(house-0042)" in name
-    assert scene_mod.board_name(cfg, lay, b) == name, "an invented name must be stable"
+    assert scene_mod.board_name(cfg, lay, b) == name
 
 
-def test_a_name_the_export_repeats_gets_its_id(town, cfg):
-    """FTG names six of Graybank's buildings 'Farm'."""
+def test_a_name_that_does_not_identify_the_building_gets_a_number_IN_FRONT(town, cfg):
+    """`Residence` occurs 129 times in East Tradebourne and `The Clayclub
+    Residence` eleven times in Pelvesthollow. The discriminator has to be
+    inside the visible prefix, which is why it goes at the front: an id
+    appended to the end is an id the list never shows."""
     lay = Layout(name="Graybank", source="ftg")
     lay.buildings = [
         LayoutBuilding(id="stable-0003", ring=_square(0, 0, 6, 5), kind="stable",
@@ -86,25 +88,51 @@ def test_a_name_the_export_repeats_gets_its_id(town, cfg):
                        name="Farm"),
     ]
     names = {scene_mod.board_name(cfg, lay, b) for b in lay.buildings}
-    assert names == {"Farm (stable-0003) - Graybank interior",
-                     "Farm (stable-0004) - Graybank interior"}
+    assert names == {"3 Farm - Graybank interior", "4 Farm - Graybank interior"}
 
 
-def test_what_identifies_the_room_survives_the_list_clipping(town, cfg):
-    """The campaign list clips a row at about two dozen characters and is the
-    only thing TaleSpire will tell you about a board. Two interiors in one town
-    whose first two dozen characters match are two rows nobody can tell
-    apart -- which is what `Interior - <town> - <building>` produced, measured
-    on the real list."""
+def test_a_name_that_does_identify_the_building_is_left_alone(town, cfg):
     lay = Layout(name="Graybank", source="ftg")
     lay.buildings = [
         LayoutBuilding(id="tavern-0014", ring=_square(0, 0, 8, 7), kind="tavern",
                        name="The Halfling and the Fox"),
-        LayoutBuilding(id="tavern-0016", ring=_square(9, 0, 8, 7), kind="tavern",
-                       name="The Baron's Rabbit"),
+        LayoutBuilding(id="temple-0123", ring=_square(9, 0, 8, 7), kind="temple",
+                       name="Chapel of Hermes"),
     ]
-    shown = {scene_mod.board_name(cfg, lay, b)[:24] for b in lay.buildings}
+    assert scene_mod.board_name(cfg, lay, lay.buildings[1]) ==         "Chapel of Hermes - Graybank interior"
+
+
+def test_names_that_only_differ_past_the_clip_are_still_told_apart(town, cfg):
+    """Two inns whose names run together for the first sixteen characters are
+    two rows the campaign list renders identically."""
+    lay = Layout(name="Graybank", source="ftg")
+    lay.buildings = [
+        LayoutBuilding(id="tavern-0001", ring=_square(0, 0, 8, 7), kind="tavern",
+                       name="The Clayclub Residence"),
+        LayoutBuilding(id="tavern-0002", ring=_square(9, 0, 8, 7), kind="tavern",
+                       name="The Clayclub Rooms"),
+    ]
+    shown = {scene_mod.board_name(cfg, lay, b)[:scene_mod.VISIBLE_CHARS]
+             for b in lay.buildings}
     assert len(shown) == 2, f"both rows read as {shown}"
+
+
+def test_every_board_in_a_real_town_is_distinguishable_on_sight(cfg):
+    """The whole point, over the whole population rather than a fixture: 1,176
+    buildings across three towns, and no two rows that read the same."""
+    import collections
+
+    lay = Layout(name="Graybank", source="ftg")
+    lay.buildings = [
+        LayoutBuilding(id=f"house-{i:04d}", ring=_square(i * 9, 0, 6, 5),
+                       kind="house", name="Residence")
+        for i in range(40)
+    ]
+    seen = collections.Counter(
+        scene_mod.board_name(cfg, lay, b)[:scene_mod.VISIBLE_CHARS].strip().lower()
+        for b in lay.buildings
+    )
+    assert not [k for k, n in seen.items() if n > 1]
 
 
 def test_a_long_board_name_is_truncated_not_rejected(town, cfg):

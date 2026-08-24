@@ -119,11 +119,15 @@ dialog that requires you to type the literal word `DELETE` into a field before
 The field takes a paste like any other (`setclip` then `Ctrl+V`); typing does
 not arrive.
 
-**You cannot delete the board you are standing on** — its row shows a different
-icon set and no delete. Delete everything else first, then make or switch to
-another board and delete the last one. Because the list is alphabetical,
-repeatedly deleting the *top* row is the simplest loop, and it needs no
-re-reading of positions between iterations.
+**The current board's row DOES offer Delete board** — seen 2026-08-24, on a
+board that was in front at the time, with `Delete board`, `Set Folder` and
+`Reload Board` under its expander like any other. An earlier note here said the
+opposite ("a different icon set and no delete") and it is wrong. Whether the
+delete *succeeds* on the current board is untested and not worth testing
+casually.
+
+Because the list is alphabetical, repeatedly deleting the *top* row is the
+simplest loop, and it needs no re-reading of positions between iterations.
 
 **This is irreversible and there is no undo.** Confirm the scope with the owner
 of the campaign before starting, and look at what is on each board first — a
