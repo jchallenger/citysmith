@@ -178,3 +178,30 @@ def test_every_room_is_reachable_on_every_level_of_a_big_plan():
                     seen.add(nxt)
                     queue.append(nxt)
         assert seen == {r.id for r in rooms}, f"level {level} has an unreachable room"
+
+
+def test_a_small_tavern_still_gets_rooms_and_not_one_big_box():
+    """On a small footprint both flanks can be thinner than a room, so both get
+    absorbed and the nave becomes the entire rect. An 8x7 tavern came out as
+    one undivided room -- a common room with no kitchen and no bar -- and the
+    GM brief listed all eight occupants in the same place."""
+    fp = generate(_building(kind="tavern", w=8, d=7, entrance="n"), seed=33)
+    rooms = fp.rooms_on(0)
+    assert len(rooms) >= 2, "the hall ate the whole building"
+    common = [r for r in rooms if r.purpose == "common room"]
+    assert len(common) == 1
+    assert common[0].rect.area < fp.rect.area, "the common room IS the building"
+
+
+@pytest.mark.parametrize("kind,w,d,entrance", [
+    ("tavern", 8, 7, "n"), ("tavern", 9, 7, "s"), ("temple", 10, 8, "e"),
+    ("guildhall", 12, 7, "w"), ("warehouse", 29, 15, "s"), ("stable", 7, 7, "n"),
+])
+def test_a_hall_plan_never_returns_a_single_room(kind, w, d, entrance):
+    """Either form, or the BSP -- but never one room where a plan was asked
+    for. `hall_layout` returning `[]` is the honest answer that sends the
+    caller to the BSP; returning one rect is not."""
+    rects, hall = hall_layout(Rect(0, 0, w, d), entrance, 0, 3)
+    assert rects == [] or len(rects) > 1, f"{kind} {w}x{d} from {entrance}"
+    fp = generate(_building(kind=kind, w=w, d=d, entrance=entrance), seed=33)
+    assert len(fp.rooms_on(0)) >= 2

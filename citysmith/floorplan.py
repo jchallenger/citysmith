@@ -286,17 +286,24 @@ def hall_layout(rect: Rect, entrance: str, level: int,
             x = rect.x2 - (a_off + a_len)
         return Rect(x, z, w, d)
 
-    # -- broad: the hall is a band along the entrance wall -------------------
-    if along < across * 0.8:
+    def broad() -> list[Rect]:
+        """The hall as a band along the entrance wall, rooms behind it."""
         depth = CORRIDOR if level else max(min_room, round(along * 0.55))
         back = along - depth
         if back and back < min_room:          # no room for a back band
-            depth, back = along, 0
-        rects = [place(0, depth, 0, across)]
+            return []
+        out = [place(0, depth, 0, across)]
         if back:
             for c_off, c_len in _slice_run(0, across, min_room):
-                rects.append(place(depth, back, c_off, c_len))
-        return rects, 0
+                out.append(place(depth, back, c_off, c_len))
+        return out
+
+    # -- broad: the hall is a band along the entrance wall -------------------
+    if along < across * 0.8:
+        rects = broad()
+        if len(rects) > 1:
+            return rects, 0
+        return [], -1
 
     # -- nave: the hall runs in from the door -------------------------------
     band = CORRIDOR if level else max(min_room, round(across * 0.45))
@@ -328,7 +335,18 @@ def hall_layout(rect: Rect, entrance: str, level: int,
     if back:
         for c_off, c_len in _slice_run(0, across, min_room):
             rects.append(place(hall_run, back, c_off, c_len))
-    return rects, 0
+
+    # **A hall that ate the whole building is not a plan.** On a small
+    # footprint both flanks can be thinner than a room, so both are absorbed
+    # and the nave becomes the entire rect: an 8x7 tavern came out as one
+    # undivided room, a common room with no kitchen and no bar, and the GM
+    # brief listed all eight occupants in the same place. Try the other form
+    # before giving up -- across the entrance wall, an 8x7 is a common room
+    # with a back room behind it, which is what a small tavern is.
+    if len(rects) > 1:
+        return rects, 0
+    fallback = broad()
+    return (fallback, 0) if len(fallback) > 1 else ([], -1)
 
 
 def _split_rooms(rect: Rect, rng: random.Random, min_room: int, depth: int = 0) -> list[Rect]:
