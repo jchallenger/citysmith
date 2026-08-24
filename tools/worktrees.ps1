@@ -83,10 +83,24 @@ function Remove-Worktree([string]$dir) {
   if ($LASTEXITCODE -eq 0) { return }
   Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
   & git worktree prune
-  if (Test-Path $dir) {
-    throw ("could not remove $dir -- something has a file open in it. Close " +
-           "any shell or editor sitting there and run: git worktree prune")
+  if (-not (Test-Path $dir)) { return }
+
+  # Still there. Deregister it anyway, by deleting the administrative copy git
+  # keeps under .git/worktrees -- otherwise the branch stays checked out
+  # somewhere, `git branch -d` refuses it, and a land that has ALREADY merged
+  # leaves the repo half finished. That happened twice, both times because a
+  # shell's current directory was inside the worktree. What is left behind is
+  # an inert directory in a gitignored path.
+  foreach ($admin in (Get-ChildItem (Join-Path $root ".git/worktrees") -Directory -ErrorAction SilentlyContinue)) {
+    $gitdir = Join-Path $admin.FullName "gitdir"
+    if (-not (Test-Path $gitdir)) { continue }
+    $points = (Get-Content $gitdir -Raw).Trim()
+    if ($points -like "$dir*") { Remove-Item -Recurse -Force $admin.FullName }
   }
+  & git worktree prune
+  "NOTE: $dir could not be deleted -- something has a file open in it."
+  "      It is deregistered, so the branch can still be landed. Close whatever"
+  "      is sitting there and delete the directory by hand."
 }
 
 function Get-Worktrees {
@@ -265,7 +279,7 @@ Branch policy (docs/branching.md is the long form)
 
     Remove-Worktree $dir
     Git-Or-Throw @('branch','-d',$branch) | Out-Null
-    "landed and removed $branch"
+    "landed $branch"
     Show-List
   }
 
@@ -287,7 +301,7 @@ Branch policy (docs/branching.md is the long form)
         "would remove $($w.Branch) at $($w.Path)  (merged into $Trunk)"
         continue
       }
-      try { Remove-Worktree $w.Path } catch { "  $_"; continue }
+      Remove-Worktree $w.Path
       & git branch -d $w.Branch | Out-Null
       "removed $($w.Branch)"
       $n++
