@@ -211,7 +211,8 @@ enemy.
 ### What that looks like at three scales
 
 Three real Fantasy Town Generator exports, built and pasted end to end. The
-numbers are what the tool actually reported, not estimates:
+numbers are what the tool actually reported, not estimates; every screenshot
+below is off the finished board:
 
 | Town | Tiles | Buildings | Assets | Chunks | `--chunk-tiles` |
 |---|---|---|---|---|---|
@@ -221,6 +222,54 @@ numbers are what the tool actually reported, not estimates:
 
 East Tradebourne is 38.7% of the per-board asset limit, so a town roughly two
 and a half times its size is the ceiling.
+
+#### Pelvesthollow — 35 buildings
+
+![A three-storey timber-framed cottage under thatch, barrels by its door and a
+handcart in the lane, with pines and stumps around
+it](docs/images/pelvesthollow-lane.jpg)
+
+Common-tier fabric: timber frame, thatch, a peasant door. The lane is cobble
+laid by its *top* surface, not its bottom — cobble is 0.25 thick and grass is
+0.5, so aligning them at the base would put a 15-inch kerb along every street.
+
+![Thatched cottages around a junction with crates and barrels stacked in the
+street](docs/images/pelvesthollow-crossroads.jpg)
+![The hamlet from above, cottages clustered along lanes with woodland between](docs/images/pelvesthollow-aerial.jpg)
+
+#### Graybank — 150 buildings
+
+![A terracotta-roofed trade building with barrels outside, standing among
+thatched cottages](docs/images/graybank-trade.jpg)
+
+Trade tier beside common tier. Importance reads off the *roof material* rather
+than off storey count, because a facade that changes material at the corner
+reads as a mistake.
+
+![Two cottages either side of a gravel yard with a lantern on a post between
+them](docs/images/graybank-yard.jpg)
+
+A single-storey building gets a lantern by the door instead of a porch: a porch
+hood seats at `storey_h + 0.5`, which on a one-storey cottage is level with its
+own eaves — a second roof grafted onto the first.
+
+#### East Tradebourne — 991 buildings, walled
+
+![The quay: a paved waterfront with rope-and-bollard railings along the river, a
+tall warehouse with a porch hood over its
+door](docs/images/east-tradebourne-quay.jpg)
+
+![The market square, crates and barrels spread over the paving, trade buildings
+with porch hoods around it](docs/images/east-tradebourne-market.jpg)
+
+FTG exports a market square as a `BUILDING` with `material: PAVEMENT`. Built as
+one it is a roofed box over the square, so it is diverted into a plaza instead —
+this is that rule working on the file it was written for.
+
+![Trade buildings under terracotta on one side of a street, common houses under
+thatch on the other](docs/images/east-tradebourne-tiers.jpg)
+![Densely packed rooftops running down to the waterfront](docs/images/east-tradebourne-rooftops.jpg)
+![A waterfront quarter seen from above, quay railings along the right](docs/images/east-tradebourne-quarter.jpg)
 
 **Sizing the chunks is a two-regime problem, and most people only meet the
 first.** Below about 90,000 assets the *byte cap* binds: pick a cell size whose
