@@ -26,7 +26,7 @@ from .catalog import Catalog, CatalogError, load_or_build
 from .city import CityParams, City, SIZES
 from .city import generate as generate_city
 from .palette import STYLES, Palette
-from .slab import SlabError, encode
+from .slab import SlabError, encode, multislab
 
 DEFAULT_OUT = pathlib.Path("out")
 
@@ -83,6 +83,23 @@ def _write_chunks(chunks, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path
         "\n".join(p.name for p in written) + "\n", encoding="utf-8"
     )
     return written
+
+
+def _write_multislab(chunks, out_dir: pathlib.Path, stem: str) -> pathlib.Path:
+    """Write the whole map as one multi-slab document.
+
+    Chunks cut with ``register=False`` keep their true in-map coordinates, so
+    every offset is zero and ``drop`` alone moves the town. That is the whole
+    integration: the plugin does the aiming that the registration markers, the
+    even-extent rule and the paste order were invented to do by hand.
+
+    The file takes a ``.slab`` extension because that is what the plugins look
+    for -- it is JSON inside, unlike our ``.slab.txt`` chunks, which are the
+    base64 the game's own ``Ctrl+V`` reads.
+    """
+    path = out_dir / f"{stem}.multislab.slab"
+    path.write_text(multislab([c.slab for c in chunks]), encoding="utf-8")
+    return path
 
 
 def _chunk_table(plan, stem: str) -> str:
@@ -153,6 +170,27 @@ def _chunk_table(plan, stem: str) -> str:
 #: whole map's corner, so they share one bounding box and one anchor point.
 #: How to paste a map cut by region, with every layer in each chunk. Nothing
 #: is ever pasted over anything, which is the whole point.
+MULTISLAB_HELP = """PASTE THE WHOLE MAP IN ONE ACTION, WITH A PLUGIN.
+
+{name} is a multi-slab document: JSON holding every chunk of this map, each
+with the position it belongs at. It needs one of LordAshes' paste plugins --
+MultiPasteSlabsPlugin or SlabPlugin_CCM, both on Thunderstore, both needing
+BepInEx.
+
+  1. Copy the whole contents of the file to the clipboard.
+  2. In build mode, press LCTRL+B to place every slab at the stated position,
+     or RCTRL+B to be prompted for an offset first.
+
+Because the plugin does the aiming, this build carries NO registration markers
+and needs NO paste order, NO shared cursor cell, and NO camera discipline. The
+two marker tiles that normally sit outside the map's corners are not there.
+
+The plugin is third-party and does break on TaleSpire updates from time to
+time. The ordinary chunk files are written alongside and still paste with
+Ctrl+V on a vanilla install -- but note they carry no registration markers in
+this mode, so if you fall back to them, rebuild without --multi-slab.
+"""
+
 TILE_HELP = """TILE THE CHUNKS ONTO BLANK BOARD. Each file holds one region of the map with
 its terrain, buildings and walls together, and the regions do not overlap --
 so every chunk is pasted onto ground nothing has been laid on yet.
@@ -475,9 +513,23 @@ def cmd_build(args) -> int:
         # from one paste to the next stops being one region. Uniform squares
         # are what make the step a constant.
         pack=not args.by_region,
+        # **Registration markers exist only to serve a cursor-anchored paste.**
+        # The plugin path states each slab's position, so the markers -- and
+        # the even-extent box, and the written paste order they enforce -- are
+        # dead weight there. Two stray tiles per chunk, at the map's corners,
+        # that a reviewer can see.
+        register=not args.multi_slab,
     )
+    multislab_path = None
     try:
         written = _write_chunks(plan.chunks, out_dir, args.stem)
+        if args.multi_slab:
+            # Deliberately NOT in `written`. That list is the pasteable slabs,
+            # and it is what the byte cap and the slab count are measured
+            # against -- the multi-slab document is a JSON wrapper around
+            # those same slabs, so counting it double-counts the map and
+            # measures a 129 KB file against the 30 KB *slab* cap.
+            multislab_path = _write_multislab(plan.chunks, out_dir, args.stem)
     except SlabError as exc:
         raise SystemExit(
             f"Could not encode slab: {exc}\nTry a smaller --max-assets "
@@ -495,12 +547,19 @@ def cmd_build(args) -> int:
         report.add("fail", "placements", problem)
     for problem in enclosed_voids(plan):
         report.add("fail", "chunk coverage", problem)
-    for problem in chunk_anchors(plan, builder.byid):
-        report.add("fail", "chunk registration", problem)
-    for problem in chunk_datum(plan, builder.byid):
-        report.add("fail", "chunk datum", problem)
-    for problem in anchor_on_a_whole_tile(plan, builder.byid):
-        report.add("fail", "paste anchor", problem)
+    # Registration, datum and anchor all exist to make a *cursor-anchored*
+    # paste land right: they check that every chunk presents the same bounding
+    # box, reaches the ground, and centres on a whole tile. The multi-slab path
+    # states each slab's position instead, so there is no shared box to agree
+    # on and nothing to aim -- running these there reports four failures for a
+    # map that is correct.
+    if not args.multi_slab:
+        for problem in chunk_anchors(plan, builder.byid):
+            report.add("fail", "chunk registration", problem)
+        for problem in chunk_datum(plan, builder.byid):
+            report.add("fail", "chunk datum", problem)
+        for problem in anchor_on_a_whole_tile(plan, builder.byid):
+            report.add("fail", "paste anchor", problem)
     # Buried geometry is a finish problem, not a broken map: it shows as a
     # seam rather than stopping anything working, so it warns rather than
     # failing the build.
@@ -927,6 +986,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="emit one slab per building instead of a few large "
                         "structure chunks, so each is pasted and checked on "
                         "its own; the town wall gets its own slab too")
+    c.add_argument("--multi-slab", action="store_true",
+                   help="also write <stem>.multislab.slab, a JSON document for "
+                        "LordAshes' MultiPasteSlabs / SlabPlugin_CCM. Those "
+                        "place each slab at a stated position, so the map "
+                        "needs no cursor aiming, no shared bounding box and no "
+                        "paste order -- at the cost of a BepInEx plugin. "
+                        "Requires the plugin; the chunk files still work "
+                        "without it.")
     c.add_argument("--by-region", action="store_true",
                    help="one slab per map region with every layer in it, to "
                         "be tiled onto blank board: nothing is ever pasted "

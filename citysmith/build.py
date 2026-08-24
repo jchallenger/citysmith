@@ -2689,24 +2689,20 @@ def _lay_town_wall(b: Builder, tm, facing, top: float,
         elif walk is not None:
             b.add(place_tile(walk, x, z, crown))
 
-    # **A cell walled in on all four sides shows nothing but its top.** The
-    # rampart is nearly three tiles thick, so 99 of its 261 body cells -- 38%
-    # -- have no face anyone can ever see, and the five courses under their
-    # walk were 495 blocks of solid nothing. Same reasoning that took out 928
-    # buried facings: only the course the walk rests on is kept. A cell next
-    # to a gate is *not* buried, because the passage below the lintel opens
-    # its side into the tunnel.
-    def entombed(x: int, z: int) -> bool:
-        return all((x + dx, z + dz) in mass and (x + dx, z + dz) not in gates
-                   for _, dx, dz in SIDE_OFFSETS)
-
+    # **The rampart is built solid, and the 495 blocks that would save are not
+    # worth it.** 38% of the body cells have no face anyone can see, so their
+    # lower courses were dropped for a while. It reads fine -- the faces seal
+    # the void -- but it empties exactly the cells `verify.town_wall_gaps`
+    # samples, and that check cannot tell a sealed void from daylight straight
+    # through the circuit. It exists because see-through wall shipped once
+    # already, on 1,234 tiles. A 1.8% asset saving is not worth blinding it,
+    # and a hollow core is a trap for whoever next cuts a postern through.
     for (x, z) in sorted(mass - tower_cells):
         gate = (x, z) in gates
         if gate and lintel_from is None:
             continue
         courses = wall_height + (GATEHOUSE_RISE if (x, z) in ring else 0)
-        start = lintel_from if gate else (courses - 1 if entombed(x, z) else 0)
-        for level in range(start, courses):
+        for level in range(lintel_from if gate else 0, courses):
             b.add(place_tile(core, x, z, top + level * course))
         crown_cell(x, z, top + courses * course,
                    [s for s, dx, dz in SIDE_OFFSETS if (x + dx, z + dz) in outside])
@@ -2901,7 +2897,20 @@ def _hang_portcullises(b: Builder, tm, gates, mass, top: float) -> int:
             continue                      # the grille does not fit this mouth
         cx = (min(xs) + max(xs) + 1) / 2.0
         cz = (min(zs) + max(zs) + 1) / 2.0
-        b.add(place_centered(grille, cx, cz, top, 0 if across_x else _QUARTER))
+        rot = 0 if across_x else _QUARTER
+        # **Seat the grille like a wall: min corner on the tile lattice.**
+        # Centring it on the boundary between two cells put its stored corner
+        # at z=84.75, the one tile on the board off the half-tile grid -- which
+        # is what `check_placements` guards, because a mini with grid snap then
+        # does not line up with the floor it is standing on. A curtain piece
+        # belongs *on* a cell edge, occupying the near half of one cell, which
+        # is exactly what `place_wall` does for the 1-wide pieces.
+        thin = min(rotated_footprint(grille, rot))
+        if across_x:
+            cz = min(zs) + (max(zs) - min(zs) + 1) // 2 + thin / 2.0
+        else:
+            cx = min(xs) + (max(xs) - min(xs) + 1) // 2 + thin / 2.0
+        b.add(place_centered(grille, cx, cz, top, rot))
         hung += 1
     return hung
 

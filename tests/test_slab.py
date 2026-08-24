@@ -225,3 +225,42 @@ def test_degrees_to_rot():
     assert degrees_to_rot(360) == 0
     assert degrees_to_rot(-90) == 18
     assert degrees_to_rot(88) == 6  # snaps to nearest step
+
+
+# -- multi-slab documents -----------------------------------------------------
+
+def test_multislab_uses_the_plugins_own_field_names():
+    """The field names belong to LordAshes' paste plugins, not to us, and a
+    typo in one fails silently as "the plugin did nothing"."""
+    import json
+
+    from citysmith.slab import Placement, Slab, multislab
+
+    a = Slab([Placement(ASSET_A, 1.0, 0.0, 2.0, 0)])
+    b = Slab([Placement(ASSET_B, 9.0, 0.5, 4.0, 6)])
+    doc = json.loads(multislab([a, (b, (3.0, 0.0, -2.0))], drop=(10.0, 0.0, 20.0)))
+
+    assert set(doc) == {"autoDrop", "dropX", "dropY", "dropZ", "slabs"}
+    assert doc["autoDrop"] is True
+    assert (doc["dropX"], doc["dropY"], doc["dropZ"]) == (10.0, 0.0, 20.0)
+    assert len(doc["slabs"]) == 2
+    for entry in doc["slabs"]:
+        assert set(entry) == {"code", "offsetX", "offsetY", "offsetZ"}
+    assert (doc["slabs"][0]["offsetX"], doc["slabs"][0]["offsetZ"]) == (0.0, 0.0)
+    assert (doc["slabs"][1]["offsetX"], doc["slabs"][1]["offsetZ"]) == (3.0, -2.0)
+
+
+def test_multislab_codes_round_trip():
+    """Each embedded code is an ordinary slab -- the document is a wrapper, not
+    a re-encoding."""
+    import json
+
+    from citysmith.slab import Placement, Slab, decode, multislab
+
+    original = Slab([Placement(ASSET_A, 1.0, 0.0, 2.0, 0),
+                     Placement(ASSET_B, 4.5, 1.0, 0.0, 12)])
+    doc = json.loads(multislab([original]))
+    back = decode(doc["slabs"][0]["code"])
+    assert len(back) == len(original)
+    assert {(p.asset_id, p.x, p.y, p.z, p.rot) for p in back.placements} == \
+           {(p.asset_id, p.x, p.y, p.z, p.rot) for p in original.placements}

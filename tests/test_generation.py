@@ -2370,13 +2370,22 @@ def test_a_one_gate_circuit_gets_a_postern_opposite():
     assert math.dist(a, b) > 15, f"postern at {b} is not opposite {a}"
 
 
-def test_the_buried_core_of_the_rampart_is_not_built():
-    """A cell walled in on all four sides shows nothing but its top. The
-    rampart is nearly three tiles thick, so 38% of its body had no face anyone
-    could ever see and five courses of solid nothing under the walk."""
+def test_the_rampart_is_built_solid_all_the_way_through():
+    """The buried core was dropped for a while and is deliberately back.
+
+    38% of the wall body has no face anyone can see, so skipping their lower
+    courses saved 495 blocks and read fine -- the faces seal the void. But it
+    empties exactly the cells `verify.town_wall_gaps` samples, and that check
+    cannot tell a sealed void from daylight straight through the circuit. It
+    exists because see-through wall shipped once, on 1,234 tiles. This test
+    holds the line: if someone hollows the core again, the masonry check will
+    start failing on every build and this says why.
+    """
     import collections
 
-    from citysmith.build import _lay_town_wall, Builder, TOWN_WALL_TILES
+    from citysmith.build import (
+        Builder, TOWN_WALL_TILES, _lay_town_wall, pick_wall_towers,
+    )
     from citysmith.catalog import load_or_build
     from citysmith.palette import MEDIEVAL, Palette
 
@@ -2388,27 +2397,20 @@ def test_the_buried_core_of_the_rampart_is_not_built():
     core = palette.resolve("city_wall_core")
     per_cell = collections.Counter(
         (int(p.x), int(p.z)) for p in b.placements if p.asset_id == core.id)
-    NB = ((1, 0), (-1, 0), (0, 1), (0, -1))
-    mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
-            if tm.wall[z][x]} | set(tm.gates)
-    # Towers are exempt: they stand the full stack plus WALL_TOWER_RISE by
-    # design, and a tower's footprint can sit over buried curtain.
-    from citysmith.build import pick_wall_towers
-
     gates = set(tm.gates)
+    mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x]} | gates
     towers = {c for t in pick_wall_towers(tm, mass, gates) for c in t}
-    buried = [c for c in mass - towers
-              if all((c[0] + dx, c[1] + dz) in mass and
-                     (c[0] + dx, c[1] + dz) not in tm.gates for dx, dz in NB)]
-    assert buried, "the fixture should have a buried core to test"
-    faced = [c for c in mass - towers
-             if c not in buried and c not in tm.gates]
-    # A buried cell carries at most the one course the walk rests on; a faced
-    # one carries the full stack. Towers stand on some cells and build higher,
-    # so compare against the *minimum* a faced cell gets.
-    assert max(per_cell[c] for c in buried) <= 1, "buried cells are still solid"
-    assert min(per_cell[c] for c in faced) > 1, "a faced cell lost its courses"
+    NB = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    buried = [c for c in mass - towers - gates
+              if all((c[0] + dx, c[1] + dz) in mass for dx, dz in NB)]
+    assert buried, "the fixture should have a buried core to check"
 
+    courses = round(TOWN_WALL_TILES / core.size_y)
+    for c in buried:
+        assert per_cell[c] == courses, (
+            f"buried cell {c} carries {per_cell[c]} courses, not {courses} -- "
+            "the rampart is hollow again and town_wall_gaps will fail")
 
 def test_wall_stairs_are_inside_parallel_and_land_on_the_curtain():
     """Three things that were each wrong once.
@@ -2508,3 +2510,81 @@ def test_a_bare_tilemap_has_no_cleared_ground():
     from citysmith import build as B
     from citysmith import raster as R
     assert B.building_distance(R.TileMap.blank(8, 8, "empty")) == {}
+
+
+def test_unregistered_chunks_keep_their_place_on_the_map():
+    """The whole multi-slab integration rests on this.
+
+    A map is normalised *once*, and chunks then carry their true in-map
+    coordinates -- they are not re-normalised to their own corner. So a
+    multi-slab document can give every slab an offset of zero and let the
+    plugin's drop position move the town. If chunking ever started
+    re-normalising per chunk, offsets of zero would stack every region on top
+    of the first and the failure would look like "the plugin is broken".
+
+    Registration markers are the other half: they exist only to give a
+    cursor-anchored paste a shared bounding box, and they are what makes the
+    registered chunks all span the same box.
+    """
+    from citysmith.build import build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = TileMap.blank(40, 40)
+    for i, x0 in enumerate((3, 24)):
+        for x in range(x0, x0 + 8):
+            for z in range(3 + i * 20, 11 + i * 20):
+                tm.building[z][x] = f"house-{i:04d}"
+                tm.surface[z][x] = FLOOR
+        tm.floors[f"house-{i:04d}"] = 2
+    _find_perimeters(tm, None)
+    _place_doors(tm, None)
+    b = build_from_tilemap(tm, palette, storeys=2)
+
+    loose = b.chunk_plan(4000, register=False, chunk_tiles=20,
+                         skip_open_country=False, pack=False, by_layer=False)
+    assert len(loose.chunks) > 1, "the fixture needs more than one chunk"
+
+    # Each chunk sits in its own region rather than at the origin.
+    starts = {round(min(p.x for p in c.slab.placements)) for c in loose.chunks}
+    assert len(starts) > 1, f"every chunk starts at the same x ({starts})"
+
+    # And the union of the chunks is the whole map, once, in place.
+    whole = {(p.asset_id, round(p.x, 2), round(p.y, 2), round(p.z, 2), p.rot)
+             for c in loose.chunks for p in c.slab.placements}
+    flat = b.chunk_plan(10 ** 9, register=False, chunk_tiles=10 ** 6,
+                        skip_open_country=False, pack=False, by_layer=False)
+    single = {(p.asset_id, round(p.x, 2), round(p.y, 2), round(p.z, 2), p.rot)
+              for c in flat.chunks for p in c.slab.placements}
+    assert whole == single, (
+        f"chunking moved geometry: {len(whole ^ single)} placements differ")
+
+
+def test_multi_slab_build_writes_a_document_the_plugins_can_read():
+    """End to end through the CLI's own writer."""
+    import json
+    import tempfile
+    import pathlib
+
+    from citysmith.build import build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.cli import _write_multislab
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.slab import decode
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    b = build_from_tilemap(_one_building("house-0001"), palette, storeys=2)
+    plan = b.chunk_plan(4000, register=False, chunk_tiles=16,
+                        skip_open_country=False, pack=False, by_layer=False)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = _write_multislab(plan.chunks, pathlib.Path(tmp), "town")
+        assert path.name == "town.multislab.slab"
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["autoDrop"] is True
+    assert len(doc["slabs"]) == len(plan.chunks)
+    total = sum(len(decode(s["code"])) for s in doc["slabs"])
+    assert total == sum(len(c.slab) for c in plan.chunks)
+    # No registration markers were added, because nothing has to be aimed.
+    assert b.stats.registration_markers == 0

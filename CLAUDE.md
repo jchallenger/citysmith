@@ -865,11 +865,15 @@ shape instead of reading it. The rules that fall out:
   board. Anything that reserves ground near the circuit has to exclude
   `tower_cells` as well as `mass`.
 
-- **A buried rampart cell shows nothing but its top.** The wall is nearly
-  three tiles thick, so 99 of 261 body cells -- 38% -- have no face anyone can
-  see, and their five courses under the walk were 495 blocks of solid nothing.
-  Only the course the walk rests on is kept. A cell beside a gate is *not*
-  buried: the passage under the lintel opens its side into the tunnel.
+- **The rampart is built SOLID, and the buried core is deliberately not an
+  optimisation.** 38% of the body cells have no face anyone can see, so their
+  lower courses were dropped for a while: 495 blocks, 1.8% of the board, and
+  it read fine because the faces seal the void. It also empties exactly the
+  cells `verify.town_wall_gaps` samples (mid-second-course), and that check
+  cannot tell a sealed void from daylight straight through the circuit -- it
+  exists because see-through wall shipped once, on 1,234 tiles. Reverted;
+  `test_the_rampart_is_built_solid_all_the_way_through` holds the line.
+  A hollow core is also a trap for whoever next cuts a postern.
 
 - **A wide gate apron paves the ground a tower needs.** The postern's approach
   was first paved as a 5x5 halo round every gate cell; `pick_wall_towers`
@@ -932,6 +936,41 @@ feature.
 it -- the shell, the upper floors and the roof -- and capping only the shell
 leaves the roof three courses up with nothing under it. Same lesson as
 `footprints` and *where* a building is.
+
+## Check the community before reverse-engineering the host
+
+**The paste-anchoring work should never have happened.** Several sessions went
+into measuring how `Ctrl+V` seats a slab -- the ray-hit anchor, the slide on a
+tilted camera, the bounding-box centre, the even-extent tie -- and then into
+the machinery that works around it: two registration markers per chunk, the
+`_even_ceil` box, `_anchor_last`, `paste-order.txt`, `chunk_anchors`,
+`chunk_datum`, `anchor_on_a_whole_tile`, and the camera discipline in
+`review.ps1`.
+
+LordAshes' `MultiPasteSlabsPlugin` and `SlabPlugin_CCM` (Thunderstore, BepInEx)
+have read a JSON document that states each slab's position for years::
+
+    {"autoDrop": true, "dropX": 0, "dropY": 0, "dropZ": 0,
+     "slabs": [{"code": "<base64>", "offsetX": 0, "offsetY": 0, "offsetZ": 0}]}
+
+`slab.multislab()` emits it and `build --multi-slab` writes it. Because a map
+is normalised **once** and chunks keep their true in-map coordinates, every
+offset is zero and `drop` alone moves the town -- the integration is a dozen
+lines. That mode also skips the markers, and `cli` skips the three
+registration checks there, since there is no shared box to agree on.
+
+The rule: **before reverse-engineering a host application's behaviour, spend
+twenty minutes on its modding community.** Thunderstore, its GitHub org, and
+the community wikis. Other things found the same way, worth knowing:
+Tales Tavern's asset archive browses every in-game tile *with pictures*, which
+would have shortened several of the probe sessions below; `SlabelFish` and
+`talespireDeserialize` are existing Python slab codecs; `TaleSpire_Generator`
+already reads `index.json` and emits slabs (terrain only -- its city generator
+is listed as planned).
+
+**The vanilla path stays the default**, because the plugin needs BepInEx and
+breaks on game updates, and a colleague cloning this should not have to mod
+their game to see a town. None of the registration machinery is deleted.
 
 ## Metrics must read the artifact, not the plan
 

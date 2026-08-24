@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import gzip
+import json
 import struct
 import uuid as _uuid
 import zlib
@@ -307,3 +308,57 @@ def decode(text: str) -> Slab:
 def degrees_to_rot(degrees: float) -> int:
     """Snap an angle in degrees to the nearest of the 24 rotation steps."""
     return int(round(degrees / DEGREES_PER_STEP)) % ROT_STEPS
+
+
+#: Field names of LordAshes' multi-slab JSON, as read off the plugin's own
+#: documentation. Kept in one place because they are *their* names, not ours,
+#: and a typo here fails silently as "the plugin did nothing".
+_MULTISLAB_FIELDS = ("autoDrop", "dropX", "dropY", "dropZ", "slabs")
+
+
+def multislab(entries, drop=(0.0, 0.0, 0.0), auto_drop: bool = True) -> str:
+    """Serialise slabs as a multi-slab document for the TaleSpire paste plugins.
+
+    **This exists so the map does not have to be aimed.** A vanilla ``Ctrl+V``
+    is cursor-anchored: the slab arrives at whatever the cursor's ray hits, so
+    a map cut into chunks only assembles if every chunk presents the identical
+    bounding box and every paste is made at one cell with the camera straight
+    down. That is what the registration markers, the even-extent rule and the
+    written paste order are all for.
+
+    LordAshes' ``MultiPasteSlabsPlugin`` / ``SlabPlugin_CCM`` read a JSON
+    document instead and place each slab at a stated position, so none of that
+    machinery is needed on that path::
+
+        {"autoDrop": true, "dropX": 0, "dropY": 0, "dropZ": 0,
+         "slabs": [{"code": "<base64>", "offsetX": 0, "offsetY": 0, "offsetZ": 0}]}
+
+    ``entries`` is an iterable of ``Slab`` or ``(Slab, (x, y, z))``. Chunks cut
+    by :meth:`Builder.chunk_plan` with ``register=False`` keep their true
+    in-map coordinates, so their offsets are all zero and ``drop`` alone moves
+    the town -- which is the whole point, and why this is a dozen lines rather
+    than a coordinate system.
+
+    The plugin is third-party and breaks on TaleSpire updates from time to
+    time; the chunk files remain the default so a vanilla install still works.
+    """
+    slabs = []
+    for entry in entries:
+        piece, off = entry if isinstance(entry, tuple) else (entry, (0.0, 0.0, 0.0))
+        ox, oy, oz = off
+        slabs.append({
+            "code": encode(piece),
+            "offsetX": round(float(ox), 2),
+            "offsetY": round(float(oy), 2),
+            "offsetZ": round(float(oz), 2),
+        })
+    dx, dy, dz = drop
+    doc = {
+        "autoDrop": bool(auto_drop),
+        "dropX": round(float(dx), 2),
+        "dropY": round(float(dy), 2),
+        "dropZ": round(float(dz), 2),
+        "slabs": slabs,
+    }
+    assert set(doc) == set(_MULTISLAB_FIELDS)
+    return json.dumps(doc, indent=1)

@@ -176,6 +176,20 @@ The three rules that matter most:
 | Layered | *(default)* | Landscape first, then structures over it. Fewer, larger files, and lets you re-paste just the buildings after a change — at the cost of the second layer resting on the first. |
 | Per building | `--per-building` | One slab per building plus one for the rampart. Dozens of files; the mode for checking a single house without re-laying the town. |
 
+**`--multi-slab`** additionally writes `<stem>.multislab.slab` — one JSON
+document holding every chunk *with the position it belongs at*. Paste it with
+LordAshes' [MultiPasteSlabsPlugin][mps] or [SlabPlugin_CCM][ccm] (Thunderstore,
+needs BepInEx) and the whole town lands in one keystroke: no cursor aiming, no
+shared bounding box, no paste order, no camera discipline. Builds in this mode
+carry **no registration markers**, so the two stray marker tiles outside the
+map corners are gone too.
+
+The plugin is third-party and does break on TaleSpire updates, so the ordinary
+chunk files remain the default and a vanilla install needs nothing extra.
+
+[mps]: https://thunderstore.io/c/talespire/p/LordAshes/MultiPasteSlabsPlugin/
+[ccm]: https://thunderstore.io/c/talespire/p/LordAshes/SlabPlugin_CCM/
+
 Other useful flags: `--style {medieval,cyberpunk}`, `--seed N`, `--storeys N`
 (ceiling on building height, default 3), `--no-roofs`, `--no-bridges`,
 `--max-assets N`, `--chunk-tiles N`, `--keep-open-country`,
