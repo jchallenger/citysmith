@@ -27,9 +27,17 @@ def _scene(scene_id="graybank-tavern-0014", centroid=(169.0, 168.0)) -> Scene:
     )
 
 
-def _slabs(tmp_path, scene, text="a slab"):
+#: A real slab, because the digest decodes what it is given -- it is a claim
+#: about what is on the board, not about the bytes of a file.
+def _slabs(tmp_path, scene, marker=(0.0, 0.0, 0.0)):
+    from citysmith.catalog import Asset
+    from citysmith.slab import Placement, Slab, encode
+
+    asset = "a" * 8 + "-1111-2222-3333-444444444444"
+    slab = Slab([Placement(asset, 1.0, 0.0, 1.0, 0),
+                 Placement(asset, marker[0], marker[1], marker[2], 0)])
     for name in scene.slabs:
-        (tmp_path / name).write_text(text, encoding="utf-8")
+        (tmp_path / name).write_text(encode(slab), encoding="utf-8")
     return boards.digest_of_scene(tmp_path, scene)
 
 
@@ -60,9 +68,9 @@ def test_rebuilding_the_scene_makes_the_board_stale(tmp_path):
     change that from here -- there is no erase. Noticing is the whole job."""
     scene = _scene()
     registry = boards.Registry.load(tmp_path / "boards.json")
-    registry.record(scene, _slabs(tmp_path, scene, "first build"))
+    registry.record(scene, _slabs(tmp_path, scene, (0.0, 0.0, 0.0)))
 
-    rebuilt = _slabs(tmp_path, scene, "second build, different geometry")
+    rebuilt = _slabs(tmp_path, scene, (5.0, 0.0, 5.0))
     status, record = registry.status(scene, rebuilt)
     assert status == boards.STALE
     assert record.board == scene.board
@@ -97,10 +105,10 @@ def test_a_small_wobble_in_the_centroid_is_not_a_move(tmp_path):
 # -- the record itself --------------------------------------------------------
 
 def test_the_same_files_always_give_the_same_digest(tmp_path):
-    """Over contents, not mtimes -- a build run twice must not read as stale."""
+    """A build run twice must not read as stale."""
     scene = _scene()
-    first = _slabs(tmp_path, scene, "identical")
-    second = _slabs(tmp_path, scene, "identical")
+    first = _slabs(tmp_path, scene)
+    second = _slabs(tmp_path, scene)
     assert first == second
 
 
@@ -125,7 +133,7 @@ def test_a_second_board_supersedes_but_never_erases_the_first(tmp_path):
     scene = _scene()
     registry = boards.Registry.load(tmp_path / "boards.json")
     registry.record(scene, _slabs(tmp_path, scene))
-    registry.record(scene, _slabs(tmp_path, scene, "rebuilt"),
+    registry.record(scene, _slabs(tmp_path, scene, (5.0, 0.0, 5.0)),
                     board="Interior - Graybank - The Halfling and the Fox (0824)")
 
     record = registry.get(scene.scene_id)
@@ -168,6 +176,6 @@ def test_two_scenes_keep_separate_records(tmp_path):
     a, b = _scene(), _scene("graybank-tavern-0016", centroid=(50.0, 50.0))
     b.slabs = ["graybank-tavern-0016.slab.txt"]
     registry = boards.Registry.load(tmp_path / "boards.json")
-    registry.record(a, _slabs(tmp_path, a, "a"))
-    registry.record(b, _slabs(tmp_path, b, "b"))
+    registry.record(a, _slabs(tmp_path, a))
+    registry.record(b, _slabs(tmp_path, b, (2.0, 0.0, 2.0)))
     assert len(boards.Registry.load(tmp_path / "boards.json").records) == 2

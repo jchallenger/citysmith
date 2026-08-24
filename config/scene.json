@@ -16,9 +16,9 @@
   "registry": "out/scenes/boards.json",
 
   "board": {
-    "_comment": "Interior boards are prefixed so they sort together in the campaign list, the way `Probe - ` does. The town's own board keeps its bare name.",
-    "prefix": "Interior - ",
-    "name_template": "{prefix}{town} - {building}",
+    "_comment": "The building goes FIRST. The campaign board list clips a row at about two dozen characters, so a `Interior - Graybank - ` prefix renders every interior in a town as the same row. Whatever identifies the room has to be at the front.",
+    "prefix": "",
+    "name_template": "{prefix}{building} - {town} interior",
     "max_name": 60
   },
 

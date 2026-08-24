@@ -1664,7 +1664,14 @@ def build_interior(
                 b.add(place_wall(ext_wall, tx, tz, side, wall_y))
 
         # Interior partitions on shared room edges, skipping doorways.
-        for wall_cell in _interior_walls(floorplan, level):
+        # **Sorted**, because `_interior_walls` returns a set of
+        # ``(x, z, side)`` and `side` is a string: Python randomises string
+        # hashing per process, so the same plan emitted its partitions in a
+        # different order every run. The geometry was identical every time --
+        # measured, 231 placements, same multiset -- but the bytes were not,
+        # which makes a build undiffable and makes any digest of the file read
+        # as a change that never happened.
+        for wall_cell in sorted(_interior_walls(floorplan, level)):
             tx, tz, side = wall_cell
             if (tx, tz, side) in doors:
                 if door_asset is not None:

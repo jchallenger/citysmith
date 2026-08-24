@@ -100,7 +100,16 @@ function Board-Status([string]$id) {
     $out = & python -m citysmith boards status $id
     $code = $LASTEXITCODE
   } finally { Pop-Location }
-  return [pscustomobject]@{ Text = ($out -join "`n"); Code = $code }
+  # The first line is "<STATE> <board name>", and the name on it is the
+  # RECORDED one -- which is not always the one in the manifest. A rebuild
+  # lands on a second board, and the name to go looking for in the campaign
+  # list is the one the board actually has.
+  $first = @($out)[0]
+  $recorded = ""
+  if ($first -match '^[A-Z]+\s+(.+)$') { $recorded = $Matches[1] }
+  return [pscustomobject]@{
+    Text = ($out -join "`n"); Code = $code; Board = $recorded
+  }
 }
 
 function Open-BoardList {
@@ -166,7 +175,7 @@ switch ($Cmd) {
     if (-not $mustPaste) {
       "`nThe board is already there. Nothing will be pasted."
       "Open the campaign list, find the row named:"
-      "    $board"
+      if ($status.Board) { "    $($status.Board)" } else { "    $board" }
       if ($WhatIf) { "(-WhatIf: not touching the game)"; break }
       Open-BoardList
       "`nout\flyby\scene-boards.jpg -- read the row number, then:"

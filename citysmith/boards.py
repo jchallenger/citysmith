@@ -184,15 +184,29 @@ class Registry:
 
 
 def digest_of(paths) -> str:
-    """A digest over the slab files, so a rebuild is detectable.
+    """A digest over what is *on the board*, so a rebuild is detectable.
 
-    Over the *contents*, in name order, rather than over mtimes: the same build
-    run twice has to give the same digest or every scene reads as stale.
+    Over the decoded placements, sorted -- not over the file bytes. The
+    question this answers is "does the board hold this build", and two files
+    that place the same assets in the same places are the same board however
+    they are ordered inside. Hashing the bytes read STALE on a rebuild that had
+    changed nothing: `_interior_walls` returns a set keyed partly on a string,
+    Python randomises string hashing per process, and the partitions came out
+    in a different order every run. That is fixed at the source too, but a
+    digest that only holds while every set in the builder happens to iterate
+    the same way is a digest that will lie again later.
     """
+    from .slab import decode
+
     h = hashlib.sha256()
     for path in sorted(pathlib.Path(p) for p in paths):
         h.update(path.name.encode("utf-8"))
-        h.update(path.read_bytes())
+        rows = sorted(
+            (p.asset_id, round(p.x, 3), round(p.y, 3), round(p.z, 3), p.rot)
+            for p in decode(path.read_text(encoding="utf-8")).placements
+        )
+        for row in rows:
+            h.update(repr(row).encode("utf-8"))
     return "sha256:" + h.hexdigest()[:16]
 
 

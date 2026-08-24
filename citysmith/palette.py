@@ -158,7 +158,23 @@ MEDIEVAL = Style(
                   exclude_tags=_OFF_THEME + ("roof",), exclude=_WRONG_SETTING,
                   height=2.0, **_MED, **_WALLSZ),
         ],
+        # **A partition comes from the wall's own kit too.** This was the last
+        # place `md_wall_1x1_02` survived, and it is MegaDungeon masonry: the
+        # same deep-relief blocks that were taken off the facade for leaving a
+        # jumbled seam at every join. Nothing showed it until an interior was
+        # built and looked at, because a town's partitions are inside a closed
+        # shell with a roof on -- read from above at the first scene, the four
+        # rooms of a tavern were a heap of pale rubble filling the floor, in a
+        # cream timber-framed building.
+        #
+        # `Village Roof Side Wall 01` is the facade's own panel (the exterior
+        # is `02`), same kit, same 1.0x2.0x0.5 footprint -- which the wall
+        # segment check requires, and which the alternative from this kit,
+        # `Tavern Wall - Small 01`, does not have: it is authored 0.5x2.0x1.0,
+        # thin on the other axis. `place_wall` handles either, `validate` does
+        # not, and teaching it that is a bigger change than this needs.
         "wall_interior": [
+            _tile(name="Village Roof Side Wall 01", **_MED),
             _tile(name=("Wall (Plain, Small)", "md_wall_1x1_02"), **_MED),
             _tile(group=("wall", "Wall"), tags=("wall",), exclude_tags=_NOT_PLAIN_WALL,
                   exclude=_WRONG_SETTING, height=2.0, **_MED, **_WALLSZ),

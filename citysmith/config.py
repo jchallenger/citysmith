@@ -38,8 +38,17 @@ DEFAULTS: dict[str, Any] = {
     "out_dir": "out/scenes",
     "registry": "out/scenes/boards.json",
     "board": {
-        "prefix": "Interior - ",
-        "name_template": "{prefix}{town} - {building}",
+        # **The building goes first, and that is measured rather than chosen.**
+        # The campaign board list clips a row at about two dozen characters, so
+        # `Interior - Graybank - The Halfling and the Fox` and
+        # `Interior - Graybank - The Baron's Rabbit` both render as
+        # `INTERIOR - GRAYBANK - T...`. Two boards, one visible name, in the
+        # one list that is the only thing TaleSpire will tell you about a
+        # board. Whatever identifies the room has to be in the first two dozen
+        # characters; the grouping prefix does not survive, so it is not worth
+        # the space it costs.
+        "prefix": "",
+        "name_template": "{prefix}{building} - {town} interior",
         "max_name": 60,
     },
     "interior": {

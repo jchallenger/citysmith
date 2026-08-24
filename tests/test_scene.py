@@ -55,7 +55,7 @@ def test_the_same_building_gives_the_same_scene_id_and_board(town, cfg):
     assert scene_mod.scene_id(town.name, b) == "graybank-tavern-0014"
     assert scene_mod.scene_id(town.name, b) == scene_mod.scene_id(town.name, b)
     assert scene_mod.board_name(cfg, town, b) == \
-        "Interior - Graybank - The Halfling and the Fox"
+        "The Halfling and the Fox - Graybank interior"
 
 
 def test_two_buildings_never_share_a_scene_id(town, cfg):
@@ -71,8 +71,8 @@ def test_a_nameless_building_gets_an_invented_name_and_its_id(town, cfg):
     lay = Layout(name="Forest Church", source="mfcg")
     lay.buildings = [b]
     name = scene_mod.board_name(cfg, lay, b)
-    assert name.startswith("Interior - Forest Church - ")
-    assert name.endswith("(house-0042)")
+    assert name.endswith(" - Forest Church interior")
+    assert "(house-0042)" in name
     assert scene_mod.board_name(cfg, lay, b) == name, "an invented name must be stable"
 
 
@@ -86,8 +86,25 @@ def test_a_name_the_export_repeats_gets_its_id(town, cfg):
                        name="Farm"),
     ]
     names = {scene_mod.board_name(cfg, lay, b) for b in lay.buildings}
-    assert names == {"Interior - Graybank - Farm (stable-0003)",
-                     "Interior - Graybank - Farm (stable-0004)"}
+    assert names == {"Farm (stable-0003) - Graybank interior",
+                     "Farm (stable-0004) - Graybank interior"}
+
+
+def test_what_identifies_the_room_survives_the_list_clipping(town, cfg):
+    """The campaign list clips a row at about two dozen characters and is the
+    only thing TaleSpire will tell you about a board. Two interiors in one town
+    whose first two dozen characters match are two rows nobody can tell
+    apart -- which is what `Interior - <town> - <building>` produced, measured
+    on the real list."""
+    lay = Layout(name="Graybank", source="ftg")
+    lay.buildings = [
+        LayoutBuilding(id="tavern-0014", ring=_square(0, 0, 8, 7), kind="tavern",
+                       name="The Halfling and the Fox"),
+        LayoutBuilding(id="tavern-0016", ring=_square(9, 0, 8, 7), kind="tavern",
+                       name="The Baron's Rabbit"),
+    ]
+    shown = {scene_mod.board_name(cfg, lay, b)[:24] for b in lay.buildings}
+    assert len(shown) == 2, f"both rows read as {shown}"
 
 
 def test_a_long_board_name_is_truncated_not_rejected(town, cfg):
@@ -308,7 +325,7 @@ def test_defaults_work_with_no_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     cfg = Config.load()
     assert cfg.get("party.size") == 4
-    assert cfg.get("board.prefix") == "Interior - "
+    assert cfg.get("board.name_template") == "{prefix}{building} - {town} interior"
 
 
 def test_a_named_config_that_is_missing_is_an_error(tmp_path):
