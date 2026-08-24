@@ -1601,6 +1601,74 @@ def _build_shell(b: Builder, building: Building, base_y: float, storeys: int) ->
 
 # -- interiors ----------------------------------------------------------------
 
+@dataclass(frozen=True)
+class Fabric:
+    """The pieces one building is built from, chosen together.
+
+    A facade that changes material at the corner reads as a mistake rather
+    than as variety -- which is why the *tier* picks the whole set and not
+    just the wall. The town build has the same idea inline in
+    `build_from_tilemap`; this is the version an interior can use, and the two
+    should converge the next time either is touched.
+    """
+
+    tier: str
+    wall: Asset
+    partition: Asset
+    door: Asset
+    floor: Asset
+    window: Asset | None = None
+    corner: Asset | None = None
+
+
+def interior_fabric(palette: Palette, tier: str, variant: int = 0) -> Fabric:
+    """Resolve one tier's pieces for an interior.
+
+    **The partition comes from the wall's own kit**, the same rule that put a
+    Village panel inside a Village shell: a stone temple whose rooms are
+    divided by timber framing is two buildings in one footprint. Where the
+    declared `wall_interior` belongs to a different kit than this tier's wall,
+    the wall itself is used instead -- a plain partition of the right material
+    beats a detailed one of the wrong material.
+    """
+    wall = palette.require("wall", variant)
+    door = palette.resolve("door")
+    window = palette.resolve("wall_window")
+    floor = palette.require("floor")
+    corner_role = "wall_corner"
+
+    if tier == "civic":
+        wall = palette.resolve("wall_civic") or wall
+        window = palette.resolve("wall_window_civic") or window
+        door = palette.resolve("door_civic") or door
+        floor = palette.resolve("floor_civic") or floor
+        corner_role = "wall_corner_civic"
+    elif tier == "utility":
+        wall = palette.resolve("wall_utility") or wall
+        # No window in this kit and none wanted: a barn with glass in it stops
+        # being a barn.
+        window = None
+        corner_role = "wall_corner_utility"
+    elif tier == "trade":
+        # Trade shares the house's wall -- it is the only kit with a 1-cell
+        # window -- and is told apart by its door.
+        door = palette.resolve("door_civic") or door
+
+    partition = palette.resolve("wall_interior")
+    if partition is None or _kit_of(partition) != _kit_of(wall):
+        partition = wall
+    if window is not None and window.footprint != wall.footprint:
+        window = None      # would overhang the cell; see Palette.validate
+    if door is None or door.footprint != wall.footprint:
+        door = palette.require("door")
+
+    corner = palette.resolve(corner_role)
+    if corner is None or (corner.size_x, corner.size_z) != (1.0, 1.0)             or abs(corner.size_y - wall.size_y) > 1e-6             or _kit_of(corner) != _kit_of(wall):
+        corner = None
+    return Fabric(tier=tier, wall=wall, partition=partition, door=door,
+                  floor=floor, window=window, corner=corner)
+
+
 def build_interior(
     floorplan,
     palette: Palette,
@@ -1609,6 +1677,7 @@ def build_interior(
     roof: bool = False,
     prop_density: float = 0.12,
     stack: bool = True,
+    tier: str | None = None,
 ) -> Builder:
     """Build a playable interior from a :class:`~citysmith.floorplan.Floorplan`.
 
@@ -1625,13 +1694,27 @@ def build_interior(
     """
     b = Builder(palette, seed)
 
-    floor = palette.require("floor")
-    upper = palette.resolve("floor_upper") or floor
-    ext_wall = palette.require("wall")
-    int_wall = palette.resolve("wall_interior") or ext_wall
-    door_asset = palette.resolve("door")
     stair_asset = palette.resolve("stairs")
 
+    # The fabric, and the face the front door is on. Both were missing: an
+    # interior was built from `wall` and `wall_interior` whatever the building
+    # was, so a stone temple came out in the same timber panels as a cottage,
+    # and no interior had a single window in it -- every wall blind, on a board
+    # whose whole purpose is to be looked into.
+    if tier is None:
+        tier = tier_of(f"{floorplan.kind}-0000")
+    fabric = interior_fabric(
+        palette, tier, zlib.crc32(floorplan.building_id.encode()) % 3
+    )
+    front = next((d.side for d in floorplan.doors if d.exterior), None)
+
+    ext_wall = fabric.wall
+    floor = fabric.floor
+    # The upper deck follows the ground floor's material, not the generic
+    # role: a stone building with plank upper storeys is the same kit mismatch
+    # one level up.
+    upper = floor if fabric.tier == "civic" else (
+        palette.resolve("floor_upper") or floor)
     storey_h = ext_wall.size_y
     level_base: list[float] = []
 
@@ -1649,19 +1732,42 @@ def build_interior(
 
         doors = {(d.x, d.z, d.side) for d in floorplan.doors if d.level == level}
 
-        # Exterior shell.
+        # Exterior shell: one corner piece where two adjacent sides are
+        # exposed, a door where the plan puts one, a window on a stable hash,
+        # and a plain panel otherwise. Same order of preference as the town's
+        # facade, and for the same reasons -- two wall ends in one square where
+        # a corner piece would do, and a blank back wall where a front wants
+        # glass, are both things a board shows immediately.
         for tx, tz in rect.tiles():
-            for side, present in (
+            exposed = {side for side, present in (
                 ("n", tz == rect.z), ("s", tz == rect.z2 - 1),
                 ("w", tx == rect.x), ("e", tx == rect.x2 - 1),
-            ):
-                if not present:
-                    continue
+            ) if present}
+            if not exposed:
+                continue
+            door_cell = any((tx, tz, s) in doors for s in exposed)
+            corner = CORNER_BY_SIDES.get(frozenset(exposed))
+            if corner is not None and fabric.corner is not None and not door_cell:
+                b.add(place_tile(fabric.corner, tx, tz, wall_y,
+                                 WALL_CORNER_ROT[corner]))
+                continue
+            for side in sorted(exposed):
                 if (tx, tz, side) in doors:
-                    if door_asset is not None:
-                        b.add(place_wall(door_asset, tx, tz, side, wall_y))
+                    b.add(place_wall(fabric.door, tx, tz, side, wall_y))
                     continue
-                b.add(place_wall(ext_wall, tx, tz, side, wall_y))
+                # crc32, not hash(): str hashes are salted per process, so
+                # hash() would re-deal the windows on every rebuild -- the same
+                # trap that made the partitions non-deterministic.
+                key = zlib.crc32(
+                    f"{floorplan.building_id}:{tx}:{tz}:{level}:{side}".encode())
+                rate = glaze_rate(tier, side, front, False)
+                # A ground floor keeps one fewer window: privacy, and the
+                # doorway already breaks that run.
+                if rate and level == 0:
+                    rate += 1
+                glazed = fabric.window is not None and rate and key % rate == 0
+                b.add(place_wall(fabric.window if glazed else ext_wall,
+                                 tx, tz, side, wall_y))
 
         # Interior partitions on shared room edges, skipping doorways.
         # **Sorted**, because `_interior_walls` returns a set of
@@ -1674,10 +1780,9 @@ def build_interior(
         for wall_cell in sorted(_interior_walls(floorplan, level)):
             tx, tz, side = wall_cell
             if (tx, tz, side) in doors:
-                if door_asset is not None:
-                    b.add(place_wall(door_asset, tx, tz, side, wall_y))
+                b.add(place_wall(fabric.door, tx, tz, side, wall_y))
                 continue
-            b.add(place_wall(int_wall, tx, tz, side, wall_y))
+            b.add(place_wall(fabric.partition, tx, tz, side, wall_y))
 
         # Dress rooms with props.
         _dress(b, floorplan, level, wall_y, prop_density)

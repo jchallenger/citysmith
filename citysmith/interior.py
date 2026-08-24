@@ -167,11 +167,42 @@ def entrance_side(layout: Layout, building: LayoutBuilding) -> str:
     return "s" if dz > 0 else "n"
 
 
+def tier_for(building: LayoutBuilding) -> str:
+    """Which of the four fabrics this building is built in.
+
+    The kind decides it, exactly as it does for the town -- **except that
+    stone wins**. FTG says `material: STONE_BRICK` per building, and a stone
+    shop is a stone building: it gets the dressed-stone fabric whatever trade
+    happens inside it. Only four buildings across the three towns carry it, so
+    this is a rare case that is nevertheless free to get right.
+    """
+    from .build import tier_of
+
+    if building.stone:
+        return "civic"
+    return tier_of(building.id)
+
+
+def storeys_for(building: LayoutBuilding, max_levels: int) -> int:
+    """How many levels to build, clamped like the town clamps them.
+
+    A warehouse, a stable or a shed is **one storey** however many the layout
+    invented for it -- `build.UTILITY_STOREYS`, and the reason is the same
+    inside as out: those are sheds with one big volume, and a barn with three
+    floors of bedrooms in it is not a barn.
+    """
+    from .build import UTILITY_STOREYS
+
+    if tier_for(building) == "utility":
+        return max(1, min(UTILITY_STOREYS, max_levels))
+    return max(1, min(max_levels, building.floors))
+
+
 def as_building(
     layout: Layout,
     building: LayoutBuilding,
     *,
-    max_levels: int = 2,
+    max_levels: int = 3,
 ) -> Building:
     """The imported building as the :class:`~citysmith.city.Building` the
     floorplan generator takes.
@@ -181,7 +212,7 @@ def as_building(
     the level count, and capping one of them leaves the others building for a
     storey that is not there.
     """
-    levels = max(1, min(max_levels, building.floors))
+    levels = storeys_for(building, max_levels)
     return Building(
         id=building.id,
         name=building.name or _fallback_name(building),
@@ -204,7 +235,7 @@ def plan(
     building: LayoutBuilding,
     *,
     seed: int = 0,
-    max_levels: int = 2,
+    max_levels: int = 3,
     min_room: int = 3,
     spread: bool = True,
     gap: int = LEVEL_GAP,

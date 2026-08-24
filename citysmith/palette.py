@@ -40,8 +40,8 @@ WALL_COURSE_ROLES = ("wall_corner", "wall_corner_civic")
 #: square, or it overhangs its neighbours -- the failure that put a 2-wide door
 #: in a 1-wide wall and dragged an entire board half a tile off the grid.
 CELL_ROLES = (
-    "floor", "floor_upper", "ground", "street", "water", "gravel", "roof",
-    "bridge_deck",
+    "floor", "floor_upper", "floor_civic", "ground", "street", "water",
+    "gravel", "roof", "bridge_deck",
 ) + WALL_COURSE_ROLES
 
 #: Roles laid across a 2x2 block of cells.
@@ -393,6 +393,14 @@ MEDIEVAL = Style(
         # Guildhall, temple, manor and barracks are built in dressed stone
         # with arched openings, so a party can read importance off the
         # architecture from a street away instead of counting storeys.
+        #: Dressed stone paving, from the civic wall's own kit. A temple built
+        #: in `castle wall 1x1` was standing on `Rural Floor 01` -- timber
+        #: planking under coursed masonry, which is the kit mismatch this
+        #: project keeps relearning, one surface lower down.
+        "floor_civic": [
+            _tile(name="castle floor 1x1", **_MED, **_FLOOR_H, **_UNIT),
+            _tile(name="Moorgoth Floor 01", **_MED, **_FLOOR_H, **_UNIT),
+        ],
         "wall_civic": [
             _tile(name="castle wall 1x1", **_MED),
         ],

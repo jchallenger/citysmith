@@ -288,6 +288,9 @@ def build(
         roof=bool(cfg.get("interior.roof", False)),
         prop_density=float(cfg.get("interior.prop_density", 0.12)),
         stack=not spread,
+        # Passed rather than derived from the plan's kind, because the plan
+        # does not carry `stone` and a stone shop is a stone building.
+        tier=interior.tier_for(building),
     )
 
     floor_top = palette.require("floor").size_y

@@ -20,16 +20,44 @@ import pytest
 from citysmith.catalog import Asset
 
 
+_IDS: dict[str, int] = {}
+
+
 def _asset(letter: str, name: str, kind: str, sx: float, sy: float, sz: float,
-           group: str = "") -> Asset:
+           group: str = "", folder: str = "") -> Asset:
+    # The folder is the kit, and `build._kit_of` reads it -- so a stub whose
+    # pieces all sat in one folder would let a mismatched fabric pass every
+    # test. Inferred from the name here, the way the real catalog has it.
+    if not folder:
+        low = name.lower()
+        folder = ("Castle Fortified" if low.startswith("castle") else
+                  "Rural" if low.startswith("rural") else
+                  "Doors" if low.startswith("door") else
+                  "Moorgoth" if low.startswith("moorgoth") else
+                  "Nature" if "grass" in low else
+                  "CobbleStones" if "cobble" in low else "Tavern")
+    # The id has to be real hex -- the slab codec parses it as a UUID -- so the
+    # `letter` is only a label and the id is numbered from it.
+    n = _IDS.setdefault(letter, len(_IDS) + 1)
     return Asset(
-        id=f"{letter * 8}-1111-2222-3333-444444444444", name=name, kind=kind,
-        pack="Medieval Fantasy", group_tag=group, tags=(), folder="Tavern",
+        id=f"{n:08x}-1111-2222-3333-444444444444", name=name, kind=kind,
+        pack="Medieval Fantasy", group_tag=group, tags=(), folder=folder,
         size_x=sx, size_y=sy, size_z=sz,
     )
 
 
 FLOOR = _asset("a", "Tavern Floor 01", "tile", 1.0, 0.5, 1.0, "floor")
+#: The civic kit, so a test can tell one fabric from another by `folder`.
+CIVIC_WALL = _asset("g", "castle wall 1x1", "tile", 1.0, 2.0, 0.5, "wall")
+CIVIC_WINDOW = _asset("h", "castle wall 1x1 window", "tile", 1.0, 2.0, 0.5, "wall")
+CIVIC_DOOR = _asset("i", "Door - Fancy", "tile", 1.0, 2.0, 0.5, "door")
+CIVIC_CORNER = _asset("j", "castle wall corner 1x1 base", "tile", 1.0, 2.0, 1.0, "corner")
+CIVIC_FLOOR = _asset("k", "castle floor 1x1", "tile", 1.0, 0.5, 1.0, "floor")
+#: Rural boarding: the utility kit, and it has no window on purpose.
+UTIL_WALL = _asset("l", "Rural Wall 01", "tile", 1.0, 2.0, 0.5, "wall")
+UTIL_CORNER = _asset("m", "Rural Corner", "tile", 1.0, 2.0, 1.0, "corner")
+CORNER = _asset("n", "Tavern no floor (1x1 a)", "tile", 1.0, 2.0, 1.0, "corner")
+WINDOW = _asset("p", "Village Roof Side Wall With Window 01", "tile", 1.0, 2.0, 0.5, "wall")
 UPPER = _asset("b", "Rural Floor 02", "tile", 1.0, 0.5, 1.0, "floor")
 WALL = _asset("c", "Village Roof Side Wall 01", "tile", 1.0, 2.0, 0.5, "wall")
 INNER = _asset("d", "Wall (Plain, Small)", "tile", 1.0, 2.0, 0.5, "wall")
@@ -46,7 +74,9 @@ STREET = _asset("3", "CobbleStone Floor Small", "tile", 1.0, 0.25, 1.0, "floor")
 
 
 class StubCatalog:
-    assets = [FLOOR, UPPER, WALL, INNER, DOOR, STAIRS, STOOL, MARK, GROUND, STREET]
+    assets = [FLOOR, UPPER, WALL, INNER, DOOR, STAIRS, STOOL, MARK, GROUND, STREET,
+              CIVIC_WALL, CIVIC_WINDOW, CIVIC_DOOR, CIVIC_CORNER, CIVIC_FLOOR,
+              UTIL_WALL, UTIL_CORNER, CORNER, WINDOW]
 
 
 class StubPalette:
@@ -56,6 +86,11 @@ class StubPalette:
         "floor": FLOOR, "floor_upper": UPPER, "wall": WALL,
         "wall_interior": INNER, "door": DOOR, "stairs": STAIRS,
         "party_mark": MARK, "ground": GROUND, "street": STREET,
+        "wall_window": WINDOW, "wall_corner": CORNER,
+        "wall_civic": CIVIC_WALL, "wall_window_civic": CIVIC_WINDOW,
+        "door_civic": CIVIC_DOOR, "wall_corner_civic": CIVIC_CORNER,
+        "floor_civic": CIVIC_FLOOR,
+        "wall_utility": UTIL_WALL, "wall_corner_utility": UTIL_CORNER,
     }
 
     def __init__(self) -> None:

@@ -55,7 +55,11 @@ DEFAULTS: dict[str, Any] = {
         "max_name": 60,
     },
     "interior": {
-        "max_levels": 2,
+        # Three, because the layout says three for 30% of buildings (352 of
+        # 1,176 across the towns) and a cap of two silently threw a storey
+        # away. Utility buildings are one storey regardless -- see
+        # `interior.storeys_for`.
+        "max_levels": 3,
         "min_room": 3,
         "spread_levels": True,
         "level_gap": 2,

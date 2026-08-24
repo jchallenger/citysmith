@@ -24,8 +24,8 @@
   },
 
   "interior": {
-    "_comment": "max_levels caps storeys. spread lays them side by side instead of stacking, because TaleSpire cannot hide an upper floor. pad is the ring of ground round the shell so the door opens onto something.",
-    "max_levels": 2,
+    "_comment": "max_levels caps storeys -- 30% of buildings have three and a cap of two threw one away; a warehouse or stable is one storey whatever the layout says. spread lays them side by side instead of stacking, because TaleSpire cannot hide an upper floor. pad is the ring of ground round the shell so the door opens onto something.",
+    "max_levels": 3,
     "min_room": 3,
     "spread_levels": true,
     "level_gap": 2,
