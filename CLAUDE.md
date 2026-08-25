@@ -15,6 +15,8 @@ This file is the internal engineering notes. User-facing docs:
 `docs/building-massing.md` (storeys, footprints and yards by settlement size),
 `docs/fencing.md` (field walls, and why they are not on the grid),
 `tasks.json` (what is designed, what is built, and `citysmith tasks --check`),
+`docs/board-strategy.md` (interior vs exterior boards, and moving a party
+  between them -- what the community recommends, and what we do instead),
 `docs/branching.md` (worktrees, and the policy that closes them),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
 `.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).

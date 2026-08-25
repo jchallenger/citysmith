@@ -160,3 +160,82 @@ def test_every_building_the_same_height_is_reported_as_a_warning():
         r for r in feature_report(builder, tm, layout) if r[1] == "storeys")
     assert level == "warn"
     assert "same height" in detail
+
+
+# -- interior furnishing ------------------------------------------------------
+
+
+def _furnished(kind: str = "tavern", w: int = 16, d: int = 12, floors: int = 2):
+    """A building big enough to have several rooms, planned and furnished.
+
+    Synthetic rather than loaded from `out/`: a test that skips when a local
+    artifact is missing is a test that quietly stops guarding anything, and the
+    door-clearance rule is one nobody should be able to break unnoticed.
+    """
+    from citysmith import interior as I
+    from citysmith.build import build_interior
+
+    layout = Layout(name="probe")
+    layout.width, layout.depth = 60.0, 60.0
+    building = LayoutBuilding(
+        id=f"{kind}-0001",
+        ring=[(6, 6), (6 + w, 6), (6 + w, 6 + d), (6, 6 + d)],
+        kind=kind, floors=floors,
+    )
+    layout.buildings.append(building)
+    fp = I.plan(layout, building, seed=0)
+    return fp, build_interior(fp, _palette(), seed=0)
+
+
+def _prop_cells(builder):
+    from citysmith.build import collider_offset
+
+    cat = builder.palette.catalog
+    for p in builder.placements:
+        asset = cat.by_id(p.asset_id)
+        if asset is None or asset.kind != "prop":
+            continue
+        ox, oz = collider_offset(asset, p.rot)
+        yield p, asset, (p.x + ox, p.z + oz)
+
+
+def test_nothing_is_furnished_into_a_doorway_or_a_stair():
+    """A slab has no physics, so a chair dropped in a door is a door that does
+    not open -- for the whole session, with nobody able to move it."""
+    from citysmith.build import _door_keepout
+
+    fp, builder = _furnished()
+    keepout = set()
+    for level in range(4):
+        keepout |= _door_keepout(fp, level)
+    assert keepout, "the fixture needs doors to be meaningful"
+
+    blocking = [(a.name, cx, cz) for _, a, (cx, cz) in _prop_cells(builder)
+                if (int(cx), int(cz)) in keepout]
+    assert not blocking, f"props standing in a doorway or on a stair: {blocking[:5]}"
+
+
+def test_furniture_does_not_sit_on_cell_centres():
+    """0.1% of hand-placed interior props are centred; this pass centred 100%
+    of them, which is most of why furniture read as debris in a grid."""
+    fp, builder = _furnished()
+    cells = list(_prop_cells(builder))
+    if not cells:
+        pytest.skip("nothing furnished")
+    centred = sum(1 for _, _, (cx, cz) in cells
+                  if abs(cx % 1 - 0.5) < 1e-6 and abs(cz % 1 - 0.5) < 1e-6)
+    assert centred / len(cells) < 0.05, f"{centred} of {len(cells)} props are centred"
+
+
+def test_most_furniture_is_on_a_quarter_turn():
+    """84% in the community slabs, against a uniform draw over all 24 steps."""
+    from citysmith.build import QUARTER_TURN_SHARE
+
+    fp, builder = _furnished()
+    rots = [p.rot for p, _, _ in _prop_cells(builder)]
+    if len(rots) < 20:
+        pytest.skip("too few props to measure a share")
+    quarter = sum(1 for r in rots if r % 6 == 0) / len(rots)
+    assert abs(quarter - QUARTER_TURN_SHARE) < 0.15, (
+        f"{quarter:.0%} on a quarter turn against a target of "
+        f"{QUARTER_TURN_SHARE:.0%}")

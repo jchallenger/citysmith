@@ -1995,22 +1995,121 @@ def _interior_walls(floorplan, level: int) -> set[tuple[int, int, str]]:
     return walls
 
 
+#: Cells kept clear around a doorway: the threshold cell itself, the cell the
+#: door opens into, and the cell on the far side. A door needs somewhere to
+#: swing and somewhere to stand while it does.
+DOOR_CLEARANCE = 1
+
+#: Cells kept clear around the foot and head of a stair, for the same reason.
+STAIR_CLEARANCE = 1
+
+#: How far a prop is pushed off the cell centre toward its wall, in tiles.
+#: **Hand-built interiors put 0.1% of props on a cell centre**
+#: (`docs/interior-slabs.md`, decoded from 2,382 community props) while this
+#: pass put 100% of them there -- which is most of why our furniture read as
+#: debris dropped in a grid rather than as a furnished room.
+WALL_SET_BACK = 0.32
+
+#: Share of props laid on an exact quarter turn. Measured at 84% in the
+#: community slabs; the remainder are angled, which is what stops a room
+#: looking like a showroom.
+QUARTER_TURN_SHARE = 0.84
+
+
+def _door_keepout(floorplan, level: int) -> set[tuple[int, int]]:
+    """Cells no prop may stand on, because a door or a stair uses them.
+
+    A chair in a doorway is not dressing, it is a blocked door -- and on a
+    board nobody can move it, because a slab has no physics. This is the one
+    rule in the pass that is about *play* rather than about looks.
+
+    Both sides of the opening are taken: the door's own cell and the cell it
+    swings into, plus a ring of :data:`DOOR_CLEARANCE` around each.
+    """
+    out: set[tuple[int, int]] = set()
+
+    def ring(x: int, z: int, r: int) -> None:
+        for dz in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                out.add((x + dx, z + dz))
+
+    for door in floorplan.doors:
+        if door.level != level:
+            continue
+        dx, dz = next((a, c) for sd, a, c in SIDE_OFFSETS if sd == door.side)
+        ring(door.x, door.z, DOOR_CLEARANCE)
+        ring(door.x + dx, door.z + dz, DOOR_CLEARANCE)
+
+    for stair in floorplan.stairs:
+        if getattr(stair, "level", level) != level:
+            continue
+        ring(stair.x, stair.z, STAIR_CLEARANCE)
+    return out
+
+
 def _dress(b: Builder, floorplan, level: int, y: float, density: float) -> None:
-    """Scatter props inside rooms, keeping the middle of small rooms clear."""
+    """Furnish the rooms on one level, keeping doors and stairs clear.
+
+    Three things here are measured rather than chosen, all from
+    `docs/interior-slabs.md`, which decoded 2,382 interior-kit props out of
+    published community slabs:
+
+    * **props sit against walls, not on cell centres** -- 0.1% of hand-placed
+      props are centred and this pass used to centre every one of them;
+    * **84% are on an exact quarter turn**, against our uniform draw over all
+      24 steps, which is what made a room read as scattered rubble;
+    * **a prop is often bigger than its cell** -- 67% of the `Furniture` kit is
+      -- so one must be checked against what is already there rather than
+      assumed to fit.
+
+    The fourth rule is not from the slabs but from play: **nothing stands in a
+    doorway or on a stair.** A slab has no physics, so a chair dropped in a
+    door is a door that does not open, for the whole session.
+    """
+    keepout = _door_keepout(floorplan, level)
+    scatter = Scatter(b)
+
     for room in floorplan.rooms_on(level):
-        category = _PROP_CATEGORY.get(room.purpose, _PROP_CATEGORY_BY_KIND.get(floorplan.kind, "house"))
-        cells = [(tx, tz) for tx, tz in room.rect.tiles()]
+        category = _PROP_CATEGORY.get(
+            room.purpose, _PROP_CATEGORY_BY_KIND.get(floorplan.kind, "house"))
+        cells = [c for c in room.rect.tiles() if c not in keepout]
         if not cells:
             continue
-        count = max(1, int(len(cells) * density))
-        # Prefer cells against a wall so the floor stays playable.
-        edge_cells = [
-            (tx, tz) for tx, tz in cells
-            if tx in (room.rect.x, room.rect.x2 - 1) or tz in (room.rect.z, room.rect.z2 - 1)
-        ] or cells
-        b.rng.shuffle(edge_cells)
-        for tx, tz in edge_cells[:count]:
-            b.prop(category, tx + 0.5, tz + 0.5, y)
+
+        # Against a wall, so the middle of the room stays walkable -- and so
+        # the set-back below has a wall to be set back against.
+        x0, z0, x1, z1 = room.rect.x, room.rect.z, room.rect.x2 - 1, room.rect.z2 - 1
+        edge = [(tx, tz) for tx, tz in cells
+                if tx in (x0, x1) or tz in (z0, z1)] or cells
+        b.rng.shuffle(edge)
+
+        for tx, tz in edge[:max(1, int(len(cells) * density))]:
+            asset = b.palette.prop(category, b.rng)
+            if asset is None:
+                continue
+            # Which wall this cell is against decides which way the piece
+            # faces and which way it is pushed. A cell on two walls is a
+            # corner; take the first, so the piece stands along one of them
+            # rather than diagonally across the angle.
+            if tz == z0:
+                rot, ox, oz = ROT_S, 0.0, -WALL_SET_BACK
+            elif tz == z1:
+                rot, ox, oz = ROT_N, 0.0, WALL_SET_BACK
+            elif tx == x0:
+                rot, ox, oz = ROT_E, -WALL_SET_BACK, 0.0
+            else:
+                rot, ox, oz = ROT_W, WALL_SET_BACK, 0.0
+
+            if b.rng.random() > QUARTER_TURN_SHARE:
+                rot = (rot + b.rng.choice((-1, 1))) % 24
+
+            cx, cz = tx + 0.5 + ox, tz + 0.5 + oz
+            # A prop wider than its cell has to be checked, not assumed: the
+            # Scatter is the same collision bookkeeping the outdoor scatter
+            # uses, and TaleSpire silently drops a prop that overlaps one
+            # already placed.
+            if not scatter.one(asset, cx, cz, y, rot):
+                continue
 
 
 _PROP_CATEGORY: dict[str, str] = {

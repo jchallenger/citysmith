@@ -206,10 +206,10 @@
     {
       "id": "furnish",
       "what": "Furnish interiors the way hand-builders do",
-      "state": "open",
+      "state": "done",
       "doc": "docs/interior-slabs.md",
-      "evidence": "citysmith.build.furnish",
-      "note": "0.1% of hand-placed props sit on a cell centre; we place 100% centred.",
+      "evidence": "citysmith.build._door_keepout",
+      "note": "Doors and stairs kept clear; props set back off cell centres (0% vs the old 100%) and 84% on quarter turns, matching the community measurements in docs/interior-slabs.md.",
       "tags": [
         "interiors"
       ]
@@ -234,6 +234,39 @@
       "note": "Four flat faces with window bands. It reads as a bell tower now, but has no relief.",
       "tags": [
         "buildings"
+      ]
+    },
+    {
+      "id": "furnish-stacking",
+      "what": "Stack tabletop props on tables and shelves",
+      "state": "open",
+      "doc": "docs/interior-slabs.md",
+      "evidence": "citysmith.build.PROP_STACKING",
+      "note": "Two thirds of hand-placed props sit on furniture, not the floor; Food & Drink is 44/45 smaller than a cell.",
+      "tags": [
+        "interiors"
+      ]
+    },
+    {
+      "id": "furnish-density",
+      "what": "Raise interior prop density toward the measured 0.41-0.66 per cell",
+      "state": "open",
+      "doc": "docs/interior-slabs.md",
+      "evidence": "citysmith.build.INTERIOR_DENSITY",
+      "note": "Ours is 0.12. Raise only after stacking lands, or the floor fills with loose objects.",
+      "tags": [
+        "interiors"
+      ]
+    },
+    {
+      "id": "scene-handover",
+      "what": "Document how a GM gets the party onto a scene board",
+      "state": "open",
+      "doc": "docs/board-strategy.md 5",
+      "evidence": "citysmith.scene.HANDOVER_HELP",
+      "note": "Summon Players To This Board takes everyone in the campaign; the alternative is naming the board and letting players navigate. The step after everything citysmith does, currently unwritten.",
+      "tags": [
+        "interiors"
       ]
     }
   ]
