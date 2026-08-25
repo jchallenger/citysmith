@@ -1809,13 +1809,32 @@ def interior_fabric(palette: Palette, tier: str, variant: int = 0) -> Fabric:
                   floor=floor, window=window, corner=corner)
 
 
+#: Props per *room cell* asked for. Not the same as props per cell delivered:
+#: placement is limited to cells against a wall and the `Scatter` rejects a
+#: piece that will not fit, so this saturates.
+#:
+#: **The target is a third of the published figure, and that is arithmetic
+#: rather than timidity.** `docs/interior-slabs.md` measures hand-built
+#: interiors at 0.41-0.66 props per cell -- but **two thirds of those sit on a
+#: table or a shelf**, not on the floor, and nothing stacks yet. So the
+#: floor-only share to aim at is about 0.14-0.22 per cell.
+#:
+#: Measured on a 15-room tavern (864 room cells): 0.12 delivers 0.07 per cell,
+#: 0.35 delivers 0.19, and 0.50 delivers 0.23 -- the wall cells run out. 0.35
+#: sits inside the band; going higher only packs the walls.
+#:
+#: On a board at 0.12 the rooms read as empty shells with one bench each, which
+#: is what `tools/interior_probe.py` was built to show and did.
+INTERIOR_DENSITY = 0.35
+
+
 def build_interior(
     floorplan,
     palette: Palette,
     *,
     seed: int = 0,
     roof: bool = False,
-    prop_density: float = 0.12,
+    prop_density: float = INTERIOR_DENSITY,
     stack: bool = True,
     tier: str | None = None,
 ) -> Builder:

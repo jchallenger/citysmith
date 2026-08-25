@@ -250,10 +250,10 @@
     {
       "id": "furnish-density",
       "what": "Raise interior prop density toward the measured 0.41-0.66 per cell",
-      "state": "open",
+      "state": "done",
       "doc": "docs/interior-slabs.md",
       "evidence": "citysmith.build.INTERIOR_DENSITY",
-      "note": "Ours is 0.12. Raise only after stacking lands, or the floor fills with loose objects.",
+      "note": "0.12 delivered 0.07 props/cell; 0.35 delivers 0.19. Two thirds of hand-built props sit ON furniture, so the floor-only share of the published 0.41-0.66 is about 0.14-0.22 -- 0.19 is inside it. Reaching the full figure needs furnish-stacking.",
       "tags": [
         "interiors"
       ]
@@ -265,6 +265,17 @@
       "doc": "docs/board-strategy.md 5",
       "evidence": "citysmith.scene.HANDOVER_HELP",
       "note": "Summon Players To This Board takes everyone in the campaign; the alternative is naming the board and letting players navigate. The step after everything citysmith does, currently unwritten.",
+      "tags": [
+        "interiors"
+      ]
+    },
+    {
+      "id": "prop-vocab",
+      "what": "Tighten the interior prop queries: seasonal and joke assets are leaking in",
+      "state": "open",
+      "doc": "docs/interior-slabs.md",
+      "evidence": "citysmith.palette.PROP_EXCLUDE",
+      "note": "Found by looking, not measuring: a temple deals 'Tree, Festive', 'snow flake standing' and 'Altar (Evil)'; a tavern deals 'Pumpkin Pie' and 'throne aberration'; a house deals 'Table Torture 01' and 'Festive turkey 01'. This is CLAUDE.md's own rule about free-text terms over structured filters, unlearned in the prop menus.",
       "tags": [
         "interiors"
       ]
