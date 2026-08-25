@@ -945,3 +945,128 @@ def floating_placements(builder, tm) -> list[str]:
         "left hanging where the edge fringe took the ground away, or beyond "
         "where ground was ever laid"
     ]
+
+
+#: Roles a feature is built from, for :func:`feature_report`. A feature is
+#: "present" when at least one placement uses one of its roles.
+FEATURE_ROLES = {
+    "field walls": ("field_wall", "field_wall_post", "field_wall_tall",
+                    "field_hedge"),
+    "yards": ("yard_fence", "yard_gravel"),
+    "plazas": ("plaza",),
+    "cart streets": ("street_cart",),
+    "lanes": ("lane_earth",),
+}
+
+
+def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
+    """What each designed feature had available, and what it actually built.
+
+    **This check exists because a feature was built, shipped, reviewed and
+    reported on while being entirely absent from every board looked at.**
+    Fences work; both crops chosen to review them were dense town centre, where
+    a field boundary does not go. Twenty-two fence runs on the map, zero in the
+    frame, and nothing said so.
+
+    So the question this answers is not "is the code right" -- the other checks
+    do that -- but "did this build contain the thing you think you are looking
+    at". It compares what the *input* offered against what the *output* used,
+    which is the only way to tell an absent feature from an inapplicable one:
+
+    * offered and built      -> ok
+    * offered and not built  -> **fail**; something is broken or switched off
+    * not offered            -> ok, and say so, because "no fences here" is a
+      fact about the map and not a fact about the code
+
+    Returns ``(level, name, detail)`` triples.
+    """
+    out: list[tuple[str, str, str]] = []
+    by_id = builder.palette.catalog.by_id
+    used: set[str] = {p.asset_id for p in builder.placements}
+
+    def built(roles) -> int:
+        ids = set()
+        for role in roles:
+            asset = builder.palette.resolve(role)
+            if asset is not None:
+                ids.add(asset.id)
+        return len(ids & used)
+
+    # -- field walls ---------------------------------------------------------
+    runs = len(getattr(tm, "fences", ()) or ())
+    on_map = len(getattr(layout, "fences", ()) or ()) if layout is not None else None
+    if runs:
+        level = "pass" if built(FEATURE_ROLES["field walls"]) else "fail"
+        out.append((level, "field walls",
+                    f"{runs} boundary run(s) on this map"
+                    + ("" if level == "pass" else
+                       " but nothing was built from them")))
+    elif on_map:
+        out.append(("pass", "field walls",
+                    f"none here; the layout has {on_map}, all outside this crop"))
+    else:
+        out.append(("pass", "field walls", "none in the source"))
+
+    # -- yards ---------------------------------------------------------------
+    from .build import yard_cells
+
+    yards = yard_cells(tm)
+    total = len({v for row in tm.building for v in row if v})
+    if yards:
+        level = "pass" if built(FEATURE_ROLES["yards"]) else "fail"
+        cells = sum(len(c) for c in yards.values())
+        out.append((level, "yards",
+                    f"{len(yards)} of {total} buildings stand apart enough for a "
+                    f"yard ({cells} cells)"
+                    + ("" if level == "pass" else " but none was surfaced")))
+    else:
+        out.append(("pass", "yards",
+                    f"none; no building of {total} stands clear of its neighbours"))
+
+    # -- quarters ------------------------------------------------------------
+    from .quarters import buildings_of, clustering_lift, quarter_map, shares
+
+    lift = clustering_lift(buildings_of(tm))
+    quarters = quarter_map(tm)
+    if quarters is None:
+        out.append(("pass", "quarters",
+                    f"none; trades cluster at {lift:.2f}x, under the threshold "
+                    "-- this settlement has no quarters to find"))
+    else:
+        share = shares(quarters, tm)
+        thin = [k for k, v in share.items() if v < 0.03 and k != "outskirts"]
+        detail = (f"{lift:.2f}x clustering -> "
+                  + ", ".join(f"{k} {v:.0%}" for k, v in share.items()))
+        out.append(("warn" if thin else "pass", "quarters",
+                    detail + (f"; {', '.join(thin)} too thin to read"
+                              if thin else "")))
+
+    # -- surfaces ------------------------------------------------------------
+    ground = {a.name for a in (by_id(i) for i in used)
+              if a is not None and a.kind == "tile" and a.size_y <= 0.5
+              and a.size_x <= 2.0 and a.size_z <= 2.0}
+    surfaces = sorted(n for n in ground if any(
+        k in n.lower() for k in ("cobble", "grass", "gravel", "stone floor",
+                                 "castle floor", "swamp", "desert ground",
+                                 "floor stone", "tilled")))
+    level = "pass" if len(surfaces) >= 3 else "warn"
+    out.append((level, "surfaces",
+                f"{len(surfaces)} distinct outdoor material(s): "
+                + ", ".join(surfaces[:8])))
+
+    # -- storeys -------------------------------------------------------------
+    from .build import storeys_of
+
+    heights = {}
+    for bid in {v for row in tm.building for v in row if v}:
+        heights[bid] = storeys_of(tm, bid, 3)
+    if heights:
+        counts = {n: sum(1 for v in heights.values() if v == n)
+                  for n in sorted(set(heights.values()))}
+        mean = sum(heights.values()) / len(heights)
+        out.append(("warn" if len(counts) == 1 else "pass", "storeys",
+                    " ".join(f"{n}:{c}" for n, c in counts.items())
+                    + f", mean {mean:.2f}"
+                    + ("  -- every building the same height"
+                       if len(counts) == 1 else "")))
+    return out

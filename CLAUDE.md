@@ -11,10 +11,10 @@ This file is the internal engineering notes. User-facing docs:
 `docs/scenes.md` (one building as a board the party walks into),
 `docs/interior-slabs.md` (what hand-builders do inside a building, measured),
 `docs/district-surfaces.md` (what a town is paved with, and whether
-  "district" is a thing we can key on -- measured, not built),
-`docs/building-massing.md` (storeys, footprints and yards by settlement
-  size -- measured, not built),
-`docs/fencing.md` (field walls: measured, designed, not built yet),
+  "district" is a thing we can key on),
+`docs/building-massing.md` (storeys, footprints and yards by settlement size),
+`docs/fencing.md` (field walls, and why they are not on the grid),
+`tasks.json` (what is designed, what is built, and `citysmith tasks --check`),
 `docs/branching.md` (worktrees, and the policy that closes them),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
 `.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).
@@ -38,6 +38,8 @@ This file is the internal engineering notes. User-facing docs:
 | `interior.py` | One imported building -> a plan, a door side, its occupants. |
 | `scene.py` | A scene: interior + apron + party marks + manifest + brief. |
 | `boards.py` | Which TaleSpire board holds which scene. The only record. |
+| `quarters.py` | Derived town quarters, and the test for whether any exist. |
+| `tasks.py` | Designed vs built. Every claim carries checkable evidence. |
 | `config.py` | `config/scene.json`: defaults in code, the file overlays. |
 | `build.py` | Geometry -> `Placement`s -> slabs. All offsets derived from bounds. |
 | `render.py` | Hand-written SVG for city and floorplan reference maps. |
@@ -1473,6 +1475,60 @@ it is tabletop dressing. Density runs 0.41-0.66 per cell against our 0.12.
 
 Worth knowing before spending a session on it: **an unfurnished interior with
 named rooms is one of the two forms people publish**, not a failure state.
+
+## A feature can be correct and absent, and nothing used to say so
+
+**Fences were built, shipped, reviewed over two sessions and written up while
+being absent from every board looked at.** Both crops chosen to review them
+were dense town centre, where a field boundary does not go: 22 runs on East
+Tradebourne, **zero in either frame**, and no part of the build report
+mentioned it. The code was right, the screenshots were real, and the conclusion
+drawn from them was worthless.
+
+`verify.feature_report` is the answer, and it asks a different question from
+every other check here. The others ask whether the geometry is *correct*; this
+asks whether it is *there*, by comparing what the input offered against what
+the output used:
+
+    offered and built      -> ok
+    offered and not built  -> FAIL, something is broken or switched off
+    not offered            -> ok, and say which, because "no fences in this
+                              crop" is a fact about the map and not about the
+                              code
+
+On the block that fooled us it now prints *"field walls: none here; the layout
+has 21, all outside this crop"*, which is the sentence that was missing.
+`tests/test_features.py` covers all three branches, including the fail.
+
+## What was designed but not built is tracked, and the tracker is checked
+
+**"Still open" is not a state anything verifies.** Yards were designed in
+`docs/building-massing.md`, listed as outstanding in two documents, twice
+described as "waiting on nothing", and deferred by three consecutive passes --
+because a paragraph of prose saying a thing is unbuilt looks exactly like a
+paragraph saying it is built. This file's own doc index called three finished
+designs "not built" at the same time.
+
+`tasks.json` is the record and every entry carries **evidence**: the dotted
+path of the symbol that exists when it is done, or `test:<name>`.
+
+    citysmith tasks              grouped by state
+    citysmith tasks --check      import every claim and report the liars
+
+A task marked `done` whose evidence is missing is a false claim; one marked
+`open` whose evidence already exists is stale bookkeeping. Both are reported,
+and `tests/test_tasks.py::test_the_shipped_backlog_is_honest` runs the same
+check in the suite, so the file cannot quietly drift from the code.
+
+Two things learned seeding it:
+
+- **A test that already exists is not evidence that a bug is fixed.** The
+  rampart task first pointed at `test_the_rampart_is_built_solid_all_the_way_through`,
+  which passes today while `entombed()` still hollows the wall. Evidence has to
+  be something that can only exist *after* the work.
+- **The evidence field is the design review.** Writing one forces you to name
+  what the finished thing is called, which is most of deciding whether the task
+  is real.
 
 ## Testing
 

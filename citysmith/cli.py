@@ -480,7 +480,7 @@ def cmd_build(args) -> int:
     from .layout import Layout
     from .raster import rasterize
     from .build import build_from_tilemap
-    from .verify import (anchor_on_a_whole_tile, check_placements,
+    from .verify import (anchor_on_a_whole_tile, check_placements, feature_report,
                      chunk_anchors, chunk_datum,
                      enclosed_voids, floating_placements,
                      shells_rest_on_their_floors, tile_interpenetration,
@@ -550,6 +550,11 @@ def cmd_build(args) -> int:
         report.add("fail", "placements", problem)
     for problem in enclosed_voids(plan):
         report.add("fail", "chunk coverage", problem)
+    # What each designed feature had available here, and what it built from it.
+    # A feature can be perfectly correct and simply absent from the region you
+    # cropped -- which is not a defect, but it must not be silent either.
+    for level, name, detail in feature_report(builder, tm, layout):
+        report.add(level, name, detail)
     # Registration, datum and anchor all exist to make a *cursor-anchored*
     # paste land right: they check that every chunk presents the same bounding
     # box, reaches the ground, and centres on a whole tile. The multi-slab path
@@ -757,6 +762,39 @@ By hand: new board, camera straight down, paste the slab(s) in the order in
 the paste-order file at one cursor cell, then rename the board. The marks in
 the floor by the door are where the four tokens go -- a slab cannot carry
 creatures, so the minis are dropped on by hand."""
+
+
+def cmd_tasks(args) -> None:
+    from . import tasks as T
+
+    items = T.load()
+    changed = False
+
+    if args.add:
+        task = T.add(items, args.add, doc=args.doc, evidence=args.evidence,
+                     note=args.note, tags=list(args.tags))
+        print(f"added {task.id}")
+        changed = True
+    if args.done:
+        changed |= _restate(items, args.done, "done")
+    if args.state:
+        if args.to not in T.STATES:
+            raise SystemExit(f"--to must be one of {', '.join(T.STATES)}")
+        changed |= _restate(items, args.state, args.to)
+    if changed:
+        print(f"wrote {T.save(items)}")
+
+    print()
+    print(T.report(items, check=args.check), end="")
+
+
+def _restate(items, task_id: str, state: str) -> bool:
+    for t in items:
+        if t.id == task_id:
+            t.state = state
+            print(f"{t.id} -> {state}")
+            return True
+    raise SystemExit(f"no task with id {task_id!r}")
 
 
 def cmd_verify(args) -> int:
@@ -1066,6 +1104,30 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with record, the board name actually used")
     c.add_argument("--config", default=None)
     c.set_defaults(func=cmd_boards)
+
+    c = sub.add_parser(
+        "tasks",
+        help="what was designed, what was built, and the difference",
+        description=(
+            "A design that is never built looks exactly like one that was, "
+            "because both are paragraphs of prose. Every task carries the "
+            "dotted path of the symbol that exists when it is done, and "
+            "--check imports each one: a task marked done whose evidence is "
+            "missing is a lie, and one marked open whose evidence is already "
+            "there is stale bookkeeping."),
+    )
+    c.add_argument("--check", action="store_true",
+                   help="verify every claim against the code")
+    c.add_argument("--add", metavar="TEXT", help="record a new task")
+    c.add_argument("--doc", default="", help="design document it came from")
+    c.add_argument("--evidence", default="",
+                   help="dotted symbol path, or test:<name>, proving it is built")
+    c.add_argument("--note", default="")
+    c.add_argument("--tag", action="append", default=[], dest="tags")
+    c.add_argument("--done", metavar="ID", help="mark a task done")
+    c.add_argument("--state", metavar="ID", help="task to restate with --to")
+    c.add_argument("--to", default="", help="new state for --state")
+    c.set_defaults(func=cmd_tasks)
 
     c = sub.add_parser("verify", help="check a layout plays well, without building it")
     c.add_argument("layout")

@@ -1,0 +1,218 @@
+{
+  "tasks": [
+    {
+      "id": "fence-run",
+      "what": "Run field boundaries along their true bearing",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "citysmith.build._lay_fences",
+      "note": "",
+      "tags": [
+        "fencing"
+      ]
+    },
+    {
+      "id": "fence-clip",
+      "what": "Clip boundary lines to the board before laying props",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "citysmith.raster.clip_polyline",
+      "note": "",
+      "tags": [
+        "fencing"
+      ]
+    },
+    {
+      "id": "fence-collider",
+      "what": "Settle whether TaleSpire drops props on the bounding box",
+      "state": "done",
+      "doc": "docs/fencing.md 11",
+      "evidence": "citysmith.build.FENCE_MODULE",
+      "note": "Answered on a real build: 78 flagged pairs, walls continuous. Oriented collider.",
+      "tags": [
+        "fencing"
+      ]
+    },
+    {
+      "id": "fence-exempt",
+      "what": "Exempt collinear fence panels from the prop-collision check",
+      "state": "open",
+      "doc": "docs/fencing.md 11",
+      "evidence": "citysmith.verify.FENCE_COLLISION_EXEMPT",
+      "note": "The drop test is known now, so the FAIL on every fenced build is a false positive.",
+      "tags": [
+        "fencing",
+        "verify"
+      ]
+    },
+    {
+      "id": "surf-tier1",
+      "what": "Give each road class and surface its own material",
+      "state": "done",
+      "doc": "docs/district-surfaces.md 5",
+      "evidence": "citysmith.build.QUARTER_SURFACE",
+      "note": "",
+      "tags": [
+        "surfaces"
+      ]
+    },
+    {
+      "id": "quarters",
+      "what": "Derive quarters, and only where trades actually cluster",
+      "state": "done",
+      "doc": "docs/district-surfaces.md 3",
+      "evidence": "citysmith.quarters.quarter_map",
+      "note": "",
+      "tags": [
+        "surfaces"
+      ]
+    },
+    {
+      "id": "feature-report",
+      "what": "Report what each designed feature built, per map",
+      "state": "done",
+      "doc": "docs/district-surfaces.md 6",
+      "evidence": "citysmith.verify.feature_report",
+      "note": "",
+      "tags": [
+        "verify"
+      ]
+    },
+    {
+      "id": "surf-flush",
+      "what": "Check no two adjacent ground tiles differ in top height",
+      "state": "open",
+      "doc": "docs/district-surfaces.md 6",
+      "evidence": "citysmith.verify.surfaces_are_flush",
+      "note": "Guards the top-align rule across a wider material set than it has carried before.",
+      "tags": [
+        "surfaces",
+        "verify"
+      ]
+    },
+    {
+      "id": "surf-onetile",
+      "what": "Check no cell holds two ground tiles",
+      "state": "open",
+      "doc": "docs/district-surfaces.md 6",
+      "evidence": "citysmith.verify.one_tile_per_cell",
+      "note": "The surface_probe z-fighting bug, promoted to a check.",
+      "tags": [
+        "surfaces",
+        "verify"
+      ]
+    },
+    {
+      "id": "storeys",
+      "what": "Key storeys on settlement size, kind and position",
+      "state": "done",
+      "doc": "docs/building-massing.md 2",
+      "evidence": "citysmith.layout.storeys_for",
+      "note": "",
+      "tags": [
+        "buildings"
+      ]
+    },
+    {
+      "id": "roof-mix",
+      "what": "Deal roof material per building so a quarter is not monochrome",
+      "state": "done",
+      "doc": "docs/building-massing.md 10",
+      "evidence": "citysmith.build.ROOF_MIX",
+      "note": "",
+      "tags": [
+        "buildings"
+      ]
+    },
+    {
+      "id": "yards",
+      "what": "Surface and fence the yard around a building",
+      "state": "done",
+      "doc": "docs/building-massing.md 12",
+      "evidence": "citysmith.build._lay_yards",
+      "note": "",
+      "tags": [
+        "buildings",
+        "yards"
+      ]
+    },
+    {
+      "id": "yard-clutter",
+      "what": "Cluster yard clutter by the building's trade",
+      "state": "open",
+      "doc": "docs/building-massing.md 4",
+      "evidence": "citysmith.build.YARD_CLUTTER",
+      "note": "TRADE_CLUTTER already does this for street frontage; point it at the yard.",
+      "tags": [
+        "buildings",
+        "yards"
+      ]
+    },
+    {
+      "id": "big-ranges",
+      "what": "Break a large footprint into ranges at different heights",
+      "state": "open",
+      "doc": "docs/building-massing.md 11",
+      "evidence": "citysmith.build.building_ranges",
+      "note": "Needs per-cell storeys; shell, upper floors and roof read one number today. 7% of buildings.",
+      "tags": [
+        "buildings"
+      ]
+    },
+    {
+      "id": "storeys-frontage",
+      "what": "Let frontage vary storeys, so a lane has a low workshop",
+      "state": "open",
+      "doc": "docs/building-massing.md 11",
+      "evidence": "citysmith.build.storeys_by_frontage",
+      "note": "storeys_for runs in the importer and frontage needs the raster.",
+      "tags": [
+        "buildings"
+      ]
+    },
+    {
+      "id": "rampart-solid",
+      "what": "Stop entombed() hollowing the rampart the masonry check samples",
+      "state": "open",
+      "doc": "CLAUDE.md",
+      "evidence": "citysmith.build.ENTOMBED_KEEPS_SAMPLED_COURSE",
+      "note": "Bisected to 8412ce9. 85 of 300 cells read as holed on Forest Church. The existing test passes and does not cover it, so the evidence must be something new.",
+      "tags": [
+        "walls"
+      ]
+    },
+    {
+      "id": "edge-taper",
+      "what": "Taper the map edge so it stops reading as a cropped rectangle",
+      "state": "open",
+      "doc": "CLAUDE.md",
+      "evidence": "citysmith.build.taper_map_edge",
+      "note": "",
+      "tags": [
+        "terrain"
+      ]
+    },
+    {
+      "id": "gate-doors",
+      "what": "Hang a portcullis and an arch in the gate opening",
+      "state": "open",
+      "doc": "CLAUDE.md",
+      "evidence": "citysmith.build._lay_gate_doors",
+      "note": "Passage is cut square now, so the grille finally has jambs.",
+      "tags": [
+        "walls"
+      ]
+    },
+    {
+      "id": "furnish",
+      "what": "Furnish interiors the way hand-builders do",
+      "state": "open",
+      "doc": "docs/interior-slabs.md",
+      "evidence": "citysmith.build.furnish",
+      "note": "0.1% of hand-placed props sit on a cell centre; we place 100% centred.",
+      "tags": [
+        "interiors"
+      ]
+    }
+  ]
+}
