@@ -439,3 +439,36 @@ What the styles are actually asking, in the order worth answering:
   question.
 - **`C-drystone`** — the gate rule, and the only thing to check there is whether
   the gaps land on the road rather than beside it.
+
+
+## 11. Stage 0 is answered: the drop test is NOT on the bounding box
+
+**Settled on a real build, 2026-08-25.** A 40x40 crop of Pelvesthollow
+(`--crop 104,64,40,40`) carrying 80 tiles of `STONE_FENCE` was built and
+pasted. `verify` flagged **78 pairs of consecutive fence panels** as
+box-overlapping -- exactly the pairs §4.1 predicted -- and on the board the
+drystone walls came out as **continuous ribbons**, running across the fields at
+their true bearings with no periodic breaks.
+
+That is the answer. If TaleSpire tested bounding boxes, roughly every second
+panel of every diagonal run would be missing: a 2-tile hole at a 50% duty
+cycle, which is not a subtle effect and is not present. **The game tests the
+oriented collider**, the design in §4 stands as written, and the run stays
+butt-jointed at 2.00.
+
+Two consequences:
+
+- `verify._prop_collisions` is *pessimistic about fences specifically*, and now
+  demonstrably so. It may be taught to exempt collinear same-asset panels --
+  with this as the evidence. Until then a fenced build reports the FAIL and the
+  second line names how many pairs are fence panels, which is what stops it
+  being read as a scatter regression.
+- `tools/fence_spacing_probe.py` was built for this and is kept. It gives the
+  formal per-row count (8 panels per block, five bearings and spacings) where
+  this reading gives the qualitative answer; nothing about the probe is wrong,
+  it simply was not needed once a real map answered the same question.
+
+**And the first look at fences on a board settled the geometry too.** The runs
+follow their surveyed bearings across open field as single continuous walls --
+no stair-step, no comb, no fins. That was the whole argument of §2.2 and §4,
+and it holds.

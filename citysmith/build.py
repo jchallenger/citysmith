@@ -2314,6 +2314,197 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
                 b.add(place_tile(piece, x, z, crown + (r - 1) * rise, rot))
 
 
+#: How far a yard reaches out from its building, in cells. Two is 10 ft --
+#: enough for a wood stack and somewhere to stand, and short enough that two
+#: neighbours 13 ft apart (Pelvesthollow's median gap) share one strip of
+#: worked ground rather than each claiming a separate one.
+YARD_REACH = 2
+
+#: A yard is only worth surfacing if this many of its cells survive. A single
+#: cell of gravel beside a wall is a smudge, not a yard.
+YARD_MIN_CELLS = 3
+
+#: How far a building must stand from its nearest neighbour, in cells, before
+#: the ground round it is *its* yard rather than the gap in a terrace.
+#:
+#: **This gate is the whole of the feature and it was got wrong twice.** With
+#: no gate at all, a 2-cell apron round every building gave 100% of every town
+#: a yard -- 31,927 cells on East Tradebourne, four fifths as much ground as
+#: all its paving, which on a board is a gravelled city. Local built *density*
+#: was tried next and does not discriminate: measured within 6 cells it is 0.25
+#: median on Pelvesthollow against 0.30 on East Tradebourne, because FTG
+#: footprints are all much the same size.
+#:
+#: What does discriminate is the gap to the nearest *other* building, measured
+#: on the raster:
+#:
+#:     gap >= 3 cells    Pelvesthollow 57%   Graybank 59%
+#:                       Forest Church 29%   East Tradebourne 23%
+#:
+#: which is the shape the design argued for -- a hamlet's buildings mostly
+#: stand apart, a city's mostly do not -- arrived at by measurement rather than
+#: by keying on the settlement band, so an outlying farm on a city's edge still
+#: gets its yard.
+YARD_MIN_GAP = 3
+
+#: Which surface a trade works on. Anything not here gets the default.
+YARD_SURFACE = {
+    "smithy": "yard_gravel",
+    "stable": "lane_earth",
+    "warehouse": "yard_gravel",
+    "shed": "lane_earth",
+}
+DEFAULT_YARD_SURFACE = "lane_earth"
+
+
+def yard_cells(tm) -> dict[str, set[tuple[int, int]]]:
+    """Building id -> the open ground worth calling its yard.
+
+    **Only where there is room, which is measured rather than assumed.** On
+    East Tradebourne 94% of buildings touch a neighbour and the 90th-percentile
+    gap is two thirds of a tile, so almost nothing here qualifies and almost
+    nothing is built -- correctly. On Pelvesthollow the median gap is 2.6 tiles
+    and one building in seven stands in over 40 ft of clear ground, which is
+    where yards actually are. `docs/building-massing.md` §4.
+
+    Street and lane cells are excluded: the ground in front of a shop is the
+    street's, not the shop's, and paving it as a yard would eat the way.
+    """
+    from . import raster as R
+
+    apart = _standing_apart(tm)
+    claimed: dict[tuple[int, int], str] = {}
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            bid = tm.building[z][x]
+            if not bid or bid not in apart:
+                continue
+            for dz in range(-YARD_REACH, YARD_REACH + 1):
+                for dx in range(-YARD_REACH, YARD_REACH + 1):
+                    nx, nz = x + dx, z + dz
+                    if not tm.inside(nx, nz):
+                        continue
+                    if tm.building[nz][nx] or tm.surface[nz][nx] != R.GROUND:
+                        continue
+                    # First building to reach a cell keeps it, so two
+                    # neighbours do not both fence the same strip.
+                    claimed.setdefault((nx, nz), bid)
+
+    out: dict[str, set[tuple[int, int]]] = {}
+    for cell, bid in claimed.items():
+        out.setdefault(bid, set()).add(cell)
+    return {b: cs for b, cs in out.items() if len(cs) >= YARD_MIN_CELLS}
+
+
+def _standing_apart(tm) -> set[str]:
+    """Buildings whose nearest neighbour is at least :data:`YARD_MIN_GAP` away.
+
+    One multi-source flood from every building cell at once, each cell carrying
+    the id of the building that reached it; where two floods meet, the sum of
+    their depths is the gap between those buildings.
+    """
+    from collections import deque
+
+    owner: dict[tuple[int, int], str] = {}
+    depth: dict[tuple[int, int], int] = {}
+    queue: deque[tuple[int, int]] = deque()
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            bid = tm.building[z][x]
+            if bid:
+                owner[(x, z)] = bid
+                depth[(x, z)] = 0
+                queue.append((x, z))
+
+    nearest: dict[str, int] = {}
+    while queue:
+        x, z = queue.popleft()
+        if depth[(x, z)] >= YARD_MIN_GAP:
+            continue
+        for dx, dz in NEIGHBOURS:
+            n = (x + dx, z + dz)
+            if not tm.inside(*n):
+                continue
+            if n in owner:
+                if owner[n] != owner[(x, z)]:
+                    gap = depth[(x, z)] + depth[n]
+                    for who in (owner[(x, z)], owner[n]):
+                        nearest[who] = min(nearest.get(who, 99), gap)
+                continue
+            owner[n] = owner[(x, z)]
+            depth[n] = depth[(x, z)] + 1
+            queue.append(n)
+
+    everyone = {v for row in tm.building for v in row if v}
+    return {b for b in everyone if nearest.get(b, 99) >= YARD_MIN_GAP}
+
+
+def _lay_yards(b: Builder, tm, grade: float,
+               taper: dict[tuple[int, int], float | None]) -> int:
+    """Surface the worked ground round a building and fence it off.
+
+    Until now a yard got *props* and nothing else -- `_dress_districts` keeps
+    trees back and drops a log pile in the gap -- so the grass ran right up to
+    every wall and the space between two cottages read as a gap rather than as
+    somebody's yard.
+
+    Two things make it a place: a surface that is not lawn, and an edge.
+
+    **The fence here is laid on cell edges, and that is the opposite of what
+    `_lay_fences` does -- deliberately.** A field boundary is a surveyed line
+    at an arbitrary bearing, and stroking one into cells stair-steps it
+    (`docs/fencing.md` §2.2). A yard boundary is the outline of a rasterised
+    region round a rectangular building: it *is* axis-aligned, so cell edges
+    are its true shape rather than an approximation of one.
+
+    The edge onto a street or a lane is left open. That is the way in, and a
+    yard sealed on all four sides is a courtyard nobody can enter.
+
+    Returns the number of cells surfaced.
+    """
+    from . import raster as R
+
+    fence = b.palette.resolve("yard_fence")
+    yards = yard_cells(tm)
+    if not yards:
+        return 0
+
+    all_yard = {c for cs in yards.values() for c in cs}
+    ways = frozenset({R.STREET, R.PLAZA, R.LANE, R.PIER})
+    laid = 0
+
+    for bid, cells in sorted(yards.items()):
+        role = YARD_SURFACE.get(bid.split("-")[0], DEFAULT_YARD_SURFACE)
+        if b.palette.resolve(role) is None:
+            role = "ground"
+        # **Not tagged with the building id.** `Builder.group` exists so a
+        # building's *shell* is never split across chunks; a yard is terrain,
+        # and tagging it made the landscape chunk claim the building and count
+        # it in `SlabChunk.buildings`, which is the number a missing structure
+        # paste is diagnosed from.
+        for x, z in sorted(cells):
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+            here = grade - drop
+            b.surface(role, x, z, here)
+            b.ground_baseline[(x, z)] = here - b.palette.require(role).size_y
+            laid += 1
+
+            if fence is None:
+                continue
+            for side, dx, dz in SIDE_OFFSETS:
+                nx, nz = x + dx, z + dz
+                if not tm.inside(nx, nz):
+                    continue
+                if (nx, nz) in all_yard or tm.building[nz][nx]:
+                    continue          # inside the yard, or against its building
+                if tm.surface[nz][nx] in ways:
+                    continue          # the way in
+                b.add(place_wall(fence, x, z, side, here), prop=True)
+    return laid
+
+
 def _lay_quays(b: Builder, tm, grade: float,
                taper: dict[tuple[int, int], float | None]) -> None:
     """Rail the edge where paved ground meets water.
@@ -3736,6 +3927,7 @@ def build_from_tilemap(
     taper = edge_taper(tm)
     with b.layer(LANDSCAPE):
         _lay_terrain(b, tm, surface_role, grade=floor.size_y, taper=taper)
+        _lay_yards(b, tm, grade=floor.size_y, taper=taper)
         _lay_quays(b, tm, grade=floor.size_y, taper=taper)
         _lay_bridges(b, tm, grade=floor.size_y, taper=taper)
 

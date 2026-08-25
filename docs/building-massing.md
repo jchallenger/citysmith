@@ -318,3 +318,53 @@ to accept it, to buy a pack, or to vary something that is not material.
 - **Yards**, still, and waiting on nothing now that fencing has landed on
   `main`: surface the clearance ring, bound it with `yard_fence`, and cluster
   the clutter by trade (§4 of the first pass).
+
+
+## 12. Yards, built
+
+§4 designed these and three successive passes deferred them. Built now, and the
+gate took three attempts to get right -- which is the part worth recording.
+
+**What a yard is:** open ground within `YARD_REACH` (2 cells, 10 ft) of a
+building that stands far enough from its neighbours to own it. Surfaced by
+trade -- gravel for a smithy or a warehouse, trodden earth otherwise -- and
+bounded with `yard_fence` timber paling on every edge that does not face a
+street, a lane or its own building. The street edge is left open: that is the
+way in, and a yard sealed on four sides is a courtyard nobody can enter.
+
+**The gate is the whole feature, and two plausible versions were wrong:**
+
+| gate | Pelvesthollow | Forest Church | Graybank | East Tradebourne |
+|---|---|---|---|---|
+| none — a 2-cell apron | 100% | 100% | 100% | **100%**, 31,927 cells |
+| local built density < 0.30 | 77% | 43% | 96% | 52% |
+| **gap to nearest neighbour >= 3 cells** | **57%** | **29%** | **59%** | **23%** |
+
+- **No gate** gives every building in a 991-building city a gravel apron --
+  four fifths as much ground as all its paving. On a board that is a gravelled
+  city, not a town with yards.
+- **Local built density does not discriminate**, and this was the surprise:
+  measured within 6 cells it is 0.25 median on Pelvesthollow against 0.30 on
+  East Tradebourne. FTG footprints are all much the same size, so density is
+  much the same everywhere.
+- **The gap to the nearest *other* building does**, measured on the raster by
+  one multi-source flood: a hamlet's buildings mostly stand apart and a city's
+  mostly do not, which is what §4 argued from the layout polygons and what the
+  artifact confirms.
+
+Keying on the measurement rather than on the settlement band matters: an
+outlying farm on a city's edge still gets its yard, and a tight terrace in a
+village still does not.
+
+**One bug this caught.** The first version tagged yard tiles with
+`Builder.group = bid`. That tag exists so a building's *shell* is never split
+across chunks, and tagging terrain with it made the landscape chunk claim the
+building and count it in `SlabChunk.buildings` -- the number a missing
+structure paste is diagnosed from.
+`test_a_building_straddling_a_chunk_line_stays_in_one_chunk` caught it. A yard
+is terrain and carries no group.
+
+**Read on a board** (`--crop 104,64,40,40` on Pelvesthollow, `review.ps1 360`):
+timber paling round the cottages, worked brown ground inside it against green
+pasture outside, and drystone field walls running away across the fields --
+three different boundary treatments doing three different jobs in one frame.
