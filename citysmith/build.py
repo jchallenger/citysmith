@@ -283,6 +283,67 @@ def storeys_of(tm, bid: str | None, ceiling: int) -> int:
     return min(max(1, tm.floors.get(bid, 1)), ceiling)
 
 
+#: A footprint this many cells or more is built as two ranges rather than one
+#: mass. 45 cells is 1,125 sq ft, which is the same threshold the lot samples
+#: were chosen on; 157 of East Tradebourne's 989 buildings clear it.
+RANGE_MIN_CELLS = 45
+
+#: Where along the long axis the lower range starts, as a fraction. 0.6 makes
+#: the outshut the *shorter* part, which is what an outshut is.
+RANGE_SPLIT = 0.6
+
+#: Cache of per-building range maps, keyed by (id(tm), bid, ceiling).
+_RANGES: dict[tuple[int, str, int], dict[tuple[int, int], int]] = {}
+
+
+def building_ranges(tm, bid: str, ceiling: int) -> dict[tuple[int, int], int]:
+    """Cell -> storey count, splitting a large footprint into two ranges.
+
+    **A big building built as one mass reads as a block, whatever it is made
+    of.** The 11x11 warehouse in `tools/lot_probe.py` came out a three-storey
+    slab-sided box with a flat top -- a tower block on a farm. Nothing about
+    the fabric fixes that; the silhouette is the problem.
+
+    So the far end of a long footprint drops a storey, which gives the mass a
+    step and gives the roof two ridges instead of one pyramid. The roof pass
+    needs no changes at all to do it: `_lay_roofs` already floods connected
+    cells that *share a storey count* into one block, so two heights produce
+    two roofs automatically. That is why this is a small change rather than the
+    refactor `docs/building-massing.md` §11 estimated.
+
+    Only a building over :data:`RANGE_MIN_CELLS` with at least two storeys
+    splits -- a cottage has no range to lose, and one storey has nothing under
+    it to keep.
+    """
+    key = (id(tm), bid, ceiling)
+    hit = _RANGES.get(key)
+    if hit is not None:
+        return hit
+
+    base = storeys_of(tm, bid, ceiling)
+    cells = [(x, z) for z in range(tm.depth) for x in range(tm.width)
+             if tm.building[z][x] == bid]
+    out = {c: base for c in cells}
+    if len(cells) >= RANGE_MIN_CELLS and base >= 2:
+        xs = [c[0] for c in cells]
+        zs = [c[1] for c in cells]
+        along_x = (max(xs) - min(xs)) >= (max(zs) - min(zs))
+        lo, hi = (min(xs), max(xs)) if along_x else (min(zs), max(zs))
+        cut = lo + (hi - lo + 1) * RANGE_SPLIT
+        for c in cells:
+            if (c[0] if along_x else c[1]) >= cut:
+                out[c] = max(1, base - 1)
+    _RANGES[key] = out
+    return out
+
+
+def storeys_at(tm, bid: str | None, x: int, z: int, ceiling: int) -> int:
+    """This *cell's* storey count -- see :func:`building_ranges`."""
+    if not bid:
+        return 0
+    return building_ranges(tm, bid, ceiling).get((x, z), storeys_of(tm, bid, ceiling))
+
+
 def rotated_footprint(asset: Asset, rot: int) -> tuple[float, float]:
     """The asset's ground footprint after ``rot``, as ``(size_x, size_z)``.
 
@@ -2266,11 +2327,22 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
 
     for bid, cells in sorted(by_building.items()):
         b.group = bid
-        base_floors = storeys_of(tm, bid, ceiling)
-        # From base_floors + 1: the building's own ceiling already fills the
-        # gap below its top course, and laying another slab there put 36 decks
-        # inside each other.
-        for level in range(base_floors + 1, base_floors + 1 + TOWER_EXTRA_STOREYS):
+        # The *tallest* shell course under the tower, not the building's
+        # nominal count: a large footprint is built as two ranges
+        # (`building_ranges`), and a tower standing on the lower one would
+        # start above its own walls.
+        base_floors = max(storeys_at(tm, bid, x, z, ceiling) for x, z in cells)
+        # **From base_floors, not base_floors + 1.** The building's top wall
+        # course is level `base_floors - 1`, whose head is at
+        # `top + base_floors * storey_h` -- so starting a course later leaves
+        # exactly one storey of daylight between the nave's eaves and the
+        # tower's base. Measured on Forest Church's temple: the shell tops out
+        # at y=4.5 and the tower's first floor was at y=6.0.
+        #
+        # The old comment blamed the building's own ceiling for filling that
+        # gap. It does not: upper decks run levels 1..floors-1, so the level
+        # this now occupies carries no deck of its own.
+        for level in range(base_floors, base_floors + TOWER_EXTRA_STOREYS):
             y = top + level * storey_h
             for (x, z) in sorted(cells):
                 # Below the course, in the gap the storey pitch leaves for it,
@@ -2284,13 +2356,16 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         # own base put every merlon inside the wall it was supposed to sit on
         # -- the same buried-geometry mistake as the rampart facing, one
         # storey up.
-        top_course = top + (base_floors + TOWER_EXTRA_STOREYS) * storey_h
+        top_course = top + (base_floors + TOWER_EXTRA_STOREYS - 1) * storey_h
         crown = top_course + face.size_y
         rings = _roof_rings(cells)
-        side_piece = b.palette.resolve("roof_side")
-        corner = b.palette.resolve("roof_corner")
-        inner = b.palette.resolve("roof_corner_inner")
-        flat = b.palette.resolve("roof")
+        # **The building's own roof set, not the default one.** These four
+        # were unsuffixed `resolve` calls, which is the thatched baseline --
+        # so a dressed-stone temple got a *thatched* cap inside its stone
+        # battlements while the nave below it was roofed in slate. The kit
+        # rule reaches the tower too.
+        side_piece, corner, inner, flat, _chimney = roof_set(
+            b.palette, tier_of(bid), bid)
         rise = side_piece.size_y if side_piece is not None else 1.0
         # Battlements round the parapet, roof only *inside* them. Doing both
         # on the same cell put a merlon and a roof piece at one height, 20
@@ -2307,9 +2382,10 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
             r = rings[(x, z)]
             fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
                          if rings.get((x + dx, z + dz), -1) < r)
-            piece, rot = _roof_piece(fall, side_piece, corner, flat,
-                                     b.palette.resolve("roof_corner_inner"),
-                                     _is_reflex(rings, x, z, fall))
+            edge_off, corner_off = roof_offsets(side_piece)
+            piece, rot = _roof_piece(fall, side_piece, corner, flat, inner,
+                                     _is_reflex(rings, x, z, fall),
+                                     edge_off, corner_off)
             if piece is not None:
                 b.add(place_tile(piece, x, z, crown + (r - 1) * rise, rot))
 
@@ -2503,6 +2579,66 @@ def _lay_yards(b: Builder, tm, grade: float,
                     continue          # the way in
                 b.add(place_wall(fence, x, z, side, here), prop=True)
     return laid
+
+
+#: What gathers in a yard, by trade, as palette prop categories. A yard with
+#: nothing in it is a fenced field: the first lot probe showed 100-cell
+#: enclosures containing a couple of stray barrels, because the only clutter
+#: pass aimed at the *street frontage* and the yard was never a target.
+#:
+#: `TRADE_CLUTTER` is the model and this is the same idea pointed at the back
+#: of the plot rather than the front of it.
+YARD_CLUTTER = {
+    "smithy": ("smithy", "smithy", "house"),
+    "stable": ("house", "house", "tavern"),
+    "warehouse": ("shop", "shop", "house"),
+    "shed": ("house", "smithy"),
+    "tavern": ("tavern", "tavern", "shop"),
+    "shop": ("shop", "house"),
+    "apothecary": ("shop", "house"),
+    "house": ("house",),
+}
+DEFAULT_YARD_CLUTTER = ("house",)
+
+#: Chance a yard cell gets something standing on it. A yard is worked ground,
+#: not a junkyard; `docs/interior-slabs.md` measures hand-built *interiors* at
+#: 0.41-0.66 props per cell, and outdoors wants far less than that.
+YARD_CLUTTER_RATE = 0.16
+
+#: Kept clear of the building's own wall, so nothing stands in a doorway.
+YARD_CLUTTER_CLEARANCE = 1
+
+
+def _dress_yards(b: Builder, tm, scatter: "Scatter", rng, grade: float,
+                 taper: dict[tuple[int, int], float | None]) -> int:
+    """Put the working life of a trade into its own yard.
+
+    Returns the number of props placed.
+    """
+    yards = yard_cells(tm)
+    if not yards:
+        return 0
+
+    placed = 0
+    for bid, cells in sorted(yards.items()):
+        kinds = YARD_CLUTTER.get(bid.split("-")[0], DEFAULT_YARD_CLUTTER)
+        for x, z in sorted(cells):
+            # A prop against the wall blocks the door it might be standing in.
+            if any(tm.inside(x + dx, z + dz) and tm.building[z + dz][x + dx]
+                   for dx in range(-YARD_CLUTTER_CLEARANCE, YARD_CLUTTER_CLEARANCE + 1)
+                   for dz in range(-YARD_CLUTTER_CLEARANCE, YARD_CLUTTER_CLEARANCE + 1)):
+                continue
+            if rng.random() > YARD_CLUTTER_RATE:
+                continue
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+            category = kinds[rng.randrange(len(kinds))]
+            if b.prop(category, x + 0.5 + rng.uniform(-0.25, 0.25),
+                      z + 0.5 + rng.uniform(-0.25, 0.25),
+                      grade - drop, rng.randrange(24)):
+                placed += 1
+    return placed
 
 
 def _lay_quays(b: Builder, tm, grade: float,
@@ -2817,6 +2953,9 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
     def _floors_at(bid: str) -> int:
         return storeys_of(tm, bid, max_floors)
 
+    def _floors_cell(bid: str, x: int, z: int) -> int:
+        return storeys_at(tm, bid, x, z, max_floors)
+
     # Roof units are connected blocks sharing a storey count, so a terrace
     # gets one roof rather than one per party wall.
     seen: set[tuple[int, int]] = set()
@@ -2826,7 +2965,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             bid = tm.building[z0][x0]
             if not bid or (x0, z0) in seen or (x0, z0) in skip:
                 continue
-            fl = _floors_at(bid)
+            fl = _floors_cell(bid, x0, z0)
             comp: set[tuple[int, int]] = set()
             stack = [(x0, z0)]
             while stack:
@@ -2834,7 +2973,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                 if (x, z) in seen or not (0 <= x < tm.width and 0 <= z < tm.depth):
                     continue
                 nb = tm.building[z][x]
-                if not nb or _floors_at(nb) != fl or (x, z) in skip:
+                if not nb or _floors_cell(nb, x, z) != fl or (x, z) in skip:
                     continue
                 seen.add((x, z)); comp.add((x, z))
                 stack += [(x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1)]
@@ -4109,7 +4248,10 @@ def build_from_tilemap(
                 # carrying one falls back to per-side walls for the ground course
                 # only; the storeys above it still get the corner piece.
                 door_cell = any((x, z, s) in doors for s in exposed)
-                for level in range(floors):
+                # Per cell, not per building: a large footprint is built as two
+                # ranges (`building_ranges`), so its far end stands a storey
+                # lower and the roof pass floods it into its own block.
+                for level in range(storeys_at(tm, bid, x, z, storeys)):
                     y = top + level * storey_h
                     if corner is not None and nook is not None and not (level == 0 and door_cell):
                         b.add(place_tile(nook, x, z, y, WALL_CORNER_ROT[corner]))
@@ -4161,10 +4303,9 @@ def build_from_tilemap(
                 # that shows only through a window.
                 edge = {(x, z) for x, z, _ in tm.perimeter.get(bid, ())}
                 inner = sorted(c for c in cells_xy if c not in edge)
-                for level in range(1, storeys_of(tm, bid, storeys)):
-                    y = top + level * storey_h
-                    for x, z in inner:
-                        b.add(place_tile(upper, x, z, y))
+                for x, z in inner:
+                    for level in range(1, storeys_at(tm, bid, x, z, storeys)):
+                        b.add(place_tile(upper, x, z, top + level * storey_h))
 
     with b.layer(STRUCTURE):
         _build_porches(b, tm, floor.size_y, taper, storey_h, storeys)
@@ -4850,6 +4991,7 @@ def _dress_districts(b: Builder, tm, grade: float,
         b.group = ""
     # Last, so it can see everything already standing and not fight it.
     _dress_seams(b, tm, scatter, rng, grade, taper)
+    _dress_yards(b, tm, scatter, rng, grade, taper)
 
 
 def _build_city_wall(b: Builder, city: City, base_y: float) -> None:

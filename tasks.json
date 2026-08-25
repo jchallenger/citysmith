@@ -139,7 +139,7 @@
     {
       "id": "yard-clutter",
       "what": "Cluster yard clutter by the building's trade",
-      "state": "open",
+      "state": "done",
       "doc": "docs/building-massing.md 4",
       "evidence": "citysmith.build.YARD_CLUTTER",
       "note": "TRADE_CLUTTER already does this for street frontage; point it at the yard.",
@@ -151,7 +151,7 @@
     {
       "id": "big-ranges",
       "what": "Break a large footprint into ranges at different heights",
-      "state": "open",
+      "state": "done",
       "doc": "docs/building-massing.md 11",
       "evidence": "citysmith.build.building_ranges",
       "note": "Needs per-cell storeys; shell, upper floors and roof read one number today. 7% of buildings.",
@@ -212,6 +212,28 @@
       "note": "0.1% of hand-placed props sit on a cell centre; we place 100% centred.",
       "tags": [
         "interiors"
+      ]
+    },
+    {
+      "id": "tower-range",
+      "what": "Handle a tower that spans a range boundary",
+      "state": "open",
+      "doc": "docs/building-massing.md 13",
+      "evidence": "citysmith.build.TOWER_RANGE_AWARE",
+      "note": "base_floors takes the max across tower cells; a tower spanning two ranges leaves a step under one side. Not seen on the five samples.",
+      "tags": [
+        "buildings"
+      ]
+    },
+    {
+      "id": "tower-relief",
+      "what": "Give the civic tower a set-back or string course",
+      "state": "open",
+      "doc": "docs/building-massing.md 13",
+      "evidence": "citysmith.build.TOWER_SETBACK",
+      "note": "Four flat faces with window bands. It reads as a bell tower now, but has no relief.",
+      "tags": [
+        "buildings"
       ]
     }
   ]

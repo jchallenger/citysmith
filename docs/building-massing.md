@@ -368,3 +368,90 @@ is terrain and carries no group.
 timber paling round the cottages, worked brown ground inside it against green
 pasture outside, and drystone field walls running away across the fields --
 three different boundary treatments doing three different jobs in one frame.
+
+## 13. Three iterations on large buildings and their lots
+
+`tools/lot_probe.py` composes several large buildings, each on its own lot,
+onto one board — so a whole iteration is one paste and one `review.ps1 360`
+rather than five of each. Samples are buildings that are both **large**
+(>= 45 raster cells) and **standing apart** (`_standing_apart`, so they own a
+yard): 54 across the four towns qualify, and five shapes were taken.
+
+| sample | building | cells | shape |
+|---|---|---|---|
+| square-warehouse | `warehouse-0692` | 112 | 11x11, the pyramid-roof case |
+| wide-tavern | `tavern-0539` | 90 | 14x7 |
+| long-temple | `temple-0002` | 102 | 6x19, a nave |
+| trade-yard | `apothecary-0037` | 57 | 7x9 |
+| farmhouse | `house-0035` | 57 | 9x7 |
+
+### Iteration 1 — baseline
+
+Two problems, both visible at eye level:
+
+- **A large mass reads as a block whatever it is made of.** One footprint, one
+  storey count, one roof: a slab.
+- **The yards were empty.** 100-cell fenced enclosures containing a couple of
+  stray barrels, because the only clutter pass aimed at the *street frontage*
+  and the back of the plot was never a target.
+
+### Iteration 2 — ranges and yard clutter
+
+**`building_ranges` drops the far 40% of a long footprint by one storey**, and
+it turned out to be a far smaller change than §11 estimated. `_lay_roofs`
+already floods connected cells *that share a storey count* into one roof block,
+so two heights produce two roofs with no change to the roof pass at all — the
+refactor was only the shell and the upper decks reading per cell instead of per
+building. Three of the five samples split (tavern 3/2, temple 2/1, farmhouse
+2/1); the warehouse correctly does not, being utility tier and one storey.
+
+**`YARD_CLUTTER` puts the working life of a trade into its own yard**, keyed on
+kind the way `TRADE_CLUTTER` already keys the frontage, at 0.16 per cell and
+kept one cell clear of the walls so nothing stands in a doorway.
+
+On the board the temple gained a genuine cross-wing — a tall hipped range
+stepping down to a lower nave — where iteration 1 had one continuous ridge.
+
+**But iteration 2 was read wrong**, and the reason is worth more than the
+result. A three-storey block dominated the frame and went down in the notes as
+"the warehouse still reads as a box". It was **a neighbouring building caught
+in the crop window**. The warehouse is one storey and was behaving perfectly.
+A probe that includes what it is not testing is a probe that gets misread,
+which is this project's oldest lesson arriving from a new direction.
+
+### Iteration 3 — isolate the sample, and what that exposed
+
+`lot_probe._isolate` erases every other building from the crop. With the
+sample alone in frame, the tall block turned out to be **the temple's own
+tower**, and measuring the stack found two defects:
+
+| | before | after |
+|---|---|---|
+| tower first wall course | y=6.5 | **y=4.5** |
+| shell wall head | y=4.5 | y=4.5 |
+| tower cap | `Thatched Roof 01` | `Village Roof Side 01` |
+| crown | y=12.5 | y=10.5 |
+
+- **A whole storey of daylight between the nave's eaves and the tower's base.**
+  `_lay_towers` ran `range(base_floors + 1, ...)`, and the comment blamed the
+  building's own ceiling for filling that gap. It does not: upper decks run
+  levels `1..floors-1`, so the level in question carries no deck at all. From
+  `base_floors` the tower now stands on its own walls.
+- **A dressed-stone temple wore a thatched hat.** The tower resolved
+  `roof_side` / `roof_corner` / `roof` unsuffixed — the thatched baseline —
+  while the nave below it was roofed from the building's dealt set. It takes
+  `roof_set(palette, tier_of(bid), bid)` now, and the kit rule reaches the
+  tower. The rotation offsets go with it, which the tower was also missing.
+
+Both are large-building defects that only a large building shows, and neither
+was visible until the sample stood on its own.
+
+### What is still open
+
+- **A tower standing on a lowered range.** `base_floors` now takes the *max*
+  storey count across the tower's cells, which is right when they agree — and
+  they do on all five samples. A tower spanning a range boundary would leave a
+  step under one side. Not seen, not fixed, recorded.
+- **The tower is still slab-sided.** Four flat faces with window bands. It is a
+  bell tower and reads as one at last, but it has no set-back, string course
+  or buttress.
