@@ -10,6 +10,10 @@ This file is the internal engineering notes. User-facing docs:
 `docs/ftg-geojson-import.md` (the second import format, reverse-engineered),
 `docs/scenes.md` (one building as a board the party walks into),
 `docs/interior-slabs.md` (what hand-builders do inside a building, measured),
+`docs/district-surfaces.md` (what a town is paved with, and whether
+  "district" is a thing we can key on -- measured, not built),
+`docs/building-massing.md` (storeys, footprints and yards by settlement
+  size -- measured, not built),
 `docs/fencing.md` (field walls: measured, designed, not built yet),
 `docs/branching.md` (worktrees, and the policy that closes them),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
