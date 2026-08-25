@@ -2650,7 +2650,16 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             if comp:
                 blocks.append((fl, comp))
 
-    sets = {tier: roof_set(b.palette, tier) for tier in ROOF_BY_TIER}
+    # Resolved per building, not once per tier -- see ROOF_MIX. Cached,
+    # because a town is 989 buildings and a palette lookup is not free.
+    _cache: dict[tuple[str, str], tuple] = {}
+
+    def sets_for(bid: str):
+        tier = tier_of(bid)
+        key = (tier, roof_suffix_for(tier, bid))
+        if key not in _cache:
+            _cache[key] = roof_set(b.palette, tier, bid)
+        return _cache[key]
 
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
         b.group = tm.building[min(cells)[1]][min(cells)[0]]
@@ -2659,7 +2668,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         # spanning two tiers takes the first one's -- deliberately, because a
         # roof that changes material mid-slope is worse than one that does not
         # match its neighbour.
-        side, corner, inner, cap, chimney = sets[tier_of(b.group)]
+        side, corner, inner, cap, chimney = sets_for(b.group)
         edge_off, corner_off = roof_offsets(side)
         rise = side.size_y if side is not None else 1.0
         roof_y = base_y + fl * storey_h
@@ -3353,8 +3362,50 @@ ROOF_BY_TIER = {
     "utility": "",
 }
 
+#: How a tier's roofs are actually dealt: (palette suffix, weight), where the
+#: empty suffix is the thatched baseline.
+#:
+#: **A quarter is 98-100% one tier, so a per-tier constant makes every quarter
+#: monochrome by construction.** Measured on East Tradebourne: the craft
+#: quarter is 98% trade, the market 99%, residential 98% common. Tier is keyed
+#: on kind and a quarter *is* a clump of one kind, so the very clustering that
+#: makes a quarter legible guarantees every building inside it is built the
+#: same. On a board that is 19 of 21 buildings in one block under identical
+#: terracotta, which reads as a housing estate rather than as a craft quarter.
+#:
+#: The fabric therefore needs an axis that is not kind. This is the cheapest
+#: one there is: deal the material per building, weighted so the tier still
+#: dominates. A trade street stays visibly tiled and a common street visibly
+#: thatched, but neither is uniform -- which is what a street built over two
+#: centuries looks like.
+#:
+#: Dealt from the building id, so it is stable across rebuilds and independent
+#: of the map seed; two towns that share a building id get the same roof, which
+#: is harmless and keeps `tests/test_determinism.py` meaningful.
+ROOF_MIX: dict[str, tuple[tuple[str, float], ...]] = {
+    "common":  (("", 0.80), ("tile", 0.20)),
+    "trade":   (("tile", 0.70), ("", 0.25), ("slate", 0.05)),
+    "civic":   (("slate", 0.70), ("tile", 0.30)),
+    "utility": (("", 0.90), ("tile", 0.10)),
+}
 
-def roof_set(palette, tier: str):
+
+def roof_suffix_for(tier: str, bid: str) -> str:
+    """Which roof material this particular building gets."""
+    mix = ROOF_MIX.get(tier)
+    if not mix:
+        return ROOF_BY_TIER.get(tier, "")
+    # A stable deal per building rather than a random one: the same town must
+    # rebuild to the same bytes, and `boards.digest_of` depends on it.
+    roll = (zlib.crc32(f"roof:{tier}:{bid}".encode()) % 10_000) / 10_000.0
+    for suffix, weight in mix:
+        if roll < weight:
+            return suffix
+        roll -= weight
+    return mix[-1][0]
+
+
+def roof_set(palette, tier: str, bid: str = ""):
     """The ``(side, corner, inner, cap, chimney)`` a tier is roofed in.
 
     Falls back a piece at a time to the thatched set, so a style that declares
@@ -3362,7 +3413,7 @@ def roof_set(palette, tier: str):
     holes in it -- a missing slope is invisible in the file and a hole on the
     board.
     """
-    suffix = ROOF_BY_TIER.get(tier, "")
+    suffix = roof_suffix_for(tier, bid) if bid else ROOF_BY_TIER.get(tier, "")
     base = ("roof_side", "roof_corner", "roof_corner_inner", "roof",
             "roof_chimney")
     out = []

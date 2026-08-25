@@ -398,12 +398,31 @@ TALL_KINDS = frozenset({"tavern", "guildhall", "temple", "manor", "barracks"})
 #: upper floor is a stable nobody can get a horse into.
 FLAT_KINDS = frozenset({"shed", "stable", "warehouse"})
 
-#: Footprint a building must reach before its size alone argues for height.
-#: **The old threshold was 40 tiles and it selected 92-97% of every town**,
-#: because a median FTG house is 56 -- so it was not selecting anything, and
-#: every settlement came out ~33/33/33 with a mean of 2.0. This is above the
-#: median of all four towns here (56, 57, 65, 66), so it picks a minority.
-BIG_FOOTPRINT_TILES = 80.0
+#: Footprint a building must reach before its size alone argues for height,
+#: as **oriented extent area** -- the units both importers have at the point
+#: they decide, which is before anything is rasterised.
+#:
+#: Two calibrations, and the second is the one that matters.
+#:
+#: The original 40 selected 92-97% of every town, because a median FTG house
+#: is 56 -- so it was not selecting anything and every settlement came out
+#: 33/33/33.
+#:
+#: **A footprint then loses about half of itself between the plan and the
+#: board.** Measured on East Tradebourne: median oriented-extent area 66,
+#: median raster cells 30, ratio 0.48 -- streets hold against footprints,
+#: `_notch_buildings` and `_absorb_fragments` cut them, and the first building
+#: to claim a cell keeps it. So a threshold of 80 read as "28% of the town" on
+#: the plan and "1% of the town" on the artifact. This is the same
+#: plan-versus-artifact trap `CLAUDE.md` records seven times, arriving in the
+#: importer where there is no artifact to read yet.
+#:
+#: 100 sits at about the 93rd percentile on East Tradebourne (p90=93, p95=102)
+#: and above the largest building in Pelvesthollow (72) and all but a couple in
+#: Graybank (p95=69) -- which is correct rather than a miss. FTG exports
+#: near-uniform footprints: a village's biggest building is 1.3x its median, so
+#: "a large building" is a thing a *city* has.
+BIG_FOOTPRINT_TILES = 100.0
 
 
 def settlement_band(building_count: int) -> str:

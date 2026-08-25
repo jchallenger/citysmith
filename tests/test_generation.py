@@ -2220,29 +2220,46 @@ def test_each_roof_kit_gets_its_own_rotation():
     assert turned == (ROOF_EDGE_ROT["n"] + 6) % 24
 
 
-def test_a_tier_is_roofed_in_its_own_material():
+def test_a_tier_is_roofed_mostly_in_its_own_material():
     """Every roof on the map used to be Thatched Roof 01, because _lay_roofs
     resolved the set once for the map rather than once per building -- so the
-    temple was thatched too."""
-    from citysmith.build import build_from_tilemap, roof_set
+    temple was thatched too.
+
+    A tier no longer owns its material *exclusively*: `ROOF_MIX` deals it per
+    building, because tier follows kind and a quarter is a clump of one kind,
+    so a per-tier constant made every quarter monochrome. What must still hold
+    is that the tier **dominates** -- a trade street reads as tiled and a
+    common street as thatched -- and that the three tiers do not collapse onto
+    one material, which is the defect this test was written for.
+    """
+    from collections import Counter
+
+    from citysmith.build import ROOF_MIX, roof_set, roof_suffix_for
     from citysmith.catalog import load_or_build
     from citysmith.palette import MEDIEVAL, Palette
 
     palette = Palette(load_or_build(), MEDIEVAL)
-    sets = {t: roof_set(palette, t) for t in ("civic", "trade", "common")}
-    slopes = {t: s[0].name for t, s in sets.items()}
+    slopes = {t: roof_set(palette, t)[0].name for t in ("civic", "trade", "common")}
     assert len(set(slopes.values())) == 3, f"tiers share a roof: {slopes}"
 
-    for bid, tier in (("temple-0001", "civic"), ("tavern-0001", "trade"),
-                      ("house-0001", "common")):
-        b = build_from_tilemap(_one_building(bid), palette, storeys=2, roofs=True)
-        placed = {p.asset_id for p in b.placements}
-        assert sets[tier][0].id in placed, (
-            f"{bid}: no {slopes[tier]!r} on a {tier} building")
-        for other, s in sets.items():
-            if other != tier:
-                assert s[0].id not in placed, (
-                    f"{bid}: {tier} building roofed in {other}'s slope")
+    for tier, mix in ROOF_MIX.items():
+        dealt = Counter(roof_suffix_for(tier, f"{tier}-{i:04d}") for i in range(400))
+        want, weight = mix[0]
+        got = dealt[want] / sum(dealt.values())
+        assert got > 0.5, f"{tier}: dominant material {want!r} only {got:.0%}"
+        assert abs(got - weight) < 0.08, (
+            f"{tier}: {want!r} dealt {got:.0%} against a weight of {weight:.0%}")
+        assert len(dealt) > 1, f"{tier}: one material only, quarters stay monochrome"
+
+
+def test_a_roof_deal_is_stable_across_rebuilds():
+    """`boards.digest_of` compares decoded placements, so a roof that is dealt
+    differently on a rebuild makes every scene read STALE for no reason."""
+    from citysmith.build import roof_suffix_for
+
+    first = [roof_suffix_for("common", f"house-{i:04d}") for i in range(50)]
+    again = [roof_suffix_for("common", f"house-{i:04d}") for i in range(50)]
+    assert first == again
 
 
 def test_the_ridge_is_capped_not_carried_up_another_course():
@@ -2255,7 +2272,10 @@ def test_the_ridge_is_capped_not_carried_up_another_course():
     from citysmith.palette import MEDIEVAL, Palette
 
     palette = Palette(load_or_build(), MEDIEVAL)
-    side, _, _, cap, _ = roof_set(palette, "common")
+    # The set this particular building is dealt -- ROOF_MIX means "common" no
+    # longer names one material, so asking for the tier's set would look for a
+    # cap that was never laid here.
+    side, _, _, cap, _ = roof_set(palette, "common", "house-0001")
 
     # 3 wide is the case the hand-built correction was made on: the top ring
     # is a single column, so the whole ridge is cap.

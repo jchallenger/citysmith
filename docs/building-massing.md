@@ -195,3 +195,126 @@ be settled that way:
 Deliberately not in scope: footprint shaping for imported towns (§3), which
 would overrule the export, and L-plans for generated cities, which is a
 `city.py` question and a separate pass.
+
+---
+
+# Second pass: floors, layouts and large footprints
+
+Measured after the first pass landed, against East Tradebourne as built.
+
+## 8. Large footprints are not the defect, and the measurement says so
+
+The expectation going in was that a big building would be a big box under a
+pyramid. Measured on the artifact — the raster, not the polygons:
+
+| | |
+|---|---|
+| buildings ≥60 cells | **69 of 989 (7%)** |
+| median box fill of those | **92%** — they are rectangles, not L-plans |
+| sides ≥60 ft | 9 buildings; ≥80 ft, 3 |
+| roof courses, whole town | 2 courses 35%, 3 courses 53%, 4 courses 11%, 5–6 courses 1% |
+| tallest roof | **15 ft**, on two buildings |
+
+`_roof_rings` floods inward from the *real* boundary, so an elongated block
+gets a ridge along its length rather than a pyramid — the 22×6 warehouse
+(110×30 ft) roofs in three courses. Only a near-square footprint pyramids, and
+there are two of those on the map.
+
+And the footprints barely vary in the first place:
+
+| town | p50 | p90 | p95 | max |
+|---|---|---|---|---|
+| Pelvesthollow | 56 | 63 | 64 | **72** |
+| Graybank | 57 | 64 | 69 | 301 |
+| Forest Church | 65 | 123 | 178 | 424 |
+| East Tradebourne | 66 | 93 | 102 | 431 |
+
+**A village's biggest building is 1.3x its median.** FTG exports near-uniform
+footprints, so "design for a large building" is a thing a *city* has and the
+other three towns do not — the same shape as the district finding, arriving
+from a third direction.
+
+**What this did surface is a bug in the first pass.** `BIG_FOOTPRINT_TILES` was
+set to 80 against oriented-extent area, which is what both importers have at
+the point they decide. But a footprint loses about half of itself between the
+plan and the board — median extent area 66, median raster cells 30, **ratio
+0.48** — because streets hold against footprints, `_notch_buildings` and
+`_absorb_fragments` cut them, and the first building to claim a cell keeps it.
+So 80 read as "28% of the town" on the plan and **1% on the artifact**. This is
+the plan-versus-artifact trap `CLAUDE.md` records seven times, arriving in the
+importer where there is no artifact to read yet. Recalibrated to 100, which is
+about the 93rd percentile on East Tradebourne and above every building in
+Pelvesthollow.
+
+## 9. The real defect: a quarter is monochrome by construction
+
+The town is built from almost nothing:
+
+| | |
+|---|---|
+| buildings whose kits are exactly `Rural` + `Tavern` | **894 of 989 (90%)** |
+| tiers | common 707, trade 252, utility 18, civic 12 |
+
+and tier decides the fabric. Measured per quarter, as *building cells*:
+
+| quarter | tier mix |
+|---|---|
+| residential | common **98%** |
+| craft | trade **98%** |
+| market | trade **99%** |
+| docks | utility **100%** |
+| civic | civic **100%** |
+
+**Tier is keyed on kind. A quarter is a clump of one kind. So they are the same
+variable, and every quarter is uniform by construction.** The clustering that
+makes a quarter legible — which is what the surface pass spent its effort
+proving is real — is the identical clustering that guarantees every building
+inside it is built the same way.
+
+On the board that is the craft/market block: 19 of 21 buildings trade tier, 15
+of 21 at three storeys, every roof terracotta, every wall the same dark
+timber-frame. It reads as a housing estate.
+
+## 10. What was done, and what the pack will not allow
+
+**Roof material is dealt per building instead of per tier** (`ROOF_MIX`),
+weighted so the tier still dominates: common 80% thatch / 20% tile, trade 70%
+tile / 25% thatch / 5% slate, civic 70% slate / 30% tile. Dealt from a CRC of
+the building id, so it is stable across rebuilds and independent of the map
+seed — `boards.digest_of` compares decoded placements, and a roof that
+re-deals would make every scene read STALE for nothing.
+
+The block goes from **one roof material to three** — 16 tile, 4 thatch, 1 slate
+across 21 buildings — and at eye level it reads as a street built over two
+centuries rather than an estate. That is the whole of the change and it is the
+cheapest variety available.
+
+`test_a_tier_is_roofed_in_its_own_material` asserted the old exclusive
+invariant and was rewritten rather than deleted: a tier must still *dominate*
+its material and the three tiers must not collapse onto one, which is the
+defect it was written for. A second test pins the deal's stability.
+
+**The wall is where this stops, and it is the pack's fault rather than the
+design's.** `CLAUDE.md` records why trade shares the house's wall: exactly two
+1-cell windows exist in the whole Medieval Fantasy pack, so any tier that wants
+glazing is built from one of two kits. With 90% of buildings on `Rural` +
+`Tavern` there is no third fabric to deal. Worth knowing before anyone spends a
+session trying: the constraint is the asset library, and the honest options are
+to accept it, to buy a pack, or to vary something that is not material.
+
+## 11. Still open
+
+- **Massing.** Every building is a box with a flat facade, whatever its size.
+  Breaking a large footprint into two ranges at different heights would give it
+  two ridges and a step in its silhouette, and it is the strongest anti-box
+  move available — but it needs per-cell storey counts, and the shell, upper
+  floors and roof all read one number per building today (`storeys_of`). That
+  is a real refactor, and on 7% of buildings.
+- **Storeys inside the walls.** The craft block is 15 of 21 at three storeys
+  and has no single-storey building at all. A real street has a low workshop
+  and an outbuilding. `storeys_for` cannot see frontage, because it runs in the
+  importer and frontage needs the raster — so either the decision moves to
+  build time or the importer gets a cheaper proxy.
+- **Yards**, still, and waiting on nothing now that fencing has landed on
+  `main`: surface the clearance ring, bound it with `yard_fence`, and cluster
+  the clutter by trade (§4 of the first pass).
