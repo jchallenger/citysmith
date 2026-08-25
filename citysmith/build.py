@@ -2022,11 +2022,19 @@ DOOR_CLEARANCE = 1
 #: Cells kept clear around the foot and head of a stair, for the same reason.
 STAIR_CLEARANCE = 1
 
-#: How far a prop is pushed off the cell centre toward its wall, in tiles.
+#: The least a prop is pushed off its cell centre, away from the wall it
+#: stands against, in tiles.
+#:
 #: **Hand-built interiors put 0.1% of props on a cell centre**
 #: (`docs/interior-slabs.md`, decoded from 2,382 community props) while this
 #: pass put 100% of them there -- which is most of why our furniture read as
 #: debris dropped in a grid rather than as a furnished room.
+#:
+#: It is a *minimum*, not the distance: the real set-back is half the prop's
+#: own depth perpendicular to the wall, so a chest clears the masonry by as
+#: much as a stool does. A constant cannot do that -- a piece deeper than
+#: twice the constant ends up inside the wall however the sign is written,
+#: and 67% of the `Furniture` kit is wider than a cell.
 WALL_SET_BACK = 0.32
 
 #: Share of props laid on an exact quarter turn. Measured at 84% in the
@@ -2087,6 +2095,12 @@ def _dress(b: Builder, floorplan, level: int, y: float, density: float) -> None:
     """
     keepout = _door_keepout(floorplan, level)
     scatter = Scatter(b)
+    # The wall's own depth, so the set-back is measured from the face a prop
+    # can actually touch rather than from the cell boundary. These happen to
+    # be equal for a 0.5-thick panel in a 1.0 cell, and relying on that
+    # coincidence is how the next kit with thicker walls buries the furniture.
+    partition = b.palette.resolve("wall_interior") or b.palette.resolve("wall")
+    wall_t = min(partition.size_x, partition.size_z) if partition else 0.5
 
     for room in floorplan.rooms_on(level):
         category = _PROP_CATEGORY.get(
@@ -2106,23 +2120,73 @@ def _dress(b: Builder, floorplan, level: int, y: float, density: float) -> None:
             asset = b.palette.prop(category, b.rng)
             if asset is None:
                 continue
-            # Which wall this cell is against decides which way the piece
-            # faces and which way it is pushed. A cell on two walls is a
-            # corner; take the first, so the piece stands along one of them
-            # rather than diagonally across the angle.
+            # Which wall this cell is against decides which way the piece runs
+            # and which way it is pushed. A cell on two walls is a corner; take
+            # the first, so the piece stands along one of them rather than
+            # diagonally across the angle. The rotation puts the prop's long
+            # axis *parallel* to its wall, which is why the perpendicular
+            # clearance below is measured on the other axis.
             if tz == z0:
-                rot, ox, oz = ROT_S, 0.0, -WALL_SET_BACK
+                rot, wall = ROT_S, "n"
             elif tz == z1:
-                rot, ox, oz = ROT_N, 0.0, WALL_SET_BACK
+                rot, wall = ROT_N, "s"
             elif tx == x0:
-                rot, ox, oz = ROT_E, -WALL_SET_BACK, 0.0
+                rot, wall = ROT_E, "w"
             else:
-                rot, ox, oz = ROT_W, WALL_SET_BACK, 0.0
+                rot, wall = ROT_W, "e"
 
             if b.rng.random() > QUARTER_TURN_SHARE:
                 rot = (rot + b.rng.choice((-1, 1))) % 24
 
-            cx, cz = tx + 0.5 + ox, tz + 0.5 + oz
+            # **A wall sits on the cell's own edge, not between cells.** So a
+            # prop on the first row of a room has masonry at its own cell
+            # boundary, and pushing it *toward* that boundary buries it --
+            # which is exactly what the first version of this did, with all
+            # four signs inverted. It is pushed away from the wall, by half
+            # its own depth so that the piece clears rather than its centre.
+            sx, sz = rotated_footprint(asset, rot)
+            span = sz if wall in ("n", "s") else sx
+            # Measured from the wall's inner face: the piece stands against
+            # the masonry, so its near edge lands there and its centre is half
+            # its depth further in. WALL_SET_BACK is the floor, for a piece so
+            # shallow that sitting flush would still read as centred.
+            back = wall_t - 0.5 + max(WALL_SET_BACK, span / 2.0)
+            ox, oz = 0.0, 0.0
+            if wall == "n":
+                oz = back
+            elif wall == "s":
+                oz = -back
+            elif wall == "w":
+                ox = back
+            else:
+                ox = -back
+
+            # Clamped to the **clear floor** -- the room inset by the wall on
+            # every side -- rather than to the room rect. A piece is only ever
+            # set back from the *one* wall its cell is against, so a wide one
+            # standing along the north wall in the first column still reaches
+            # into the west wall, which is a second way to end up inside the
+            # masonry and does not look any different from the first.
+            #
+            # A room too narrow to hold the piece between two walls gets it
+            # centred: there is no honest answer there, and centred is the one
+            # that is wrong symmetrically.
+            def _fit(want: float, lo: float, hi: float, span_: float) -> float:
+                lo, hi = lo + wall_t + span_ / 2.0, hi - wall_t - span_ / 2.0
+                if lo > hi:
+                    return (lo + hi) / 2.0
+                return min(max(want, lo), hi)
+
+            cx = _fit(tx + 0.5 + ox, float(x0), float(x1 + 1), sx)
+            cz = _fit(tz + 0.5 + oz, float(z0), float(z1 + 1), sz)
+
+            # **Re-checked where it ended up, not where it started.** The
+            # set-back moves a piece off its own cell, so a candidate cell
+            # clear of every door can still put the prop in one. The keepout
+            # is about the square a creature walks through, so it is the
+            # final position that has to satisfy it.
+            if (int(cx), int(cz)) in keepout:
+                continue
             # A prop wider than its cell has to be checked, not assumed: the
             # Scatter is the same collision bookkeeping the outdoor scatter
             # uses, and TaleSpire silently drops a prop that overlaps one

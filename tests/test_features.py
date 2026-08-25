@@ -239,3 +239,53 @@ def test_most_furniture_is_on_a_quarter_turn():
     assert abs(quarter - QUARTER_TURN_SHARE) < 0.15, (
         f"{quarter:.0%} on a quarter turn against a target of "
         f"{QUARTER_TURN_SHARE:.0%}")
+
+
+def test_furniture_stands_inside_the_room_not_in_the_wall():
+    """Nothing may reach into a wall band.
+
+    An interior wall sits on the *cell's own edge*, not between cells, so a
+    prop on a room's first row has masonry at its own boundary. The first
+    version of the set-back pushed it *toward* that boundary on all four sides
+    and buried most of the furniture in the walls.
+
+    "Not on a cell centre" passed throughout that, because a piece 0.32 into
+    the wall is exactly as far off-centre as one 0.32 into the room. The
+    invariant that bites is the prop's **box against the wall's**: a wall is
+    0.5 thick, so the clear floor is the room rect inset by that.
+
+    **Worth knowing what this does and does not catch.** Re-introducing the
+    inverted sign alone no longer fails it, because `_fit` clamps every piece
+    into the clear floor whichever way the offset pointed -- the invariant is
+    structural now, not a consequence of getting a sign right, which is the
+    stronger arrangement. What it catches is any placement that escapes that
+    clamp: a new wall kit thicker than the cell inset, a prop positioned
+    outside `_dress`, or a change to the clamp itself. It also caught the
+    second bug on the way in -- a wide piece set back from the *north* wall
+    while standing in the first column still reached into the *west* one.
+    """
+    from citysmith.build import rotated_footprint
+
+    fp, builder = _furnished()
+    partition = builder.palette.resolve("wall_interior")
+    thick = min(partition.size_x, partition.size_z)
+
+    buried = []
+    for p, asset, (cx, cz) in _prop_cells(builder):
+        room = next((r for r in fp.rooms
+                     if r.rect.x <= cx <= r.rect.x2 and r.rect.z <= cz <= r.rect.z2),
+                    None)
+        if room is None:
+            continue
+        r = room.rect
+        sx, sz = rotated_footprint(asset, p.rot)
+        # A room only one or two cells across has no clear floor once both
+        # walls are taken off it; nothing can satisfy the rule there.
+        if r.w >= 3 and (cx - sx / 2 < r.x + thick - 1e-6
+                         or cx + sx / 2 > r.x2 - thick + 1e-6):
+            buried.append((asset.name, "x", round(cx, 2), (r.x, r.x2)))
+        elif r.d >= 3 and (cz - sz / 2 < r.z + thick - 1e-6
+                           or cz + sz / 2 > r.z2 - thick + 1e-6):
+            buried.append((asset.name, "z", round(cz, 2), (r.z, r.z2)))
+    assert not buried, (
+        f"{len(buried)} prop(s) reaching into a wall band: {buried[:6]}")
