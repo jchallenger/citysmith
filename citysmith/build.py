@@ -2070,7 +2070,7 @@ def _bed_role(b: "Builder", preferred: str, fallback: str) -> str:
     return preferred if b.palette.resolve(preferred) is not None else fallback
 
 
-def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
+def _lay_terrain(b: Builder, tm, surface_role, grade: float,
                  taper: dict[tuple[int, int], float | None]) -> None:
     """Lay the ground plane, preferring 2x2 tiles over 1x1 where it can.
 
@@ -2194,7 +2194,7 @@ def _lay_terrain(b: Builder, tm, surface_roles: dict[str, str], grade: float,
                     _fill_water(b, water_tile, x, z,
                                 here - WATER_SURFACE_DROP, bed)
                 continue
-            role = surface_roles.get(s, ground_role)
+            role = surface_role(s, x, z)
             if (x, z) in bank and b.palette.resolve("field_1x1") is not None:
                 role = "field_1x1"          # shingle shore
             b.surface(role, x, z, here)
@@ -3574,6 +3574,31 @@ def tier_of(bid: str | None) -> str:
     return "common"
 
 
+#: What each quarter paves its LANES with. Lanes only, and that is a finding
+#: rather than a simplification.
+#:
+#: The first version repainted open ground too, so a craft quarter's grass
+#: became gravel. On the board (`out/flyby/blockq-eye.jpg`) that is a bald,
+#: hard-edged sandy patch in a lawn with pine trees growing out of it -- the
+#: override has no shape of its own, so it cuts an arbitrary blob wherever the
+#: influence field happens to fall. A lane already has a shape somebody laid,
+#: so repainting one reads as a decision; repainting open country reads as a
+#: texture bug.
+#:
+#: A main road is left alone for the same kind of reason: it runs *between*
+#: quarters and belongs to the town, so changing its surface at a boundary
+#: claims a change the road does not have.
+#:
+#: A quarter with no entry keeps the town's own surfaces, which is what
+#: `residential` does -- it is the default, so it should look like the default.
+QUARTER_SURFACE: dict[str, str] = {
+    "craft": "yard_gravel",
+    "market": "plaza",
+    "civic": "plaza",
+    "docks": "yard_gravel",
+}
+
+
 def build_from_tilemap(
     tm,
     palette: Palette,
@@ -3582,6 +3607,8 @@ def build_from_tilemap(
     roofs: bool = True,
     wall_tiles: float = TOWN_WALL_TILES,
     seed: int = 0,
+    layout=None,
+    quarters: bool = True,
     fence_style: str = DEFAULT_FENCE_STYLE,
 ) -> Builder:
     """Build a TaleSpire city board from a rasterised :class:`~citysmith.raster.TileMap`.
@@ -3605,25 +3632,59 @@ def build_from_tilemap(
 
     # Surfaces map to roles, not assets, so the 2x2 pass can swap in a block
     # tile for the same surface where one exists.
-    surface_roles = {
+    #
+    # **Keyed on the road's class as well as the surface**, because the raster
+    # already tells main from cart from lane and all three used to arrive as
+    # one cobble. Six distinctions, three materials, and `lane`, `gravel` and
+    # `field_1x1` all resolving to the same asset -- see
+    # `docs/district-surfaces.md` §1.
+    base_roles = {
         R.GROUND: "ground",
         # NOTE: R.FIELD maps to the 1x1 fallback here, not the 2x2 "field"
         # block -- pass 2 of _lay_terrain lays one asset per leftover cell,
         # and dropping the 2x2 Tilled Earth on a 1x1 leftover overhangs its
         # neighbours (the jumbled field fringes the design review caught).
-        R.FIELD: "field_1x1",
+        R.FIELD: "field_edge",
         R.STREET: "street",
-        R.PLAZA: "street",
+        R.PLAZA: "plaza",
         # A lane is trodden earth, not laid cobble -- that is the whole point
-        # of distinguishing it from the street it opens off.
-        R.LANE: "lane",
+        # of distinguishing it from the street it opens off. It used to be
+        # `lane`, which is the same gravel the field edge was built from.
+        R.LANE: "lane_earth",
         # R.PIER is deliberately absent: a plank is water with a deck on it,
         # and both halves are laid by name rather than as a surface.
         R.FLOOR: "floor",
     }
+
+    # Quarters, where the town has any. `quarter_map` measures the clustering
+    # first and returns None on a settlement whose kinds do not cluster --
+    # which is most of them, and is the correct answer rather than a
+    # degradation. See `citysmith/quarters.py`.
+    quarter_at = None
+    if quarters:
+        from .quarters import quarter_map
+        quarter_at = quarter_map(tm)
+
+    def surface_role(surface: str, x: int, z: int) -> str:
+        """Which role paves this cell."""
+        role = base_roles.get(surface, "ground")
+
+        # A cart street is humbler than a through road, and the class is the
+        # only place that distinction has ever been recorded.
+        if surface == R.STREET and tm.street_class[z][x] == R.CART_ROAD:
+            if palette.resolve("street_cart") is not None:
+                role = "street_cart"
+
+        # A quarter repaints its lanes, and nothing else. See QUARTER_SURFACE.
+        if quarter_at is not None and surface == R.LANE:
+            override = QUARTER_SURFACE.get(quarter_at.get((x, z)))
+            if override and palette.resolve(override) is not None:
+                role = override
+        return role
+
     taper = edge_taper(tm)
     with b.layer(LANDSCAPE):
-        _lay_terrain(b, tm, surface_roles, grade=floor.size_y, taper=taper)
+        _lay_terrain(b, tm, surface_role, grade=floor.size_y, taper=taper)
         _lay_quays(b, tm, grade=floor.size_y, taper=taper)
         _lay_bridges(b, tm, grade=floor.size_y, taper=taper)
 

@@ -501,7 +501,8 @@ def cmd_build(args) -> int:
     palette = _palette(args, catalog, args.style, args.seed)
     builder = build_from_tilemap(
         tm, palette, storeys=args.storeys, roofs=not args.no_roofs, seed=args.seed,
-        fence_style=args.fence_style,
+        fence_style=args.fence_style, layout=layout,
+        quarters=not args.no_quarters,
     )
     plan = builder.chunk_plan(
         max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
@@ -1013,6 +1014,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "over anything, which is what stops a chunk inheriting "
                         "the height of what is under the cursor")
     c.add_argument("--scale", type=int, default=3, help="raster SVG pixels per tile")
+    c.add_argument("--no-quarters", action="store_true",
+                   help="do not vary lane and yard surfaces by derived "
+                        "quarter; the measurement already switches this off "
+                        "on a town whose trades do not cluster")
     c.add_argument("--fence-style", default=build.DEFAULT_FENCE_STYLE,
                    choices=sorted(build.FENCE_STYLES),
                    help="how field boundaries are built; see docs/fencing.md "

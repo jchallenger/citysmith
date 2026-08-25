@@ -43,6 +43,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .layout import settlement_band, storeys_for
 from .layout import (
     TILE_FEET,
     Layout,
@@ -575,17 +576,13 @@ def _assign_buildings(layout: Layout, rings: list[list[Point]], seed: int) -> No
         for c in pool[:quota]:
             kinds[c.index] = kind
 
+    band = settlement_band(len(candidates))
     for c in candidates:
         kind = kinds.get(c.index)
         if kind is None:
             kind = "shed" if c.short < MIN_PLAYABLE_SHORT_SIDE else "house"
 
-        floors = 1
-        if kind != "shed":
-            if c.area >= 40:
-                floors = rng.randint(1, 3)
-            elif c.area >= 20:
-                floors = rng.randint(1, 2)
+        floors = storeys_for(band, kind, c.area, c.inside, rng)
 
         layout.buildings.append(
             LayoutBuilding(

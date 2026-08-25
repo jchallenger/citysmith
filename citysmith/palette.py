@@ -545,6 +545,50 @@ MEDIEVAL = Style(
         "field_hedge": [
             _prop(name=("hedge_piece_01",), **_MED),
         ],
+        # Outdoor surfaces beyond the three the map used to have. Every pick
+        # here was read off a board (`tools/surface_probe.py` under
+        # `review.ps1 360`), because nothing in the catalog says what a tile
+        # looks like and this project has three findings that end that way.
+        #
+        # The raster distinguishes six surfaces and classes every road
+        # main/cart/lane; all of it used to arrive as cobble, gravel, grass --
+        # with `lane`, `gravel` and `field_1x1` resolving to the *same* asset
+        # and `plaza` resolving to nothing at all. See `docs/district-surfaces.md`.
+
+        # A cart street: grey-brown coursed flag, weathered. Humbler than the
+        # through road's setts, which is the distinction the class already
+        # makes and the board never showed.
+        "street_cart": [
+            _tile(name="Castle Ruins floor stone 1x1", **_MED),
+            _tile(name="Castle Ruins Stone Floor 2", **_MED),
+        ],
+        # A market square or a temple forecourt: cream regular flagstone, and
+        # visibly *dressed* rather than laid. This is the one surface a town
+        # spends money on, and 631 cells of East Tradebourne were paved as road.
+        "plaza": [
+            _tile(name="castle floor 1x1", **_MED),
+            _tile(name="Castle Ruins floor stone 1x1", **_MED),
+        ],
+        # A back lane: dark wet brown, and it is not a road surface at all --
+        # it is what a way looks like when nobody has paved it. Reads as earth
+        # trodden to mud, which is what a medieval lane was.
+        "lane_earth": [
+            _tile(name="Swamp floor 1x1", **_MED),
+            _tile(name="gravel_1x1_01", **_MED),
+        ],
+        # The ragged edge of a ploughed field: pale, dry, wind-scoured stubble.
+        # Its own tile at last -- it used to share the lane's gravel, so a field
+        # edge and a track were built from one asset.
+        "field_edge": [
+            _tile(name="Desert Ground Dry 01", **_MED),
+            _tile(name="gravel_1x1_01", **_MED),
+        ],
+        # A craft yard: bright orange coarse pebbles. `gravel_1x1_01` is much
+        # louder than its name suggests, which is wrong for a lane and exactly
+        # right for hard standing outside a forge.
+        "yard_gravel": [
+            _tile(name="gravel_1x1_01", **_MED),
+        ],
         "quay_rail": [
             _tile(name="Harbor Fence 02", **_MED),
             _tile(name="Desert fence low", **_MED),

@@ -72,6 +72,9 @@ COLS = 5
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--catalog", default="catalog.json")
+    ap.add_argument("--names", default=None,
+                    help="comma-separated asset names to probe instead of the "
+                         "standing list, for a focused second look")
     args = ap.parse_args()
 
     catalog = load_or_build(args.catalog)
@@ -82,11 +85,15 @@ def main() -> None:
     tally = byname.get("CobbleStone Floor Small") or grass
     top = grass.size_y
 
-    missing = [n for n, _ in CANDIDATES if n not in byname]
+    candidates = CANDIDATES
+    if args.names:
+        candidates = [(n.strip(), "") for n in args.names.split(",") if n.strip()]
+
+    missing = [n for n, _ in candidates if n not in byname]
     if missing:
         print(f"not in this catalog: {missing}", file=sys.stderr)
 
-    found = [(byname[n], n, why) for n, why in CANDIDATES if n in byname]
+    found = [(byname[n], n, why) for n, why in candidates if n in byname]
     rows = (len(found) + COLS - 1) // COLS
     cell_w = PAD + GAP
     cell_d = PAD + LABEL_GAP + 2 + GAP

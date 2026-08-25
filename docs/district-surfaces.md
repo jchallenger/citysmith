@@ -236,3 +236,50 @@ once:
    East Tradebourne's craft quarter against the same section built flat, both
    through `review.ps1 360`, judged at eye level — because the question "does
    this read as a different part of town" is not answerable from plan.
+
+## 10. Built, and tested on a city block
+
+Tiers 1 and 2 are built, and the storey rule in `docs/building-massing.md` with
+them. Tested on East Tradebourne `--crop 304,288,48,48` -- 21 buildings (13
+smithy, 5 shop, a temple, a tavern), 289 cells of plaza, 331 of lane, and both
+road classes. The block measures 1.39x clustering and comes out **60% market,
+35% craft**, which is the seam it was picked for.
+
+Materials laid on that one block, against two before:
+
+| material | role | cells |
+|---|---|---|
+| `castle floor 1x1` | plaza + market lanes | 426 |
+| `Castle Ruins floor stone 1x1` | cart street | 205 |
+| `gravel_1x1_01` | craft lanes | 194 |
+| `Grass 1x1` / `Grass - Lush` | open ground | 166 / 191 |
+| `CobbleStone Floor Small` | main street | 90 |
+
+**What the board settled:**
+
+- **The market square works, and it is the biggest single win.** 289 cells of
+  dressed cream flagstone, read at eye level with crates and barrels standing on
+  it, is unmistakably a market square. It used to be the same cobble as the road
+  running past it.
+- **The quarter override must be LANES ONLY.** The first version repainted open
+  ground too, so a craft quarter's grass became gravel: on the board that is a
+  bald, hard-edged sandy patch in a lawn with pine trees growing out of it. A
+  lane has a shape somebody laid, so repainting one reads as a decision; open
+  country has no shape, so the override cuts an arbitrary blob and reads as a
+  texture bug. Dropped, and `QUARTER_SURFACE` records why.
+- **A coordinate-space bug the block caught and nothing else would have.**
+  `quarter_map` first measured the `Layout` -- whole-map tiles -- and was then
+  indexed by *cropped* cell coordinates, so on any `--crop` it read the quarter
+  from wherever that cell number landed on the full map, 300 tiles away. It
+  reads `TileMap.building` now, where the id leads with the kind, so the
+  measurement is made in the space it is used in. Same rule as
+  `verify.check_placements`: measure the artifact.
+
+**Still open, and visible in the same shot:** every building in the block is
+dark timber-frame under a terracotta roof, whatever its trade. Thirteen
+smithies and five shops are built identically, so the craft quarter and the
+market street are told apart by their *ground* and by nothing else.
+`CLAUDE.md` explains the constraint -- exactly two 1-cell windows exist in the
+whole Medieval Fantasy pack, so trade deliberately shares the house's wall --
+but with quarters now measurable there is a second axis to hang a fabric on
+that did not exist when that decision was made.

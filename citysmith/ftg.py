@@ -60,6 +60,8 @@ from .layout import (
     centroid,
     oriented_extent,
     point_in_polygon,
+    settlement_band,
+    storeys_for,
 )
 
 #: FTG's own coordinate system: "1 unit = 1 meter", per its export docs.
@@ -527,6 +529,7 @@ def _read_buildings(layout, footprints, T, seed, unmapped) -> None:
     building is. Only ``floors`` is invented, and only from footprint area.
     """
     rng = random.Random(seed)
+    band = settlement_band(len(footprints))
     for index, (ring, props) in enumerate(footprints):
         building_type = str(props.get("buildingType", ""))
         kind = BUILDING_KINDS.get(building_type)
@@ -540,14 +543,11 @@ def _read_buildings(layout, footprints, T, seed, unmapped) -> None:
             kind = "shed"
 
         area = long_side * short_side
-        floors = 1
-        if kind != "shed":
-            if area >= 40:
-                floors = rng.randint(1, 3)
-            elif area >= 20:
-                floors = rng.randint(1, 2)
-
         inside = any(point_in_polygon(w, centroid(tiles)) for w in layout.walls)
+        # Height follows the settlement, the kind and the plot -- not footprint
+        # area alone, which selected 92-97% of every town and gave a hamlet the
+        # same skyline as a city. See `docs/building-massing.md`.
+        floors = storeys_for(band, kind, area, inside, rng)
         layout.buildings.append(
             LayoutBuilding(
                 id=f"{kind}-{index + 1:04d}",

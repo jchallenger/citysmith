@@ -378,3 +378,104 @@ class Layout:
         ]
         layout.areas = [LayoutArea(a["kind"], ring(a["ring"])) for a in data["areas"]]
         return layout
+
+
+#: Settlement size bands, by building count, smallest first. The name is what
+#: the town *is*, and it is the axis height varies on -- see
+#: `docs/building-massing.md`.
+SETTLEMENT_BANDS: tuple[tuple[int, str], ...] = (
+    (60, "hamlet"),
+    (250, "village"),
+    (10**9, "town"),
+)
+
+#: Kinds that earn height wherever they stand: the inn, the hall, the temple.
+#: A hamlet has one or two of these and they are the only things above one
+#: storey in it.
+TALL_KINDS = frozenset({"tavern", "guildhall", "temple", "manor", "barracks"})
+
+#: Kinds that are a single storey whatever the settlement. A stable with an
+#: upper floor is a stable nobody can get a horse into.
+FLAT_KINDS = frozenset({"shed", "stable", "warehouse"})
+
+#: Footprint a building must reach before its size alone argues for height.
+#: **The old threshold was 40 tiles and it selected 92-97% of every town**,
+#: because a median FTG house is 56 -- so it was not selecting anything, and
+#: every settlement came out ~33/33/33 with a mean of 2.0. This is above the
+#: median of all four towns here (56, 57, 65, 66), so it picks a minority.
+BIG_FOOTPRINT_TILES = 80.0
+
+
+def settlement_band(building_count: int) -> str:
+    """What kind of settlement this is, by how many buildings it has."""
+    for limit, name in SETTLEMENT_BANDS:
+        if building_count < limit:
+            return name
+    return SETTLEMENT_BANDS[-1][1]
+
+
+def storeys_for(band: str, kind: str, area: float, inside_walls: bool,
+                rng) -> int:
+    """How many storeys a building has.
+
+    **Floor count used to be `randint(1, 3)` gated on footprint area alone**,
+    duplicated in both importers, and it produced the identical skyline on a
+    35-building hamlet and a 991-building city -- ~33/33/33, mean 2.0
+    everywhere, Pelvesthollow 74% two-or-three storey.
+
+    Height is a function of land value and of what the building is for, so:
+
+    * a **hamlet** is single-storey cottages with a taller inn or hall;
+    * a **village** stacks its trades on the through road;
+    * a **town** stacks inside its walls, where the plot is expensive, and
+      stays low on the outskirts.
+
+    `docs/building-massing.md` has the measurements.
+    """
+    if kind in FLAT_KINDS:
+        return 1
+
+    big = area >= BIG_FOOTPRINT_TILES
+    tall = kind in TALL_KINDS
+
+    if band == "hamlet":
+        # Nothing but the hall stands over one storey. This is the whole of
+        # the complaint that a hamlet read as a town.
+        if tall:
+            return 2
+        return 1
+
+    if band == "village":
+        if tall:
+            return rng.randint(2, 3)
+        if big:
+            return 2
+        return rng.randint(1, 2)
+
+    # A town. Inside the walls the ground is worth building on.
+    if tall:
+        return 3 if inside_walls else 2
+    if inside_walls:
+        return 3 if big else rng.randint(2, 3)
+    return 2 if big else rng.randint(1, 2)
+
+
+def raise_a_landmark(buildings) -> None:
+    """Let the biggest building stand a storey taller when nothing else does.
+
+    Pelvesthollow is 32 houses and 3 stables -- no tavern, no hall, no temple --
+    so :func:`storeys_for` correctly makes every one of them single storey. That
+    is true to the export and it is 35 identical cottages, with nothing for the
+    eye to land on and nothing to steer by.
+
+    Every hamlet has one house bigger than the others. This finds it by
+    footprint and gives it a second storey, which is derived rather than
+    exported and is said so here. It fires only when the settlement is
+    *uniformly* flat, so a town that already has a hall is left alone.
+    """
+    if not buildings or any(b.floors > 1 for b in buildings):
+        return
+    from .ftg import oriented_extent
+    biggest = max(buildings, key=lambda b: (lambda ls: ls[0] * ls[1])(
+        oriented_extent(b.ring)))
+    biggest.floors = 2
