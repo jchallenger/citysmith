@@ -132,20 +132,33 @@ function Get-Client {
   }
 }
 
-function Get-DarkFraction([int]$x0, [int]$y0, [int]$w, [int]$h) {
+# **Measure the GLYPHS, not the plate.** The first cut of these probes counted
+# dark pixels and compared the widget against a control patch of board. That
+# survives a dark board but NOT a dark *screen*: a freshly made board is an
+# empty void, the control saturates at 100% dark, and the difference goes
+# negative however bright the widget is -- so `hudstate` reported `down` at a
+# HUD that was plainly up, and refused to open the board list at all.
+#
+# What separates a HUD from any board, bright or void, is near-white glyph
+# pixels: measured across five real frames, the icon column is 6.7-8.6% light
+# with the HUD up and 0.0% with it down, and the control strip is 0.0% in every
+# state. Same for the list: 2.6-3.2% light with the panel open, 0.0% closed, on
+# a bright board and on a void one. Dark fraction is kept only for reporting.
+function Get-PatchStats([int]$x0, [int]$y0, [int]$w, [int]$h) {
   Add-Type -AssemblyName System.Drawing
   $bmp = New-Object System.Drawing.Bitmap $w,$h
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen($x0, $y0, 0, 0, (New-Object System.Drawing.Size $w,$h))
-  $n = 0; $d = 0
+  $n = 0; $d = 0; $l = 0
   for ($yy = 0; $yy -lt $h; $yy += 3) {
     for ($xx = 0; $xx -lt $w; $xx += 3) {
       $c = $bmp.GetPixel($xx, $yy); $n++
       if ([Math]::Max([Math]::Max($c.R,$c.G),$c.B) -lt 95) { $d++ }
+      if ([Math]::Min([Math]::Min($c.R,$c.G),$c.B) -gt 185) { $l++ }
     }
   }
   $g.Dispose(); $bmp.Dispose()
-  return 100.0 * $d / $n
+  return [pscustomobject]@{ dark = 100.0*$d/$n; light = 100.0*$l/$n }
 }
 
 function Read-Hud {
@@ -157,17 +170,21 @@ function Read-Hud {
   # cannot tell the first two apart, which is exactly the mistake that put two
   # stray clicks on a live board on 2026-08-26.
   #
-  # Same self-calibrating shape as Read-BoardsPanel: the column is a dark plate
-  # of icons at the far left, so measure it against a strip of board on the far
-  # right. Measured: up 81.6 / 81.8, down -0.1 / 0.0.
+  # Measured on the icon column's GLYPHS against a control strip of board, so
+  # it holds on a bright board and on an empty void alike: up 6.7 / 6.7 / 8.6,
+  # down 0.0 / 0.0, control 0.0 in every state. See Get-PatchStats for why the
+  # dark-plate version had to go.
   $cl = Get-Client
   $y = $cl.Y + [int]($cl.H * 0.037)
   $h = [int]($cl.H * 0.167)
-  $column  = Get-DarkFraction ($cl.X + 5) $y 40 $h
-  $control = Get-DarkFraction ($cl.X + $cl.W - 220) $y 40 $h
-  $delta = $column - $control
-  $state = if ($delta -gt 40) { 'up' } elseif ($delta -lt 15) { 'down' } else { 'unknown' }
-  return [pscustomobject]@{ state = $state; delta = $delta; column = $column; control = $control }
+  $column  = Get-PatchStats ($cl.X + 5) $y 40 $h
+  $control = Get-PatchStats ($cl.X + $cl.W - 220) $y 40 $h
+  $delta = $column.light - $control.light
+  $state = if ($column.light -gt 3.0 -and $delta -gt 2.0) { 'up' }
+           elseif ($column.light -lt 1.0) { 'down' }
+           else { 'unknown' }
+  return [pscustomobject]@{ state = $state; delta = $delta
+                            column = $column.light; control = $control.light }
 }
 
 function Read-BoardsPanel {
@@ -179,34 +196,23 @@ function Read-BoardsPanel {
   # this one, which reported OPEN at a closed panel and put a click on the
   # board.
   #
-  # The fix is a control. The panel is anchored LEFT and ends at a hard
-  # vertical edge around x=400, so sample just inside it and just outside it
-  # and compare. A dark board darkens both patches and the DIFFERENCE stays
-  # near zero; only the panel darkens one and not the other. Measured on real
-  # frames: open 77.3 / 84.1 / 84.6, closed -6.9. The band between 15 and 40
-  # is nobody's measurement and returns `unknown` rather than a guess.
-  Add-Type -AssemblyName System.Drawing
+  # The fix is a control AND the right signal. The panel is anchored LEFT and
+  # ends at a hard vertical edge around x=400, so sample row text just inside it
+  # against board just outside. Measured on the LIGHT (glyph) fraction, which is
+  # what survives a void board: open 2.61 / 2.61 / 3.23, closed 0.00 on a bright
+  # board, on a void board and with the HUD down. The band between is nobody's
+  # measurement and returns `unknown` rather than a guess.
   $cl = Get-Client
-  $y = $cl.Y + [int]($cl.H * 0.556)
-  function Dark([int]$x0, [int]$y0) {
-    $bmp = New-Object System.Drawing.Bitmap 90,100
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($x0, $y0, 0, 0, (New-Object System.Drawing.Size 90,100))
-    $n = 0; $d = 0
-    for ($yy = 0; $yy -lt 100; $yy += 3) {
-      for ($xx = 0; $xx -lt 90; $xx += 3) {
-        $c = $bmp.GetPixel($xx, $yy); $n++
-        if ([Math]::Max([Math]::Max($c.R,$c.G),$c.B) -lt 95) { $d++ }
-      }
-    }
-    $g.Dispose(); $bmp.Dispose()
-    return 100.0 * $d / $n
-  }
-  $inside  = Dark ($cl.X + 300) $y
-  $outside = Dark ($cl.X + 430) $y
-  $delta = $inside - $outside
-  $state = if ($delta -gt 40) { 'open' } elseif ($delta -lt 15) { 'closed' } else { 'unknown' }
-  return [pscustomobject]@{ state = $state; delta = $delta; inside = $inside; outside = $outside }
+  $y = $cl.Y + [int]($cl.H * 0.231)
+  $h = [int]($cl.H * 0.565)
+  $in  = Get-PatchStats ($cl.X + 90)  $y 250 $h
+  $out = Get-PatchStats ($cl.X + 430) $y 250 $h
+  $delta = $in.light - $out.light
+  $state = if ($in.light -gt 1.2 -and $delta -gt 1.0) { 'open' }
+           elseif ($in.light -lt 0.5) { 'closed' }
+           else { 'unknown' }
+  return [pscustomobject]@{ state = $state; delta = $delta
+                            inside = $in.light; outside = $out.light }
 }
 
 function Get-TS {
@@ -643,12 +649,12 @@ switch ($Cmd) {
   }
   'hudstate' {
     $h = Read-Hud
-    "hud $($h.state) (column $([int]$h.column)% dark, control " +
+    "hud $($h.state) (column $([math]::Round($h.column,2))% glyph, control " +
     "$([int]$h.control)%, delta $([int]$h.delta))"
   }
   'boardsstate' {
     $st = Read-BoardsPanel
-    "campaign boards $($st.state) (inside $([int]$st.inside)% dark, outside " +
+    "campaign boards $($st.state) (inside $([math]::Round($st.inside,2))% glyph, outside " +
     "$([int]$st.outside)%, delta $([int]$st.delta))"
   }
   'shot'    { & (Join-Path $PSScriptRoot "grab.ps1") -Name $Name }

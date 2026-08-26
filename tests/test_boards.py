@@ -341,8 +341,16 @@ def test_the_board_switcher_reads_state_before_pressing_space():
     # thresholding one patch.
     for fn in ("function Read-Hud", "function Read-BoardsPanel"):
         assert fn in src, f"{fn} is gone; the switcher is blind again"
-    assert src.count("$delta = $column - $control") == 1
-    assert src.count("$delta = $inside - $outside") == 1
+    # Both compare their widget against a control patch rather than
+    # thresholding one patch on its own.
+    assert src.count("$delta = $column.light - $control.light") == 1
+    assert src.count("$delta = $in.light - $out.light") == 1
+    # And both measure GLYPHS, not the dark plate. The dark version survived a
+    # dark board but not a dark *screen*: on a freshly made board the control
+    # saturates at 100% dark, the difference goes negative however bright the
+    # widget is, and `hudstate` reported `down` at a HUD that was plainly up.
+    assert "Get-DarkFraction" not in src, "the dark-plate probe is back"
+    assert src.count("Get-PatchStats") >= 5
 
     # Every probe has an `unknown` verdict. A two-way probe cannot say "I could
     # not see", which is how a bad reading becomes a click.
