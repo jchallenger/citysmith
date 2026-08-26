@@ -34,6 +34,7 @@ param(
   [Parameter(Mandatory=$true)][ValidateSet(
     'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','rename','boards','shot',
     'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','camerastate',
+    'elevplane','elevstate',
     'cutbox','plane','planestate',
     'select','copyout','setclip')]
   [string]$Cmd,
@@ -66,12 +67,12 @@ public class TSIn {
   public static void Chord(byte[] vks,int ms){
     foreach(byte v in vks){
       keybd_event(v,(byte)MapVirtualKey(v,0),0,IntPtr.Zero);
-      System.Threading.Thread.Sleep(30);
+      System.Threading.Thread.Sleep(20);
     }
     System.Threading.Thread.Sleep(ms);
     for(int i=vks.Length-1;i>=0;i--){
       keybd_event(vks[i],(byte)MapVirtualKey(vks[i],0),2,IntPtr.Zero);
-      System.Threading.Thread.Sleep(30);
+      System.Threading.Thread.Sleep(20);
     }
   }
   public const uint LDOWN=0x02, LUP=0x04, MDOWN=0x20, MUP=0x40, RDOWN=0x08, RUP=0x10, WHEEL=0x800;
@@ -94,14 +95,25 @@ $VK = @{
   enter=0x0D; tab=0x09; delete=0x2E; f1=0x70; f2=0x71;
   up=0x26; down=0x28; left=0x25; right=0x27
 }
-function Send-Chord([string]$spec, [int]$ms = 150) {
+# 120 ms, not 150, and not the 40 ms that the measurement allows. TaleSpire
+# runs under a 25 fps cap here, so one frame is ~41 ms, and a key has to be
+# held across at least one frame to be seen at all: swept with
+# `tools/probe_input.ps1`, a 0 ms press registered 0/12 times, 10 ms 2/12,
+# 20 ms 8/12, 30 ms 11/12 and 40 ms 12/12. 120 ms is three frames, which keeps
+# a margin over the edge of the measurement -- a missed Ctrl+V is the most
+# expensive failure this tool has, so this one is deliberately not tuned to
+# the minimum.
+function Send-Chord([string]$spec, [int]$ms = 120) {
   $codes = foreach ($part in $spec.ToLower().Split('+')) {
     if ($VK.ContainsKey($part)) { [byte]$VK[$part] }
     elseif ($part.Length -eq 1) { [byte][char]$part.ToUpper() }
     else { throw "unknown key '$part'" }
   }
   [TSIn]::Chord([byte[]]$codes, $ms)
-  Start-Sleep -Milliseconds 400
+  # Was 400. The screen answers a keypress in 42-55 ms (measured over 10
+  # trials, `probe_input.ps1 latency`), so 150 is still three times the
+  # observed response.
+  Start-Sleep -Milliseconds 150
 }
 
 # Every screen coordinate in here is derived from TaleSpire's client rect, not
@@ -137,18 +149,34 @@ function Focus-TS {
 # drag outruns it and registers as nothing at all. One implementation, three
 # callers (left pan, right pan, middle orbit), so they cannot drift apart.
 function Drag([int]$px,[int]$py,[int]$dx,[int]$dy,[uint32]$down,[uint32]$up,
-              [int]$steps = 60,[int]$ms = 40) {
-  [TSIn]::Move($px,$py); Start-Sleep -Milliseconds 250
+              [int]$steps = 60,[int]$ms = 40,
+              [int]$grab = 250,[int]$pre = 250,[int]$hold = 300,[int]$post = 600) {
+  [TSIn]::Move($px,$py); Start-Sleep -Milliseconds $pre
   [TSIn]::mouse_event($down,0,0,0,[IntPtr]::Zero)
-  Start-Sleep -Milliseconds 250          # let the grab register before moving
+  if ($grab -gt 0) { Start-Sleep -Milliseconds $grab }
   for ($i = 1; $i -le $steps; $i++) {
     [TSIn]::Move($px + [int]($dx*$i/$steps), $py + [int]($dy*$i/$steps))
     Start-Sleep -Milliseconds $ms
   }
-  Start-Sleep -Milliseconds 300          # let it settle before letting go
+  Start-Sleep -Milliseconds $hold
   [TSIn]::mouse_event($up,0,0,0,[IntPtr]::Zero)
-  Start-Sleep -Milliseconds 600
+  Start-Sleep -Milliseconds $post
 }
+
+# The cadence a *camera* drag actually needs, measured rather than guessed.
+# `tools/drag_speed.ps1` rotates by a fixed amount at a range of cadences and
+# compares each result against a 60x40 reference frame: 60x40, 40x25, 30x20,
+# 20x16, 12x16 and 8x10 all land on the identical view, at the 0.47 noise
+# floor, and they do it with the post-press pause removed as well. So the
+# 2.4 s of dragging this file used to spend was buying nothing.
+#
+# CLAUDE.md said "24 x 16 ms outruns the camera and registers as nothing".
+# That is refuted: 20x16 and 8x10 both deliver the full move. Whatever the
+# original failure was, it was not the cadence.
+#
+# 16x12 is set here rather than the fastest that worked, so there is a margin
+# over the measurement instead of sitting on its edge.
+$CAM = @{ steps = 16; ms = 12; grab = 60; pre = 100; hold = 60; post = 200 }
 
 function Press([int]$px,[int]$py,[uint32]$down,[uint32]$up,[int]$ms = -1) {
   if ($ms -lt 0) { $ms = [int]($Hold*1000) }
@@ -253,64 +281,86 @@ switch ($Cmd) {
     "flew $Keys for $Hold s"
   }
   'camera'  {
-    # The vertical track down the right edge is a *camera height* slider, and
-    # it goes far higher than the wheel, whose zoom-out is capped well short of
-    # a 187-tile map. Raising it is how you get a whole quarter of the town in
-    # one frame -- which is what a paste wants, so the chunk being placed and
-    # the chunk it has to line up with are both on screen.
+    # This command was built on a wrong model and there is no quiet way to fix
+    # it, so it refuses rather than doing something plausible.
     #
-    # The handle moves as the height changes, so it is found rather than
-    # assumed: scan the track column for the bright diamond.
-    Focus-TS
-    $cl = Get-Client
-    $tx = $cl.X + 1540
-    Add-Type -AssemblyName System.Drawing
-    $bmp = New-Object System.Drawing.Bitmap 9,700
-    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen(($tx - 4), ($cl.Y + 120), 0, 0, (New-Object System.Drawing.Size 9,700))
-    $bestY = -1; $best = -1
-    for ($y = 0; $y -lt 700; $y++) {
-      $sum = 0
-      for ($x = 0; $x -lt 9; $x++) { $c = $bmp.GetPixel($x,$y); $sum += $c.R + $c.G + $c.B }
-      if ($sum -gt $best) { $best = $sum; $bestY = $y }
-    }
-    $gfx.Dispose(); $bmp.Dispose()
-    if ($bestY -lt 0) { throw "could not find the camera slider handle" }
-    $hy = $cl.Y + 120 + $bestY
-    Drag $tx $hy 0 $DY ([TSIn]::LDOWN) ([TSIn]::LUP) 40 30
-    "camera slider dragged $DY from y=$hy"
+    # It scanned a column at `client.X + 1540` for the brightest pixel and
+    # dragged it, on the belief that the right-hand vertical track is a camera
+    # *height* slider. Two things are wrong with that. The offset is measured
+    # from the LEFT edge while the widget is anchored to the RIGHT border, so
+    # on a 1920-wide window it samples x=1540 -- which in Cutscene Mode is the
+    # blue "Grab Shot" button, rgb(0,114,165). And the track is not a camera
+    # control at all: dragged, it moves the elevation cut plane; and a large
+    # camera height change (Ctrl+scroll) leaves it exactly where it was.
+    #
+    # Camera height is Ctrl+scroll or Ctrl+right-drag: `ts.ps1 nudge -Mode
+    # vertical` with an empty hand, or `ts.ps1 elev`.
+    throw ("ts.ps1 camera is withdrawn: the right-hand track is the ELEVATION " +
+           "cut plane, not a camera height slider, and its column was measured " +
+           "from the wrong window edge. Use 'elevplane' to drive the plane, or " +
+           "'nudge -Mode vertical' / 'elev' to change camera height.")
   }
+  'elevplane' {
+    # Drive the elevation cut plane on the right-hand ruler.
+    #
+    # The ruler is graduated in TILES -- hover its markers and the game names
+    # them: the sliding handle reads "0 TILES" at the bottom, a fixed reticle
+    # beside it reads "0.5 TILES", and the locked green marker at the top of
+    # the track reads "60 TILES". Everything below the plane renders with a
+    # heavy green tint, which is how you can tell at a glance that it is
+    # raised.
+    #
+    # Two things have to be right or this does nothing at all:
+    #
+    #  * **Grab the CHEVRONS, not the diamond on the track.** The blue chevron
+    #    cluster (rgb(28,175,255)) is the handle; the diamond sitting on the
+    #    track line is a fixed 0-tile marker and a press on it goes through to
+    #    the board.
+    #  * **Move with relative mouse motion.** A `SetCursorPos` walk presses the
+    #    handle and never carries it, exactly as with a creature -- see
+    #    `tools/creature_drag.ps1`.
+    #
+    # Negative -DY raises the plane, positive lowers it, in screen pixels.
+    Focus-TS
+    $st = & (Join-Path $PSScriptRoot 'elevstate.ps1') -Json | ConvertFrom-Json
+    $hx = $st.handleX; $hy = $st.handleY
+    [TSIn]::Move($hx,$hy); Start-Sleep -Milliseconds 300
+    [TSIn]::mouse_event([TSIn]::LDOWN,0,0,0,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    $steps = 30
+    for ($i = 1; $i -le $steps; $i++) {
+      [TSIn]::mouse_event(0x0001, 0, [int]($DY/$steps), 0, [IntPtr]::Zero)
+      Start-Sleep -Milliseconds 25
+    }
+    Start-Sleep -Milliseconds 300
+    [TSIn]::mouse_event([TSIn]::LUP,0,0,0,[IntPtr]::Zero)
+    Start-Sleep -Milliseconds 600
+    $after = & (Join-Path $PSScriptRoot 'elevstate.ps1') -Json | ConvertFrom-Json
+    "elevation plane: handle y $hy -> $($after.handleY)  (frac $($st.frac) -> $($after.frac))"
+  }
+  'elevstate' { & (Join-Path $PSScriptRoot 'elevstate.ps1') }
   'camerastate' {
     # Every camera command here is a *relative* move, which is how a session
-    # ends up lost over the void wondering why the map vanished. This reads the
-    # two things the game does display: the height slider's handle position on
-    # its track, and the compass rose. The handle is numeric and comparable
-    # between calls; the compass is saved as a crop to be looked at, because
-    # the game draws the bearing rather than writing it down.
+    # ends up lost over the void wondering why the map vanished. What the game
+    # actually displays is the compass rose, which gives bearing by where N
+    # points and pitch by how squashed the circle is.
+    #
+    # The height-slider reading that used to be printed here is GONE: it was
+    # scanning a left-anchored column that lands on a Cutscene-mode button, and
+    # the widget it thought it was reading is the elevation plane anyway. Use
+    # `elevstate` for that.
+    #
+    # The compass is anchored to the BOTTOM-LEFT of the client, and the crop is
+    # derived from the rect rather than remembered -- the old (490, 660) was
+    # right for a 1600x900 window and lands in open board on a 1920x1080 one.
     Focus-TS
     $cl = Get-Client
-    Add-Type -AssemblyName System.Drawing
-
-    $tx = $cl.X + 1540
-    $bmp = New-Object System.Drawing.Bitmap 9,700
-    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-    $gfx.CopyFromScreen(($tx - 4), ($cl.Y + 120), 0, 0, (New-Object System.Drawing.Size 9,700))
-    $bestY = -1; $best = -1
-    for ($y = 0; $y -lt 700; $y++) {
-      $sum = 0
-      for ($x = 0; $x -lt 9; $x++) { $c = $bmp.GetPixel($x,$y); $sum += $c.R + $c.G + $c.B }
-      if ($sum -gt $best) { $best = $sum; $bestY = $y }
-    }
-    $gfx.Dispose(); $bmp.Dispose()
-
-    # 0 at the top of the track (camera high) to 1 at the bottom (camera low).
-    $frac = [math]::Round($bestY / 700.0, 3)
     $grab = Join-Path $PSScriptRoot "grab.ps1"
-    & $grab -Name "camstate-compass" -X ($cl.X + 490) -Y ($cl.Y + 660) -W 220 -H 190 | Out-Null
-    & $grab -Name "camstate-slider"  -X ($tx - 90)    -Y ($cl.Y + 120) -W 180 -H 700 | Out-Null
-    "camera height: handle at y=$bestY of 700 (frac $frac; 0=high, 1=low)"
-    "compass -> out/flyby/camstate-compass.jpg   slider -> out/flyby/camstate-slider.jpg"
+    & $grab -Name "camstate-compass" -X ($cl.X + 55) -Y ($cl.Y + $cl.H - 175) -W 150 -H 100 | Out-Null
+    "compass -> out/flyby/camstate-compass.jpg  (bearing from where N points, pitch from how flat the circle is)"
+    "elevation plane: run 'ts.ps1 elevstate'"
   }
+
   'cutbox'  {
     # `N` toggles the cut box, which hides everything inside a region so you can
     # look *into* solid geometry rather than at its faces.
@@ -464,14 +514,14 @@ switch ($Cmd) {
     # Middle drag rotates the camera. Reviewing from one angle is how three
     # wrong wall blocks got chosen, so this is not optional dressing.
     Focus-TS
-    Drag $X $Y $DX $DY ([TSIn]::MDOWN) ([TSIn]::MUP) 48 35
+    Drag $X $Y $DX $DY ([TSIn]::MDOWN) ([TSIn]::MUP) $CAM.steps $CAM.ms $CAM.grab $CAM.pre $CAM.hold $CAM.post
     "orbited $DX,$DY"
   }
   'pan'     {
     # Left drag pans. No pre-emptive right-click here: with an empty hand a
     # right-click opens the asset library over the board.
     Focus-TS
-    Drag $X $Y $DX $DY ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Drag $X $Y $DX $DY ([TSIn]::LDOWN) ([TSIn]::LUP) $CAM.steps $CAM.ms $CAM.grab $CAM.pre $CAM.hold $CAM.post
     "panned $DX,$DY"
   }
   'rdrag'   {
@@ -480,7 +530,7 @@ switch ($Cmd) {
     # the slab stays put, which is the same confusion that made `drop` look
     # broken. Clear first.
     Focus-TS
-    Drag $X $Y $DX $DY ([TSIn]::RDOWN) ([TSIn]::RUP)
+    Drag $X $Y $DX $DY ([TSIn]::RDOWN) ([TSIn]::RUP) $CAM.steps $CAM.ms $CAM.grab $CAM.pre $CAM.hold $CAM.post
     "right-dragged $DX,$DY"
   }
   'elev'    {

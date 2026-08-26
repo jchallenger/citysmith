@@ -320,9 +320,11 @@ ts.ps1 hold   -Slab f -X .. -Y ..# Ctrl+V, leaves it in hand, does NOT commit
 ts.ps1 nudge  -Ticks -1 -Mode vertical
 ts.ps1 commit -X .. -Y ..
 ts.ps1 clear                     # right-click TAP; nothing else empties the hand
-ts.ps1 camera -DY -300           # camera height slider; beats the capped wheel
+ts.ps1 elevplane -DY -200        # the right-hand track: ELEVATION cut plane
+ts.ps1 elevstate                 # read it back (it is graduated in tiles)
+ts.ps1 nudge -Mode vertical -Ticks 8   # camera height (Ctrl+scroll); beats the wheel
 ts.ps1 elev   -DY 200            # ctrl+right-drag: the working plane
-ts.ps1 camerastate               # READ the camera back: height + compass
+ts.ps1 camerastate               # READ the camera back: compass rose crop
 ts.ps1 pan / rdrag / orbit / fly / cutbox / shot
 tools/review.ps1 360 -Slab f -Name n
 tools/review.ps1 flyby -Name n

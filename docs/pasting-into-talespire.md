@@ -127,15 +127,16 @@ has **not** been driven — treat it as a lead, not a measurement.
 | Input | Does | Duration matters? |
 |---|---|---|
 | `Ctrl+V` | paste slab into hand | — |
-| left press | commit what is in hand | **hold ~0.2 s** — an instant click is swallowed |
+| left press | commit what is in hand | **hold ~0.2 s** — an instant click is swallowed. The floor is one game frame, ~41 ms; 0.2 s is kept as margin |
 | right-click | clear the hand | **tap ~40 ms** — a ~250 ms hold reads as a drag and the slab stays in hand |
 | left-click | pick up a placed asset | — |
 | `W`/`A`/`S`/`D` | fly the camera | **hold** — velocity ramps; 0.4 s crawls, 3 s crosses a map |
 | `Q` / `E` | rotate the camera (hint bar; not driven) | — |
-| left-drag | pan the camera | **slow** — 60 steps × 40 ms tracks; 24 × 16 ms outruns it and registers as nothing |
+| left-drag | pan the camera | **no** — measured; see the note below the table |
 | middle-drag | rotate camera | — |
 | `Ctrl` + right-drag | set the build **elevation plane** | — |
-| right-hand vertical track | camera **height** slider — goes far higher than the wheel | drag it in steps, not one throw |
+| right-hand vertical track | **elevation cut plane**, graduated in tiles — *not* a camera slider | grab the blue chevrons, and move with relative motion |
+| `Ctrl` + scroll / `Ctrl` + right-drag | move the **camera** vertically (hint bar says so) | — |
 | `B` | toggle build mode | — |
 | `G` | raise a build plane — **a paste snaps to it instead of the ground** | persists across new boards |
 | `N` | cut box — removes a region so the *section* shows | persists across new boards |
@@ -146,11 +147,77 @@ has **not** been driven — treat it as a lead, not a measurement.
 | `F1` | help — a video overlay; it does not screen-capture | — |
 | `Alt+Enter` | toggle windowed / fullscreen | — |
 
+**Duration, measured (2026-08-24).** TaleSpire runs under a 25 fps cap here
+(`TaleSpireSettings.json`, `RefreshRateSettingV0`), so a frame is ~41 ms, and
+that single number explains the whole table. A key swept over twelve trials per
+value registered 0/12 at 0 ms, 2/12 at 10, 8/12 at 20, 11/12 at 30 and **12/12
+at 40** — one frame. The screen answers in 42-55 ms. `tools/probe_input.ps1`
+is the harness.
+
+**Drags do NOT have to be slow, and this document used to say they did.**
+`tools/drag_speed.ps1` performs the same camera rotation at a range of cadences
+and compares each resulting frame against a 60 × 40 reference. 60×40, 40×25,
+30×20, 20×16, 12×16 and 8×10 — 80 ms of dragging against the reference's
+2400 — all produce the identical view, at the noise floor, with or without a
+pause between the press and the first motion. `ts.ps1`'s camera commands now
+use 16×12 and are about 3× faster end to end. The marquee (`select`) and the
+elevation drag keep the old timings, because only the camera orbit was
+measured.
+
+## Creatures
+
+Slabs cannot carry minis (`creatureCount` is always 0), but a mini on the board
+can be driven. Hover one and the hint bar becomes the authority:
+
+| Input over a creature | Does |
+|---|---|
+| left press + **move** + release | pick it up, carry it, drop it |
+| `Alt` + mouse | rotate creature |
+| `Ctrl` + mouse | elevate creature |
+| `Shift` + mouse | teleport creature |
+
+Two things bite here:
+
+- **It is a carry, not a click-place.** The button stays down and the mini
+  follows the cursor with a leash line and a live "N TILES" readout. A press
+  that goes down and up without moving picks the mini up and puts it back where
+  it was, which looks exactly like a dead binding.
+- **`SetCursorPos` will not move it.** The camera tracks pointer position and
+  is happy either way, but a carried creature tracks pointer *motion*, and
+  `SetCursorPos` teleports the pointer without generating any. Same gesture,
+  same delta: the walked version reads **0 TILES** and the mini stays put,
+  while `mouse_event(MOUSEEVENTF_MOVE)` reads **4.0 TILES** and it lands.
+  `tools/creature_drag.ps1` does it properly; `tools/creature_state.py` reads
+  the position back off disk, which is the only way to check without trusting
+  a screenshot.
+
+**Creatures are grey ghosts in build mode and cannot be picked up there.** Leave
+build mode first — and note the top bar's "[B] Build Mode" is a button, not a
+state light. The hint bar is what tells you which mode you are in.
+
+## The three board modes
+
+The icons at the top centre are **Exploration Mode** (footprints), **Turnbased
+Mode** (hourglass) and **Cutscene Mode** (film strip); the active one is orange.
+It is board state and it persists between sessions.
+
+| mode | what appears | carrying a mini |
+|---|---|---|
+| Exploration | dice tray and hotbar | works |
+| Turnbased | PREV / gear / NEXT, cyan ring on the active mini, dice tray | works, plus dashed movement-range rings |
+| Cutscene | the Grab Shot panel | works |
+
+Turnbased Mode is unfinished in this build — its own bottom bar still reads
+"SETUP AN INIATIVE TRACKER AND SOME OTHER DESCRIPTIVE TEXT", typo included — so
+there is no initiative tracker to build a workflow on yet.
+
 Four traps behind that table, each of which cost real time:
 
-- **Zoom-out is capped** well short of a large map. Raising the camera on the
-  right-hand slider is how a whole quarter fits one frame; the wheel cannot do
-  it. To review one district up close, build a `--crop` onto its own board.
+- **Zoom-out is capped** well short of a large map. `Ctrl` + scroll raises the
+  camera far higher than the wheel and is how a whole quarter fits one frame.
+  (This used to say "the right-hand slider"; that track is the elevation cut
+  plane and does not move the camera at all.) To review one district up close,
+  build a `--crop` onto its own board.
 - **`G` and `N` survive making a new board.** A build plane left up makes every
   chunk land a course high with nothing wrong in the file; a cut box left on
   reads as a rectangular hole in the terrain with the trees still standing in
