@@ -55,18 +55,69 @@ def test_a_feature_present_in_the_source_and_absent_from_the_build_fails():
     assert tm.fences, "the fixture needs a fence run to be meaningful"
 
     builder = build_from_tilemap(tm, _palette(), storeys=1)
-    # Strip every fence placement, which is what a broken pass looks like from
-    # the outside: the run is on the tilemap and nothing was built from it.
+    # What a broken pass looks like from the outside: the run is on the
+    # tilemap and `_lay_fences` laid nothing off it. The placements are
+    # stripped too, so the fallback path in `_fences_built` -- used for a
+    # builder with no recorded count -- sees the same thing.
     fence_ids = {a.id for r in ("field_wall", "field_wall_post")
                  for a in (builder.palette.resolve(r),) if a is not None}
-    keep = [i for i, p in enumerate(builder.placements)
-            if p.asset_id not in fence_ids]
-    builder.placements = [builder.placements[i] for i in keep]
+    builder.placements = [p for p in builder.placements
+                          if p.asset_id not in fence_ids]
+    builder.fence_pieces = 0
 
     level, _, detail = next(
         r for r in feature_report(builder, tm, layout) if r[1] == "field walls")
     assert level == "fail", detail
     assert "nothing was built" in detail
+
+
+def test_a_boundary_built_in_any_style_counts_as_built():
+    """A false FAIL, and it was inside `feature_report` itself.
+
+    `FEATURE_ROLES["field walls"]` listed the drystone and hedge roles by
+    hand, so a build run with `--fence-style paling` reported "nothing was
+    built from them" while 782 `Wooden Fence` panels stood on the board --
+    among them the barricade the map was made for. The list of styles and the
+    list of roles to look for were the same fact written twice.
+
+    Every style has to pass, so adding one cannot reintroduce this.
+    """
+    from citysmith.build import FENCE_STYLES
+
+    layout = _town(fences=[[(2.0, 40.0), (55.0, 44.0)]])
+    tm = R.rasterize(layout)
+    assert tm.fences
+
+    for style in FENCE_STYLES:
+        builder = build_from_tilemap(tm, _palette(), storeys=1,
+                                     fence_style=style)
+        assert builder.fence_pieces, f"--fence-style {style} laid nothing"
+        level, _, detail = next(
+            r for r in feature_report(builder, tm, layout)
+            if r[1] == "field walls")
+        assert level == "pass", f"--fence-style {style}: {detail}"
+
+
+def test_garden_fences_are_not_mistaken_for_field_walls():
+    """The opposite error, and the one the second attempt at this shipped.
+
+    The paling style builds boundaries from `yard_fence`; `_lay_yards` builds
+    garden fences from the same role. A check that asks "is a yard_fence on
+    this board" answers yes for a town with gardens and no field walls at
+    all -- so it has to ask the *pass*, not the asset.
+    """
+    layout = _town(fences=[[(2.0, 40.0), (55.0, 44.0)]], spacing=12)
+    tm = R.rasterize(layout)
+    builder = build_from_tilemap(tm, _palette(), storeys=1,
+                                 fence_style="paling")
+    yard = builder.palette.resolve("yard_fence")
+    assert yard is not None
+    assert any(p.asset_id == yard.id for p in builder.placements)
+
+    builder.fence_pieces = 0          # the boundary pass laid nothing...
+    level, _, detail = next(
+        r for r in feature_report(builder, tm, layout) if r[1] == "field walls")
+    assert level == "fail", detail    # ...and the garden fences must not cover for it
 
 
 def test_a_feature_absent_because_the_crop_has_none_does_not_fail():

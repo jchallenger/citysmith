@@ -164,10 +164,19 @@ def _door_cells(tm) -> set[tuple[int, int]]:
 
 
 def _standable(tm, x: int, z: int) -> bool:
-    """Somewhere a person could actually be: open, walkable, not water."""
+    """Somewhere a person could actually be: open, walkable, not water.
+
+    The marsh clause is belt-and-braces and is unreachable today: a fen is
+    not in `R.OPEN`, and `is_walkable` gates on `OPEN`, so the guard above
+    has already refused every wetland cell before this line runs. It is kept
+    because the two facts are declared in different modules -- the day a fen
+    becomes public open space for some routing reason, the villagers should
+    not silently move into it knee-deep in the reeds.
+    """
     if not tm.inside(x, z) or not tm.is_walkable(x, z):
         return False
-    return tm.surface[z][x] != R.WATER and not tm.building[z][x]
+    return (tm.surface[z][x] not in (R.WATER, R.MARSH)
+            and not tm.building[z][x])
 
 
 def posts(tm, layout, *, seed: int = 0, hour: str = "day",

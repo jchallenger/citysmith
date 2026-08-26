@@ -183,7 +183,7 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
     # is not. So a block carrying paving, and its neighbours along the border,
     # keep their ground: the road ends at the edge with shoulders.
     paved = {b for b in border
-             if any(tm.surface[z][x] not in (R.GROUND, R.FIELD)
+             if any(tm.surface[z][x] not in (R.GROUND, R.FIELD, R.MARSH)
                     for (x, z) in cells(*b))}
     sheltered = set(paved)
     for b in paved:
@@ -627,6 +627,16 @@ class Builder:
         #: channel is a feature and must keep disqualifying its chunk.
         self.ground_baseline: dict[tuple[int, int], float] = {}
         self._byid: dict[str, Asset] | None = None
+        #: How many boundary pieces `_lay_fences` actually laid, or None if
+        #: that pass has not run.
+        #:
+        #: **Recorded rather than inferred from asset ids**, for the reason
+        #: `verify._fence_roles` documents at length: the paling style builds
+        #: from `yard_fence`, which `_lay_yards` *also* builds from, so
+        #: "is a yard_fence on this board" cannot answer "was a field
+        #: boundary built". A pass knows what it did; nothing downstream can
+        #: recover it from a finished placement. Same argument as `layer_of`.
+        self.fence_pieces: int | None = None
         #: Which layer each placement belongs to, parallel to ``placements``.
         #: Recorded at ``add`` time because it is a property of the *pass* that
         #: emitted it, and nothing about a finished placement can recover it.
@@ -2270,7 +2280,7 @@ _PROP_CATEGORY_BY_KIND: dict[str, str] = {
 #: Surfaces that can be tiled with a 2x2 asset, and the role that does it.
 #: Surfaces tiled with a 2x2 asset. Parks are painted as GROUND by the
 #: raster (there is no PARK surface), so they tile as ground.
-_BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field"}
+_BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field", "marsh": "marsh_2x2"}
 
 #: How much deeper the bed goes per cell away from the bank, and the most it
 #: is allowed to drop. **TaleSpire's water tile is translucent and tints with
@@ -3495,7 +3505,7 @@ def pick_wall_towers(tm, mass: set[tuple[int, int]], gates: set[tuple[int, int]]
     """
     from . import raster as R
 
-    blocked = {R.STREET, R.LANE, R.PLAZA, R.FLOOR, R.WATER, R.PIER, R.VOID}
+    blocked = {R.STREET, R.LANE, R.PLAZA, R.FLOOR, R.WATER, R.MARSH, R.PIER, R.VOID}
 
     def usable(cell: tuple[int, int]) -> bool:
         x, z = cell
@@ -3711,7 +3721,7 @@ def _lay_wall_stairs(b: Builder, tm, towers, mass, outside, top: float,
         return 0
 
     from . import raster as R
-    blocked = {R.WATER, R.PIER, R.VOID, R.FLOOR}
+    blocked = {R.WATER, R.MARSH, R.PIER, R.VOID, R.FLOOR}
     taken: set[tuple[int, int]] = set()
     side_of = {(dx, dz): s for s, dx, dz in SIDE_OFFSETS}
 
@@ -4376,6 +4386,11 @@ def build_from_tilemap(
         # of distinguishing it from the street it opens off. It used to be
         # `lane`, which is the same gravel the field edge was built from.
         R.LANE: "lane_earth",
+        # Wet ground, at grade. The 2x2 twin in `_BLOCK_SURFACES` carries most
+        # of a fen -- this is the 1x1 fringe, and it is the same asset
+        # `lane_earth` uses, which is correct: a back lane and a bog are both
+        # trodden wet mud, and the swamp kit ships exactly one 1x1 floor.
+        R.MARSH: "marsh",
         # R.PIER is deliberately absent: a plank is water with a deck on it,
         # and both halves are laid by name rather than as a surface.
         R.FLOOR: "floor",
@@ -4932,6 +4947,11 @@ def building_distance(tm, limit: int = 8) -> dict[tuple[int, int], int]:
 CANOPY_CELL = 14
 STAND_CELL = 9
 
+#: Lattice spacing for the reed field. Finer than the canopy, because a reed
+#: bed is a smaller thing than a stand of pines: at CANOPY_CELL a whole fen
+#: came out either uniformly thick or uniformly bare.
+REED_CELL = 7
+
 
 def _value_noise(x: int, z: int, cell: int, salt: str) -> float:
     """Smooth deterministic noise in 0..1, on a lattice of ``cell`` tiles.
@@ -5274,7 +5294,7 @@ def _dress_districts(b: Builder, tm, grade: float,
     # reserved before anything is planted. Planting first would put trees in
     # the line of the boundary and then reject the wall panels that hit them.
     with b.layer(LANDSCAPE):
-        _lay_fences(b, tm, grade, taper, scatter, fence_style)
+        b.fence_pieces = _lay_fences(b, tm, grade, taper, scatter, fence_style)
     #: Where a tree stands, so a *felled* stump is never dropped beside one.
     #: A cut stump within a canopy's reach reads as that tree's trunk, badly
     #: aligned -- which is what "trees that do not match their trunks" turned
@@ -5300,6 +5320,34 @@ def _dress_districts(b: Builder, tm, grade: float,
     market = [m for m in market if m is not None]
     yard = [b.palette.resolve("yard_clutter", v) for v in range(4)]
     yard = [y for y in yard if y is not None]
+    reeds = [b.palette.resolve("marsh_reed", v) for v in range(6)]
+    reeds = [r for r in reeds if r is not None]
+    lilies = [b.palette.resolve("marsh_lily", v) for v in range(6)]
+    lilies = [l for l in lilies if l is not None]
+
+    # The waterline, derived rather than assumed. `_fill_water` steps up from
+    # the bed by the water tile's own height, and every bed drop is a whole
+    # multiple of that step (`WATER_DEEPEN_STEP` == the tile's 0.5), so the
+    # topmost tile always seats with its underside at `here -
+    # WATER_SURFACE_DROP` whatever the depth. A pad floats on its top face.
+    water_tile = b.palette.resolve("water")
+    lily_lift = (water_tile.size_y - WATER_SURFACE_DROP) if water_tile else None
+
+    def pool_cell(x: int, z: int, r: int = 2) -> bool:
+        """Is this open water part of a fen rather than a river or a harbour?
+
+        Lily pads belong in still water inside a wetland. Scattered on every
+        WATER cell they would carpet a tidal quay and a mill race alike, which
+        is the surface-class-without-context mistake `_dress_seams` already
+        records against hedgerows.
+        """
+        for dz in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                nx, nz = x + dx, z + dz
+                if (0 <= nx < tm.width and 0 <= nz < tm.depth
+                        and tm.surface[nz][nx] == R.MARSH):
+                    return True
+        return False
 
     # Parks come from the layout as GROUND repainted by area polygons; the
     # raster keeps no park mask, so rediscover them cheaply: ground cells not
@@ -5332,6 +5380,38 @@ def _dress_districts(b: Builder, tm, grade: float,
                     scatter.one(wheat, x + 0.5, z + 0.5, here, rng.randrange(24))
                 elif roll < 0.12 * detail and straw is not None:
                     scatter.one(straw, x + 0.5, z + 0.5, here, rng.randrange(24))
+
+            elif surf == R.MARSH:
+                # **Reeds grow in beds.** Same argument as the canopy field
+                # above, for the same reason: a flat rate produced an orchard
+                # there, and here it would produce a lawn of reeds at one
+                # spacing over the whole fen. The noise field gives thickets
+                # you cannot see through and open water-meadow between them,
+                # and the walk between the two is most of what makes a
+                # wetland somewhere rather than a texture.
+                #
+                # NOT scaled by `detail`: reeds are the fen's own vegetation,
+                # not human dressing, so they follow the woodland convention
+                # of being budget-independent.
+                if reeds:
+                    thickness = _value_noise(x, z, REED_CELL, "reeds")
+                    if rng.random() < 0.05 + 0.40 * thickness ** 2:
+                        scatter.one(reeds[rng.randrange(len(reeds))],
+                                    x + 0.5 + rng.uniform(-0.32, 0.32),
+                                    z + 0.5 + rng.uniform(-0.32, 0.32),
+                                    here, rng.randrange(24))
+
+            elif surf == R.WATER:
+                # Standing water inside a fen gets floating cover. Every pad
+                # is under 0.3 tall and under a tile across, so this is the
+                # one place a prop is laid on the waterline rather than on
+                # the ground -- see `lily_lift`.
+                if lilies and lily_lift is not None and pool_cell(x, z):
+                    if rng.random() < 0.22:
+                        scatter.one(lilies[rng.randrange(len(lilies))],
+                                    x + 0.5 + rng.uniform(-0.28, 0.28),
+                                    z + 0.5 + rng.uniform(-0.28, 0.28),
+                                    here + lily_lift, rng.randrange(24))
 
             elif surf == R.GROUND and not near(x, z, frozenset({R.STREET, R.PLAZA})):
                 # Density follows the canopy field, so the wood closes up in

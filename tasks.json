@@ -529,6 +529,56 @@
         "talespire",
         "cleanup"
       ]
+    },
+    {
+      "id": "marsh-surface",
+      "what": "Give a wetland its own surface class, so a fen reads as a fen",
+      "state": "done",
+      "doc": "docs/marsh.md",
+      "evidence": "test:test_the_ground_of_a_fen_is_laid_in_wetland_tiles",
+      "note": "`swamp` sits on palette._WRONG_SETTING, so every swamp asset in the Nature kit was unreachable and a fen built as grass with a pond in it. The exclusion is NOT relaxed -- the marsh roles pin by exact name, which is not a search, the same property `lane_earth` has always relied on.",
+      "tags": [
+        "terrain",
+        "marsh"
+      ]
+    },
+    {
+      "id": "marsh-dressing",
+      "what": "Grow reeds in the fen and float lily pads on its pools",
+      "state": "done",
+      "doc": "docs/marsh.md",
+      "evidence": "test:test_a_fen_grows_reeds",
+      "note": "Reeds follow a noise field (REED_CELL) so they form beds rather than a lawn at one spacing -- the same argument as the canopy field. Measured on Sedgewater: 1,497 reeds added 2 overlapping props and LOWERED the board's overlap rate, so the scatter's collision test handles them.",
+      "tags": [
+        "terrain",
+        "marsh",
+        "dressing"
+      ]
+    },
+    {
+      "id": "fence-style-evidence",
+      "what": "Report a boundary as built whatever style built it",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_garden_fences_are_not_mistaken_for_field_walls",
+      "note": "A false FAIL inside feature_report, which exists to catch absent features: `--fence-style paling` reported 'nothing was built from them' over 782 Wooden Fence panels. Deriving the role list from FENCE_STYLES fixed that and broke the converse, because _lay_yards builds from yard_fence too. Builder.fence_pieces records what the pass actually laid; an asset id cannot name the pass that placed it.",
+      "tags": [
+        "fencing",
+        "verify"
+      ]
+    },
+    {
+      "id": "marsh-trees",
+      "what": "Stand swamp trees in the fen",
+      "state": "open",
+      "doc": "docs/marsh.md",
+      "evidence": "citysmith.build._plant_swamp_tree",
+      "note": "NOT DONE, and deliberately not guessed. The kit is modular like the pine -- base 01/02, mid 01-04, top -- but the shapes do not behave like one: base is 2.15x4.03x3.09 while mid 01 is 5.25x2.01x6.46, so the canopy is over five tiles across and WIDER THAN ITS OWN TRUNK, and mid 04 at 0.81 wide is plainly a trunk extender rather than a canopy. Which piece stacks on which, and whether they sit concentric at every rotation, is exactly what `_plant_conifer`'s comment says was settled for the pine by probing and not by reading. A 6-tile canopy that hangs wrong is visible from anywhere on the board. Sweep the stacking with a probe first, per the standing rule.",
+      "tags": [
+        "terrain",
+        "marsh",
+        "probe"
+      ]
     }
   ]
 }

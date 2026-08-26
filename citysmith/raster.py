@@ -25,6 +25,7 @@ VOID = "void"
 GROUND = "ground"
 FIELD = "field"
 WATER = "water"
+MARSH = "marsh"
 STREET = "street"
 PLAZA = "plaza"
 PIER = "pier"
@@ -32,12 +33,29 @@ LANE = "lane"
 FLOOR = "floor"
 
 #: Surfaces a creature can stand and walk on.
-WALKABLE = frozenset({GROUND, FIELD, STREET, PLAZA, PIER, LANE, FLOOR})
+#:
+#: **This constant is descriptive, and `TileMap.is_walkable` does NOT read
+#: it** -- that method gates on ``OPEN``, which is a strictly smaller set.
+#: Nothing in the package reads ``WALKABLE`` at all; only tests do. Adding a
+#: surface here therefore changes no behaviour, and believing otherwise cost
+#: a wrong assertion while the marsh pass was being written. If a check ever
+#: needs "can a creature stand here", it should read this and say so.
+#:
+#: **``MARSH`` belongs here and ``WATER`` does not**, and the difference is
+#: measured rather than atmospheric: the swamp floor tiles are 1.0 and 2.0
+#: wide and **0.5 tall**, exactly like grass, so a marsh cell is solid matter
+#: at grade that a creature stands on with its feet dry-ish. Open water is
+#: dropped ``build.WATER_SURFACE_DROP`` below grade with a bed under it.
+WALKABLE = frozenset({GROUND, FIELD, MARSH, STREET, PLAZA, PIER, LANE, FLOOR})
 
 #: Surfaces that count as public open space for door placement and routing.
 #: A lane belongs here: it is a way people walk, and leaving it out silently
 #: invalidated the doorway of every building whose only frontage got paved as
 #: one -- access fell to 96% with no hint that the lanes had caused it.
+#:
+#: ``MARSH`` is deliberately absent. It is walkable, but it is not a *way*:
+#: nobody puts their front door onto a bog, and routing that treats a fen as
+#: public open space will happily send the street network through it.
 OPEN = frozenset({GROUND, STREET, PLAZA, PIER, LANE})
 
 SIDES = (("n", 0, -1), ("s", 0, 1), ("w", -1, 0), ("e", 1, 0))
@@ -521,6 +539,11 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
     # Terrain, coarse to fine.
     for area in layout.areas_of("field"):
         paint(_fill_polygon(shift(area.ring), width, depth), FIELD)
+    # Marsh before water, so the pools sit *in* the fen rather than being
+    # painted over by it. A wetland is a sheet of wet ground with standing
+    # water in the hollows, and that is the order it has to be laid in.
+    for area in layout.areas_of("marsh"):
+        paint(_fill_polygon(shift(area.ring), width, depth), MARSH)
     for area in layout.areas_of("water"):
         paint(_fill_polygon(shift(area.ring), width, depth), WATER)
 
@@ -552,7 +575,11 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
         elif road.kind == "plank":
             paint(cells, PIER)
         else:
-            paint(cells, STREET, over=frozenset({GROUND, FIELD, WATER}))
+            # MARSH is in this set so a causeway or a reedcutters' track can
+            # cross the fen. Leave it out and every way into a wetland stops
+            # dead at its edge, which is the "silently dropped feature" shape
+            # this project keeps rediscovering.
+            paint(cells, STREET, over=frozenset({GROUND, FIELD, MARSH, WATER}))
             for x, z in cells:
                 if (tm.inside(x, z) and tm.surface[z][x] == STREET
                         and _CLASS_RANK[cls] > _CLASS_RANK[tm.street_class[z][x]]):
@@ -836,7 +863,7 @@ def _carve_plaza(tm: "TileMap") -> None:
             block = [(x + i, z + j) for i in range(PLAZA_SIDE)
                      for j in range(PLAZA_SIDE)]
             if any(tm.building[bz][bx] or tm.wall[bz][bx]
-                   or tm.surface[bz][bx] in (WATER, VOID, PIER)
+                   or tm.surface[bz][bx] in (WATER, MARSH, VOID, PIER)
                    for bx, bz in block):
                 continue
             paved = sum(1 for bx, bz in block if tm.surface[bz][bx] == STREET)

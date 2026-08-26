@@ -41,11 +41,11 @@ WALL_COURSE_ROLES = ("wall_corner", "wall_corner_civic")
 #: in a 1-wide wall and dragged an entire board half a tile off the grid.
 CELL_ROLES = (
     "floor", "floor_upper", "floor_civic", "ground", "street", "water",
-    "gravel", "roof", "bridge_deck",
+    "gravel", "roof", "bridge_deck", "marsh",
 ) + WALL_COURSE_ROLES
 
 #: Roles laid across a 2x2 block of cells.
-BLOCK_ROLES = ("ground_2x2", "field")
+BLOCK_ROLES = ("ground_2x2", "field", "marsh_2x2")
 
 
 @dataclass
@@ -299,6 +299,52 @@ MEDIEVAL = Style(
         "field": [
             _tile(name="Tilled Earth", **_MED),
             _tile(name="Grass - Sparse", **_MED),
+        ],
+        #: Wet ground. Measured before pinning: every Swamp floor tile is
+        #: **0.5 tall**, the same course as grass and tilled earth, so a marsh
+        #: cell lays through the ordinary terrain pass with no special casing
+        #: and a creature stands on it at grade.
+        #:
+        #: **Pinned by exact name, and that is what keeps `_WRONG_SETTING`
+        #: honest.** "swamp" is on that list -- it is there because a
+        #: free-text query for a floor should never wander into another biome,
+        #: and that guard earned its place. A `name=` pin is not a search, so
+        #: it goes straight past the exclusion without weakening it for
+        #: anything else. `lane_earth` has relied on the same property for as
+        #: long as it has existed.
+        "marsh": [
+            _tile(name="Swamp floor 1x1", **_MED),
+        ],
+        #: 2x2 twin of ``marsh``, and the reason a fen reads as a fen: the
+        #: puddled variants carry standing water in the tile itself, so open
+        #: wetland is broken up without a single prop.
+        #:
+        #: **One query holding three names, not three queries holding one.**
+        #: ``resolve(role, v)`` seeds its choice *inside the first matching
+        #: query* and stops there, so a list of single-name queries resolves
+        #: every variant to the first one -- the whole fen laid in one tile.
+        #: That is the same defect `CLAUDE.md` records against the wall deal
+        #: ("5 civic, 46 identical"), and it was reproduced here before being
+        #: recognised.
+        "marsh_2x2": [
+            _tile(name=("Swamp floor 2x2 puddles", "Swamp floor 2x2 puddle",
+                        "Swamp floor 2x2"), **_MED),
+        ],
+        #: Reeds standing in the fen. `swamp reed 01` is 1.28 wide -- the only
+        #: one over a tile -- and the horsetails run 0.45 to 0.58, so the set
+        #: gives a range of thickness rather than one repeated silhouette.
+        "marsh_reed": [
+            _tile(name=("swamp reed 01", "swamp reed 02",
+                        "swamp reed horsetail 04", "swamp reed horsetail 05"),
+                  kind="prop", **_MED),
+        ],
+        #: Floating cover for open water inside a fen. All four are under a
+        #: tile and under 0.3 tall, so they lie on the surface rather than
+        #: standing out of it.
+        "marsh_lily": [
+            _tile(name=("swamp lily pad 01", "swamp lily pad 02",
+                        "swamp lily pad 03", "swamp lily flower"),
+                  kind="prop", **_MED),
         ],
         "water": [
             _tile(name="tempWater1x1", **_MED),

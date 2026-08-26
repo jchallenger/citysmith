@@ -219,6 +219,10 @@ def layout_svg(layout, *, scale: float = 4.0, labels: bool = True) -> str:
         poly(a.ring, "#5a6b45", 0.6)
     for a in layout.areas_of("lawn"):
         poly(a.ring, "#54703f", 0.6)
+    # Marsh under water, matching the raster's own paint order: the fen is a
+    # sheet of wet ground and the pools are the hollows in it.
+    for a in layout.areas_of("marsh"):
+        poly(a.ring, "#3d4f3a", 0.85)
     for a in layout.areas_of("water"):
         poly(a.ring, "#22485e")
     for a in layout.areas_of("field"):

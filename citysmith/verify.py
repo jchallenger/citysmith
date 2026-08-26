@@ -32,6 +32,7 @@ from .raster import (
     LANE_ROAD,
     LANE_TILES,
     MAIN_ROAD,
+    MARSH,
     MAIN_STREET_TILES,
     OPEN,
     PIER,
@@ -301,6 +302,7 @@ def verify(tm: TileMap, *, asset_count: int | None = None, slab_count: int | Non
 _SURFACE_COLOUR = {
     GROUND: "#4a4f44",
     "field": "#6d7040",
+    MARSH: "#3d4f3a",
     WATER: "#22485e",
     STREET: "#8a8272",
     PLAZA: "#b9a06a",
@@ -1097,13 +1099,53 @@ def floating_placements(builder, tm) -> list[str]:
 #: Roles a feature is built from, for :func:`feature_report`. A feature is
 #: "present" when at least one placement uses one of its roles.
 FEATURE_ROLES = {
+    # Superseded by `_fence_roles()`, which derives the same list from
+    # `build.FENCE_STYLES`. Kept as the fallback for a caller with no build
+    # module to hand, and as the record of what the hardcoded version missed.
     "field walls": ("field_wall", "field_wall_post", "field_wall_tall",
                     "field_hedge"),
     "yards": ("yard_fence", "yard_gravel"),
     "plazas": ("plaza",),
     "cart streets": ("street_cart",),
     "lanes": ("lane_earth",),
+    # `marsh` is deliberately NOT in this tuple. It resolves to the same
+    # `Swamp floor 1x1` as `lane_earth`, so a board with one trodden lane and
+    # no fen at all would report the wetland as built. The 2x2 puddled tiles
+    # and the reeds are unique to a marsh, so they are what proves one.
+    "marsh": ("marsh_2x2", "marsh_reed", "marsh_lily"),
 }
+
+
+def _fences_built(builder) -> bool:
+    """Did the boundary pass actually lay anything?
+
+    **Ask the pass, do not infer from asset ids.** Two attempts failed first,
+    and both are worth keeping written down:
+
+    1. `FEATURE_ROLES["field walls"]` listed the drystone and hedge roles by
+       hand, so `--fence-style paling` reported "nothing was built from them"
+       while 782 `Wooden Fence` panels stood on the board -- the barricade
+       that map was made for. A false FAIL inside the check whose entire
+       purpose is catching absent features.
+    2. Deriving the role list from `FENCE_STYLES` fixed that and broke the
+       opposite case: paling builds from `yard_fence`, and so does
+       `_lay_yards`. A town with garden fences and no field walls would have
+       reported its boundaries as built.
+
+    An asset id cannot distinguish the pass that placed it -- the same lesson
+    as `layer_of`, and as `marsh` sharing `Swamp floor 1x1` with `lane_earth`.
+    `Builder.fence_pieces` is the count `_lay_fences` returned. The role
+    fallback stays for a builder that predates it.
+    """
+    count = getattr(builder, "fence_pieces", None)
+    if count is not None:
+        return count > 0
+    ids = set()
+    for role in FEATURE_ROLES["field walls"]:
+        asset = builder.palette.resolve(role)
+        if asset is not None:
+            ids.add(asset.id)
+    return bool(ids & {p.asset_id for p in builder.placements})
 
 
 def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
@@ -1143,7 +1185,7 @@ def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
     runs = len(getattr(tm, "fences", ()) or ())
     on_map = len(getattr(layout, "fences", ()) or ()) if layout is not None else None
     if runs:
-        level = "pass" if built(FEATURE_ROLES["field walls"]) else "fail"
+        level = "pass" if _fences_built(builder) else "fail"
         out.append((level, "field walls",
                     f"{runs} boundary run(s) on this map"
                     + ("" if level == "pass" else
@@ -1169,6 +1211,24 @@ def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
     else:
         out.append(("pass", "yards",
                     f"none; no building of {total} stands clear of its neighbours"))
+
+    # -- marsh ---------------------------------------------------------------
+    wet = sum(1 for row in tm.surface for v in row if v == MARSH)
+    on_map = (sum(1 for a in layout.areas if a.kind == "marsh")
+              if layout is not None else None)
+    if wet:
+        level = "pass" if built(FEATURE_ROLES["marsh"]) else "fail"
+        out.append((level, "marsh",
+                    f"{wet} wetland cell(s) on this map"
+                    + ("" if level == "pass" else
+                       " but nothing marsh-specific was built on them -- "
+                       "the fen is being laid as ordinary ground")))
+    elif on_map:
+        out.append(("pass", "marsh",
+                    f"none here; the layout has {on_map} wetland area(s), "
+                    "all outside this crop"))
+    else:
+        out.append(("pass", "marsh", "none in the source"))
 
     # -- quarters ------------------------------------------------------------
     from .quarters import buildings_of, clustering_lift, quarter_map, shares

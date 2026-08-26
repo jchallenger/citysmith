@@ -173,6 +173,22 @@ BACKGROUND_AREAS: dict[str, str | None] = {
     "PIGS_TEXTURE_TYPE": "pasture",
     "CATTLE_TEXTURE_TYPE": "pasture",
     "ROAD_TEXTURE_TYPE": "plaza",
+    # -- wetland ------------------------------------------------------------
+    # **None of these four has been seen in a real FTG export.** The observed
+    # vocabulary across all three files here is the ten values above, and it
+    # contains no wetland at all. They are mapped because `marsh` is a surface
+    # citysmith now builds, and an authored export (or a later FTG version)
+    # needs a spelling to say so; the alternative is every wetland arriving as
+    # DEFAULT_BACKGROUND_AREA and reading as parkland.
+    #
+    # This is the documented behaviour for a growing vocabulary -- map it,
+    # never drop it -- applied *forwards* for once. If FTG later ships a
+    # wetland under a fifth name it lands on the default and is reported
+    # through `Layout.unmapped`, which is exactly the intended failure.
+    "MARSH": "marsh",
+    "SWAMP": "marsh",
+    "BOG": "marsh",
+    "WETLAND": "marsh",
 }
 DEFAULT_BACKGROUND_AREA = "park"
 

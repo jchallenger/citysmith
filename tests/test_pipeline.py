@@ -176,6 +176,7 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] field walls: none in the source
 [ok  ] yards: 4 of 4 buildings stand apart enough for a yard (207 cells)
+[ok  ] marsh: none in the source
 [ok  ] quarters: none; trades cluster at 0.00x, under the threshold -- this settlement has no quarters to find
 
   wrote {svg}  (tile numbers here match the chunk table below)
@@ -231,6 +232,7 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] field walls: none in the source
 [ok  ] yards: 4 of 4 buildings stand apart enough for a yard (207 cells)
+[ok  ] marsh: none in the source
 [ok  ] quarters: none; trades cluster at 0.00x, under the threshold -- this settlement has no quarters to find
 
   wrote {svg}  (tile numbers here match the chunk table below)
