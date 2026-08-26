@@ -364,3 +364,65 @@ def test_the_board_switcher_reads_state_before_pressing_space():
     assert body.index("Read-Hud") < body.index('Send-Chord "space"')
     # And it must be able to refuse.
     assert "break" in body
+
+
+def test_an_unnamed_board_in_the_published_folder_is_a_hard_error():
+    """Loose it is a "look first"; filed under Ready to publish it is a FAIL.
+
+    The same board, the same absent name, two verdicts -- and the difference is
+    the folder, because filing something under `Ready to publish` is a claim
+    about it while `Unknown Realm 14` is the name the game invents when nobody
+    made one. The two contradict each other, and the likeliest cause is the one
+    this list makes easy: the rows move on every rename, so a click that missed
+    by one filed a board nobody meant to file.
+
+    Deliberately narrow. It says nothing about whether the *content* is fit to
+    publish, because nothing here can see a board's content. Pretending
+    otherwise is how a check starts lying, which this project has a section
+    about.
+    """
+    from citysmith import boards
+
+    seen = boards.parse_seen([
+        "Ready to publish:",
+        "  East Tradebourne",
+        "  Unknown Realm 14",
+        "Workshop:",
+        "  Unknown Realm 3",
+        "Unknown Realm 9",
+    ])
+    assert boards.unfit_to_publish(seen) == ["Unknown Realm 14"]
+
+    # A clean published folder is silence, not a warning about the others.
+    clean = boards.parse_seen(["Ready to publish:", "  East Tradebourne",
+                               "Workshop:", "  Unknown Realm 3"])
+    assert boards.unfit_to_publish(clean) == []
+
+
+def test_a_board_name_containing_a_slash_is_not_read_as_a_folder():
+    """`GRB/T14 ...` is the naming scheme this project actually uses.
+
+    The obvious listing format is `Folder/Name`, and it is wrong here: a loose
+    board called `GRB/T14 The Halfling and the Fox Interior` parses as folder
+    `GRB`, and the published set then reads as empty. Silent, and exactly the
+    shape of failure this codebase keeps records of. The separator is
+    INDENTATION instead -- which is also how the panel draws it, so the listing
+    is a transcription rather than a translation.
+    """
+    from citysmith import boards
+
+    seen = boards.parse_seen([
+        "Ready to publish:",
+        "  GRB/T14 The Halfling and the Fox Interior",
+        "GRB/T99 A Loose Board",
+    ])
+    filed, loose = seen
+    assert filed.folder == "Ready to publish"
+    assert filed.name == "GRB/T14 The Halfling and the Fox Interior"
+    assert loose.folder == ""
+    assert loose.name == "GRB/T99 A Loose Board"
+
+    # A header with nothing under it is a board, not an empty folder -- which
+    # matches the game, where a folder cannot exist without a board in it.
+    [only] = boards.parse_seen(["Pelvesthollow"])
+    assert (only.name, only.folder) == ("Pelvesthollow", "")

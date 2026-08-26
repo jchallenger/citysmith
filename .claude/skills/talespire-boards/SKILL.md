@@ -219,6 +219,35 @@ The dropdown lists **`- NO FOLDER -`** first and then every existing folder, so
 filing is reversible and a board can be pulled back out. A board is in at most
 one folder, and the move is a **move** -- there is no second board afterwards.
 
+**Filing many boards is a command, not a click sequence.**
+
+```bash
+pwsh tools/ts.ps1 setfolder -Y 283 -Text "Workshop"
+```
+
+`-Y` is the row's own y, **read off a `boards` shot and never computed from a
+row index**. It clicks the expander, then *Set Folder* at `row + 68` -- one
+number for both menu shapes, because items are ~26 px tall so +68 lands inside
+*Set Folder* whether it sits at +63 (current board) or +68 (any other). *Delete
+board* is a full item away at +37/+42, which is the reason this is a command
+rather than six clicks by hand.
+
+**The target folder AUTO-EXPANDS when a board lands in it**, and the filed
+board's own row menu stays open, so the list below moves. That makes a naive
+loop file the wrong boards after the first. Collapse the target again and the
+geometry returns exactly:
+
+| | client y |
+|---|---|
+| first folder header | 200 |
+| second folder header | 241 |
+| **first ungrouped board** | **283** |
+
+With both folders collapsed, a filed board leaves the ungrouped list and the
+next one rises into 283 — so *file at 283, collapse the folder, repeat* is a
+loop with a fixed target, and it is how twenty-seven boards get filed without
+hunting for a row each time.
+
 **What folders do to the list, which is the point:**
 
 - They sort **alphabetically among themselves, above every ungrouped board**
@@ -241,15 +270,31 @@ someone's work on it looks exactly like an empty one from the list. So the
 first step is never a click:
 
 ```bash
-python -m citysmith boards prune --seen-file campaign-boards.txt
+python -m citysmith boards prune --seen-file campaign/campaign-list.txt
 ```
 
-Write the campaign list into a text file first, one board name per line, read
-off a `ts.ps1 boards` screenshot. `prune` then sorts them into three:
+Write the campaign list into a text file first, read off a `ts.ps1 boards`
+screenshot and laid out **the way the panel lays it out** -- folder headers at
+the left margin, their boards indented under them:
+
+```
+Ready to publish:
+  East Tradebourne
+  GRB/T14 The Halfling and the Fox Interior
+Workshop:
+  Unknown Realm 3
+```
+
+**Indentation, not `Folder/Name`.** The obvious format is wrong here: this
+project's own scheme is `GRB/T14 The Halfling and the Fox Interior`, so a
+slash-separated listing files it under a folder called `GRB` and the published
+set reads as empty -- silently. Indenting also makes the file a transcription
+of the screen rather than a translation of it. `prune` then sorts them into three:
 
 | bucket | what it means | what to do |
 |---|---|---|
 | **keepers** | a scene in `campaign/boards.json` points at it | leave alone |
+| **unfit to publish** | unnamed, but filed under `Ready to publish` | **FAIL** -- name it or unfile it |
 | **prunable** | *provably* disposable: a scene name the registry itself recorded as superseded | safe to delete |
 | **unnamed** | still called `Unknown Realm N` | **switch to each and look**, then name the keepers |
 | **unclaimed** | named by hand, claimed by no scene | **no recommendation** -- ask |

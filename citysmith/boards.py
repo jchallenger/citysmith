@@ -271,6 +271,91 @@ def _now() -> str:
 #: of these is a paste nobody named, which is what a probe or a rebuild leaves.
 UNNAMED_PREFIX = "Unknown Realm"
 
+#: The folder a board has to be in before anyone else sees it. A campaign has
+#: folders (verified 2026-08-26: `Set Folder` on a board's row menu), they sort
+#: above the loose boards and collapse to one line, and a board is in at most
+#: one -- so they are the cheapest way to keep work-in-progress apart from what
+#: is finished. There is no "move to campaign" anywhere in TaleSpire, so this
+#: is the separation that exists.
+PUBLISHED_FOLDER = "Ready to publish"
+
+
+@dataclass
+class SeenBoard:
+    """One row of the campaign list, with the folder it was filed under."""
+
+    name: str
+    folder: str = ""
+
+    @property
+    def is_unnamed(self) -> bool:
+        return self.name.startswith(UNNAMED_PREFIX)
+
+
+def parse_seen(lines) -> list[SeenBoard]:
+    """Read a campaign listing, laid out the way the panel lays it out.
+
+    A folder header sits at the left margin and its boards are indented under
+    it, which is exactly what you are copying off the screen::
+
+        Ready to publish:
+          East Tradebourne
+          GRB/T14 The Halfling and the Fox Interior
+        Workshop:
+          Unknown Realm 3
+        Unknown Realm 9
+
+    An unindented line is a folder header if anything is indented under it, and
+    a loose board otherwise; the trailing colon is optional.
+
+    **The separator is indentation and not a character in the line, because
+    every character worth using is already in a board name.** `Folder/Name` was
+    the obvious format and it is wrong here: this project's own scheme is
+    `GRB/T14 The Halfling and the Fox Interior`, so a loose board would parse
+    as folder `GRB` and the published set would read as empty. That failure is
+    silent, which is the kind this file keeps a section about.
+    """
+    out: list[SeenBoard] = []
+    pending: SeenBoard | None = None
+    folder = ""
+    for raw in lines:
+        if not raw.strip():
+            continue
+        indented = raw[:1].isspace()
+        name = raw.strip().rstrip(":").strip() if not indented else raw.strip()
+        if indented:
+            # Whatever was above us is a header, not a board.
+            if pending is not None:
+                folder = pending.name
+                pending = None
+            out.append(SeenBoard(raw.strip(), folder))
+        else:
+            if pending is not None:
+                out.append(pending)          # nothing under it: a loose board
+            folder = ""
+            pending = SeenBoard(name, "")
+    if pending is not None:
+        out.append(pending)
+    return out
+
+
+def unfit_to_publish(seen: list[SeenBoard],
+                     folder: str = PUBLISHED_FOLDER) -> list[str]:
+    """Boards in the published folder that nobody ever named.
+
+    **This is a hard error, where the same board loose in the campaign is only
+    a "look first".** The difference is that filing something under `Ready to
+    publish` is a claim about it, and `Unknown Realm 14` is the name the game
+    invents when nobody made one -- so the claim and the name contradict each
+    other. Somebody either filed the wrong row (the rows move on every rename)
+    or meant to name it and did not.
+
+    Deliberately narrow. It does not judge whether the *content* is fit to
+    publish, because nothing here can see a board's content -- that stays a
+    person's call, and pretending otherwise is how a check starts lying.
+    """
+    return sorted(b.name for b in seen if b.folder == folder and b.is_unnamed)
+
 
 @dataclass
 class Prunable:

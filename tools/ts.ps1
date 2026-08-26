@@ -35,7 +35,7 @@ param(
     'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','rename','boards','shot',
     'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','camerastate',
     'elevplane','elevstate',
-    'cutbox','plane','planestate','boardsstate','hudstate',
+    'cutbox','plane','planestate','boardsstate','hudstate','setfolder',
     'select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
@@ -646,6 +646,35 @@ switch ($Cmd) {
     "the current board is HIGHLIGHTED in place at the same row height, not " +
     "expanded -- row arithmetic holds in a resting list. It re-sorts on every " +
     "rename, so read the rows off the shot rather than reusing a position."
+  }
+  'setfolder' {
+    # File the board whose row is at -Y into the folder -Text, creating it if
+    # it does not exist. `Y` is the row's own y, read off a `boards` shot --
+    # **never computed from a row index**, because a folder header eats a slot
+    # and an expanded folder inserts its children, so the Nth-board-to-y
+    # mapping stops holding the moment folders exist.
+    #
+    # +68 is deliberately one number for two cases. `Reload Board` only appears
+    # for the board you are standing on, so Set Folder sits at row+63 there and
+    # row+68 everywhere else; menu items are ~26 px tall, so +68 falls inside
+    # the item in both. Delete board is at +37/+42, a full item away -- which is
+    # the reason this is a command and not six clicks by hand.
+    if (-not $Text) { throw "setfolder needs -Text <folder name>" }
+    if ($Y -lt 1)   { throw "setfolder needs -Y <row y>, read off a boards shot" }
+    Focus-TS
+    $cl = Get-Client
+    Press ($cl.X + 79) $Y ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Milliseconds 1200
+    Press ($cl.X + 150) ($Y + 68) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Milliseconds 1500
+    [System.Windows.Forms.Clipboard]::SetText($Text)
+    Press $cl.CX ($cl.CY - 16) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Milliseconds 300
+    Send-Chord "ctrl+v" 150
+    Start-Sleep -Milliseconds 400
+    Press ($cl.CX - 105) ($cl.CY + 70) ([TSIn]::LDOWN) ([TSIn]::LUP)
+    Start-Sleep -Milliseconds 1500
+    "filed the board at row y=$Y into '$Text' -- VERIFY on a shot, this cannot read the row it clicked"
   }
   'hudstate' {
     $h = Read-Hud

@@ -604,6 +604,10 @@ def cmd_boards(args) -> int:
             seen += [n.strip() for n
                      in pathlib.Path(args.seen_file).read_text(encoding="utf-8").splitlines()
                      if n.strip()]
+        # A listing may record folders as `Folder/Name`; the checks below work
+        # on names, so keep both.
+        filed = boards.parse_seen(seen)
+        seen = [b.name for b in filed]
         gone = boards.prunable(registry, seen)
         keep = boards.keepers(registry)
         other = boards.unclaimed(registry, seen)
@@ -637,6 +641,22 @@ def cmd_boards(args) -> int:
               "per-board triangle in the campaign list, right beside the play "
               "arrow, and the rows move on every rename -- so a click that "
               "misses by one deletes the wrong board, and there is no undo.")
+
+        # The one hard error here. Loose in the campaign, an unnamed board is
+        # only a LOOK FIRST; filed under the published folder it is a
+        # contradiction, because filing it there is a claim and `Unknown Realm
+        # N` is the name the game invents when nobody made one.
+        unfit = boards.unfit_to_publish(filed)
+        if unfit:
+            print(f"\nFAIL -- {len(unfit)} board(s) in "
+                  f"'{boards.PUBLISHED_FOLDER}' that nobody ever named:")
+            for name in unfit:
+                print(f"  {name}")
+            print("Filing a board there is a claim about it, and that name is "
+                  "the one the game invents when nobody made one. Either it is "
+                  "the wrong row -- they move on every rename -- or it needs a "
+                  "name before anyone else sees it.")
+            return 1
         return 0
 
     if not args.scene:
