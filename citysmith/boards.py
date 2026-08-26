@@ -322,6 +322,19 @@ def prunable(registry: "Registry", seen: list[str] | None = None) -> list[Prunab
 
     for record in sorted(registry.records.values(), key=lambda r: r.board):
         for old in record.superseded:
+            # **A superseded name is only prunable if the board is still
+            # there.** The registry remembers every name a scene has ever had,
+            # and remembering is not the same as the board existing: delete it
+            # and the entry stays, so `prune` goes on naming it for ever. That
+            # is not merely noise. The campaign list is the only way to act on
+            # this, rows move on every rename, and the skill's own warning is
+            # that a click missing by one deletes the wrong board with no undo
+            # -- so sending somebody hunting for a row that is not there is
+            # pointing them at a neighbour. Measured on the real campaign
+            # 2026-08-26: both superseded interior names had already gone, and
+            # both were still being recommended.
+            if seen and old not in set(seen):
+                continue
             out.append(Prunable(
                 old, "superseded by a rebuild; nothing points at it",
                 record.scene_id))

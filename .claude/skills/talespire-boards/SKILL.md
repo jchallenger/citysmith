@@ -68,6 +68,24 @@ directly** — not a menu. The current name arrives already selected, so a
 synthetic typing does not arrive at all; this is the same reason `Ctrl+V` needs
 a real scan code. Do not try to type a name character by character.
 
+**Verify the rename, and verify it with a change you could SEE fail.** The
+command prints `renamed board to '...'` whatever happened -- that is the
+script's own return string, not a reading of the game. Renaming a board to the
+name it already has therefore tests nothing: success and failure look
+identical. Rename to something different and read the title bar back.
+
+The cheap way is a crop of the title bar rather than a whole frame -- **3.7 KB
+against 470 KB**, and the name is the only thing in it:
+
+```bash
+pwsh tools/grab.ps1 -Name titlecheck -X 1500 -Y 0 -W 420 -H 34
+```
+
+Derive that x from the client width on any other window size. Note the title
+bar shows far more of a name than a list row does, so it verifies the rename
+took -- it does **not** tell you the name will still be distinguishable in the
+campaign list. That is what the two dozen character budget below is for.
+
 **The chevron next to `...` is a saved-state indicator, not a board list.** It
 toggles "No unsaved changes" and does nothing else. It was the obvious thing to
 try and it is wrong.

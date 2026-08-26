@@ -274,3 +274,38 @@ def test_a_board_a_scene_still_points_at_is_never_prunable(tmp_path):
         scene_id="gb-tavern-0014", board="Unknown Realm 9")])
     assert boards.prunable(reg, ["Unknown Realm 9"]) == []
     assert [r.board for r in boards.keepers(reg)] == ["Unknown Realm 9"]
+
+
+def test_a_superseded_board_already_deleted_is_not_recommended_again(tmp_path):
+    """Remembering a name is not the same as the board still existing.
+
+    `superseded` is append-only -- it is the record of every name a scene has
+    had -- so once the old board is actually deleted the entry stays behind and
+    `prune` goes on naming it. Measured on the real campaign 2026-08-26: both
+    superseded interior boards had already gone and both were still being
+    recommended for deletion.
+
+    That is not merely a stale line. The campaign list is the only way to act
+    on a recommendation, the rows move on every rename, and deleting sits one
+    click from the play arrow with no undo -- so naming a row that is not there
+    is pointing somebody at its neighbour. When a campaign list is supplied it
+    is the authority on what exists; without one, nothing can be checked and
+    every remembered name is still reported.
+    """
+    from citysmith import boards
+
+    reg = _registry(tmp_path, [boards.BoardRecord(
+        scene_id="gb-tavern-0014", board="GRB/T14 The Fox",
+        superseded=["The Fox - Graybank interior"])])
+
+    # Still in the campaign: worth deleting, and named.
+    seen = ["GRB/T14 The Fox", "The Fox - Graybank interior"]
+    assert [p.board for p in boards.prunable(reg, seen)] == [
+        "The Fox - Graybank interior"]
+
+    # Already gone: silence, not a second recommendation.
+    assert boards.prunable(reg, ["GRB/T14 The Fox"]) == []
+
+    # No list given, nothing to check against, so the memory still speaks up.
+    assert [p.board for p in boards.prunable(reg)] == [
+        "The Fox - Graybank interior"]
