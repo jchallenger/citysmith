@@ -24,6 +24,25 @@ board is not the one you left, or has content you did not paste, stop and ask.
 pwsh tools/ts.ps1 shot -Name check
 ```
 
+**Read the HUD before pressing `Space`.** It is a toggle over the HUD, not
+over the board list, and the difference matters: with the HUD already up,
+`Space` *hides* it and whatever click you had queued next lands on the board in
+build mode, where a click is not a no-op.
+
+```bash
+pwsh tools/ts.ps1 hudstate
+pwsh tools/ts.ps1 boardsstate
+```
+
+Both are **self-calibrating, and that is the part to preserve if you ever
+rewrite them.** Each measures its widget against a control patch of bare board,
+so a dark board darkens both and the difference stays near zero. The naive
+shape — sample one patch, call dark pixels "the widget" — has failed three
+times in this project: Graybank's grass fooled `planestate`, and a first cut of
+`boardsstate` read the left tool column and reported OPEN at a closed panel.
+Both return `unknown` for anything between the measured bands, and `boards`
+refuses on `unknown` rather than guessing.
+
 Then confirm the two persistent toggles are off, because both survive making a
 new board and both imitate a defect:
 
@@ -325,14 +344,12 @@ confirm the *content*:
 
 ## What is not solved
 
-- **`ts.ps1 boards` is unreliable** — it has failed twice and worked once, all
-  down to the `Space` toggle. Until it checks HUD state first, drive the two
-  steps separately and screenshot between them. The fix is a HUD-state probe of
-  the same shape as `planestate`, and it carries `planestate`'s warning with
-  it: aim the probe at a widget that only exists when the HUD is up, derive its
-  position from the client rect, and return `UNKNOWN` rather than guessing —
-  reading the board and calling it a state has now happened three times in this
-  project, and twice the wrong toggle was pressed as a result.
+- ~~`ts.ps1 boards` is unreliable~~ **FIXED 2026-08-26.** It reads
+  `hudstate` and `boardsstate` before it touches anything, presses `Space` only
+  when the HUD is genuinely down, does nothing when the panel is already open,
+  and refuses on an unreadable state. It was **unsafe**, not merely unreliable:
+  there are three states and the old code saw two, so with the HUD already up
+  `Space` hid it and the following click landed on the board *in build mode*.
 - **The `Filter...` box is unmeasured.** Four questions above; answering them
   probably closes "switching to an existing board, unattended", which is the
   oldest open item in `CLAUDE.md`'s "Not built yet".

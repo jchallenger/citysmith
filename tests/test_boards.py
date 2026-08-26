@@ -309,3 +309,50 @@ def test_a_superseded_board_already_deleted_is_not_recommended_again(tmp_path):
     # No list given, nothing to check against, so the memory still speaks up.
     assert [p.board for p in boards.prunable(reg)] == [
         "The Fox - Graybank interior"]
+
+
+def test_the_board_switcher_reads_state_before_pressing_space():
+    """`boards` must not press Space blind, because Space is a HUD toggle.
+
+    There are three states and the old code saw two. HUD down + panel closed:
+    Space raises it. HUD **up** + panel closed: Space *hides* it, and the click
+    that follows lands on the board -- in build mode, where a click is not a
+    no-op. HUD up + panel open: same. On 2026-08-26 that put two stray clicks
+    on a live board inside ten minutes.
+
+    Both probes are self-calibrating against a control patch, which is the part
+    worth protecting. The naive version -- sample one patch, call dark pixels
+    "panel" -- has now failed three times here: Graybank's grass fooled
+    `planestate`, and a first cut of this probe read the left tool column and
+    reported OPEN at a closed panel. A control cancels the board out: a dark
+    board darkens both patches and the difference stays near zero.
+
+    This is a structural test because the thing under test is a PowerShell
+    script driving a GUI, and the property -- "reads before it presses" -- is
+    visible in the source and is exactly what regressed before.
+    """
+    import pathlib
+    import re
+
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "tools" / "ts.ps1").read_text(encoding="utf-8")
+
+    # Both probes exist, and both compare against a control rather than
+    # thresholding one patch.
+    for fn in ("function Read-Hud", "function Read-BoardsPanel"):
+        assert fn in src, f"{fn} is gone; the switcher is blind again"
+    assert src.count("$delta = $column - $control") == 1
+    assert src.count("$delta = $inside - $outside") == 1
+
+    # Every probe has an `unknown` verdict. A two-way probe cannot say "I could
+    # not see", which is how a bad reading becomes a click.
+    assert src.count("{ 'unknown' }") >= 2
+
+    body = src[src.index("'boards'  {"):]
+    body = body[:body.index("\n  'shot'")]
+    assert "Read-BoardsPanel" in body, "boards no longer reads the panel"
+    assert "Read-Hud" in body, "boards no longer reads the HUD"
+    # The read has to come *before* the keypress, which is the whole property.
+    assert body.index("Read-Hud") < body.index('Send-Chord "space"')
+    # And it must be able to refuse.
+    assert "break" in body

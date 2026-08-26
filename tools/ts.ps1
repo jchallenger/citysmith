@@ -35,7 +35,7 @@ param(
     'focus','client','paste','hold','commit','raise','lower','nudge','click','drop','clear','move','newboard','rename','boards','shot',
     'key','chord','fly','orbit','pan','rdrag','elev','zoom','camera','camerastate',
     'elevplane','elevstate',
-    'cutbox','plane','planestate',
+    'cutbox','plane','planestate','boardsstate','hudstate',
     'select','copyout','setclip')]
   [string]$Cmd,
   [string]$Slab, [string]$Keys, [string]$Text, [string]$Name,
@@ -130,6 +130,83 @@ function Get-Client {
     X = $pt.X; Y = $pt.Y; W = $c.R; H = $c.B
     CX = $pt.X + [int]($c.R/2); CY = $pt.Y + [int]($c.B/2)
   }
+}
+
+function Get-DarkFraction([int]$x0, [int]$y0, [int]$w, [int]$h) {
+  Add-Type -AssemblyName System.Drawing
+  $bmp = New-Object System.Drawing.Bitmap $w,$h
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen($x0, $y0, 0, 0, (New-Object System.Drawing.Size $w,$h))
+  $n = 0; $d = 0
+  for ($yy = 0; $yy -lt $h; $yy += 3) {
+    for ($xx = 0; $xx -lt $w; $xx += 3) {
+      $c = $bmp.GetPixel($xx, $yy); $n++
+      if ([Math]::Max([Math]::Max($c.R,$c.G),$c.B) -lt 95) { $d++ }
+    }
+  }
+  $g.Dispose(); $bmp.Dispose()
+  return 100.0 * $d / $n
+}
+
+function Read-Hud {
+  # Is the left tool column up? **`Space` is a toggle over the HUD, not over
+  # the board list, and conflating the two is what made `boards` unsafe.**
+  # There are three states, not two: HUD down + panel closed (Space raises it),
+  # HUD UP + panel closed (Space HIDES it, and the click that follows lands on
+  # the board), and HUD up + panel open. A probe that only asks about the panel
+  # cannot tell the first two apart, which is exactly the mistake that put two
+  # stray clicks on a live board on 2026-08-26.
+  #
+  # Same self-calibrating shape as Read-BoardsPanel: the column is a dark plate
+  # of icons at the far left, so measure it against a strip of board on the far
+  # right. Measured: up 81.6 / 81.8, down -0.1 / 0.0.
+  $cl = Get-Client
+  $y = $cl.Y + [int]($cl.H * 0.037)
+  $h = [int]($cl.H * 0.167)
+  $column  = Get-DarkFraction ($cl.X + 5) $y 40 $h
+  $control = Get-DarkFraction ($cl.X + $cl.W - 220) $y 40 $h
+  $delta = $column - $control
+  $state = if ($delta -gt 40) { 'up' } elseif ($delta -lt 15) { 'down' } else { 'unknown' }
+  return [pscustomobject]@{ state = $state; delta = $delta; column = $column; control = $control }
+}
+
+function Read-BoardsPanel {
+  # Is the Campaign Boards panel up? **Measured against BOTH states, and
+  # deliberately self-calibrating**, because the obvious version of this probe
+  # is the one that has now failed three times in this project: sample one
+  # patch, call dark pixels "panel", and read the board instead. Graybank's
+  # grass did it to `planestate`; the left tool column did it to a first cut of
+  # this one, which reported OPEN at a closed panel and put a click on the
+  # board.
+  #
+  # The fix is a control. The panel is anchored LEFT and ends at a hard
+  # vertical edge around x=400, so sample just inside it and just outside it
+  # and compare. A dark board darkens both patches and the DIFFERENCE stays
+  # near zero; only the panel darkens one and not the other. Measured on real
+  # frames: open 77.3 / 84.1 / 84.6, closed -6.9. The band between 15 and 40
+  # is nobody's measurement and returns `unknown` rather than a guess.
+  Add-Type -AssemblyName System.Drawing
+  $cl = Get-Client
+  $y = $cl.Y + [int]($cl.H * 0.556)
+  function Dark([int]$x0, [int]$y0) {
+    $bmp = New-Object System.Drawing.Bitmap 90,100
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($x0, $y0, 0, 0, (New-Object System.Drawing.Size 90,100))
+    $n = 0; $d = 0
+    for ($yy = 0; $yy -lt 100; $yy += 3) {
+      for ($xx = 0; $xx -lt 90; $xx += 3) {
+        $c = $bmp.GetPixel($xx, $yy); $n++
+        if ([Math]::Max([Math]::Max($c.R,$c.G),$c.B) -lt 95) { $d++ }
+      }
+    }
+    $g.Dispose(); $bmp.Dispose()
+    return 100.0 * $d / $n
+  }
+  $inside  = Dark ($cl.X + 300) $y
+  $outside = Dark ($cl.X + 430) $y
+  $delta = $inside - $outside
+  $state = if ($delta -gt 40) { 'open' } elseif ($delta -lt 15) { 'closed' } else { 'unknown' }
+  return [pscustomobject]@{ state = $state; delta = $delta; inside = $inside; outside = $outside }
 }
 
 function Get-TS {
@@ -508,23 +585,71 @@ switch ($Cmd) {
     #
     # The panel also carries a **Filter box** at the top, which is the thing
     # that would make this unattended; see the skill before building on it.
+    #
+    # **`Space` is a TOGGLE, so this used to be unsafe rather than merely
+    # unreliable.** It pressed Space blind and then clicked a fixed point: with
+    # the panel already up, Space closed the HUD and that click landed on the
+    # BOARD, in build mode. Seen twice on 2026-08-26, and a click on a board in
+    # build mode is not a no-op. It reads the panel first now, and refuses on
+    # anything it cannot read.
     Focus-TS
     $cl = Get-Client
-    Send-Chord "space" 150
-    Start-Sleep -Milliseconds 900
-    Press ($cl.X + 17) ($cl.Y + 57) ([TSIn]::LDOWN) ([TSIn]::LUP)
-    Start-Sleep -Seconds 2
+    $st = Read-BoardsPanel
+    if ($st.state -eq 'open') {
+      # Already there. Pressing Space here would hide it again, which is how
+      # this command used to "fail" every other call.
+    }
+    else {
+      $hud = Read-Hud
+      if ($st.state -eq 'unknown' -or $hud.state -eq 'unknown') {
+        "campaign boards UNKNOWN (panel delta $([int]$st.delta), hud delta " +
+        "$([int]$hud.delta)) -- refusing to press Space blind. The click that " +
+        "follows Space lands on the BOARD in build mode when the HUD is " +
+        "already up, and that is not a no-op. Look at the window and retry."
+        break
+      }
+      # Space toggles the HUD, so only press it when the HUD is actually down.
+      if ($hud.state -eq 'down') {
+        Send-Chord "space" 150
+        Start-Sleep -Milliseconds 900
+        $hud = Read-Hud
+      }
+      if ($hud.state -ne 'up') {
+        "the HUD did not come up (state $($hud.state), delta " +
+        "$([int]$hud.delta)). Nothing was clicked. Retry."
+        break
+      }
+      Press ($cl.X + 17) ($cl.Y + 57) ([TSIn]::LDOWN) ([TSIn]::LUP)
+      Start-Sleep -Seconds 2
+      $st = Read-BoardsPanel
+    }
     $shot = if ($Name) { $Name } else { "boards" }
     & (Join-Path $PSScriptRoot "grab.ps1") -Name $shot
+    if ($st.state -ne 'open') {
+      "campaign boards did NOT open (state $($st.state), delta " +
+      "$([int]$st.delta)). Nothing was clicked on the board. Retry."
+      break
+    }
     # NOT a claim that it opened -- `Space` is a toggle, so if the HUD was
     # already up this closed it and the click landed on the board instead.
     # Look at the shot before trusting any row position.
-    "screenshotted after Space + board icon. CHECK THE SHOT: if the Campaign " +
-    "Boards panel is not open, Space toggled it shut -- run again. Rows start " +
-    "at client y=200, 42 apart, play arrow at x=360, row expander at x=79. The " +
-    "list is plain alphabetical and re-sorts on every rename, and the CURRENT " +
-    "board's row is expanded in place (~134px), so any arithmetic from a row " +
-    "index is wrong below it. Read the rows off the shot."
+    "campaign boards OPEN, verified (panel delta $([int]$st.delta)). Rows start " +
+    "at client y=200, 42 apart; play arrow at x=360, row EXPANDER at x=79 -- the " +
+    "expander opens Delete board, so aim at 360 unless you mean it. The list is " +
+    "plain alphabetical (string order, so Unknown Realm 14 sorts before 2) and " +
+    "the current board is HIGHLIGHTED in place at the same row height, not " +
+    "expanded -- row arithmetic holds in a resting list. It re-sorts on every " +
+    "rename, so read the rows off the shot rather than reusing a position."
+  }
+  'hudstate' {
+    $h = Read-Hud
+    "hud $($h.state) (column $([int]$h.column)% dark, control " +
+    "$([int]$h.control)%, delta $([int]$h.delta))"
+  }
+  'boardsstate' {
+    $st = Read-BoardsPanel
+    "campaign boards $($st.state) (inside $([int]$st.inside)% dark, outside " +
+    "$([int]$st.outside)%, delta $([int]$st.delta))"
   }
   'shot'    { & (Join-Path $PSScriptRoot "grab.ps1") -Name $Name }
   'chord'   { Focus-TS; Send-Chord $Keys; "sent $Keys" }
