@@ -113,7 +113,7 @@ Run all three before reporting a build as good.
 ```bash
 python -m pytest -q
 ```
-146 tests. `tests/fixtures/*.slab` are genuine TaleSpire slabs and are the codec's
+326 tests. `tests/fixtures/*.slab` are genuine TaleSpire slabs and are the codec's
 ground truth: decode → encode reproduces the original *binary* byte for byte (the
 base64 differs, because .NET's deflate and zlib's differ — that is expected).
 
@@ -134,6 +134,13 @@ print('placements', len(s.placements), 'off-grid', len(bad))
 "
 ```
 Must print `off-grid 0`. Check every chunk, not just the first.
+
+**Read the whole report. Do not grep it for the lines you want.** Two defects
+were shipped in one session because the build was filtered with
+`grep -E "assets in|slab export"`, which hides every `[FAIL]` above it: a
+portcullis sitting a quarter tile off the lattice, and a rampart optimisation
+that emptied exactly the cells the masonry check samples. The report is short.
+Read it.
 
 **3. Building access.** The `build`/`verify` report line reading
 `building access: N of M buildings (P%) can be entered from the street network`.
@@ -157,6 +164,30 @@ Never add a new check to the TileMap pass. If it can be fooled by geometry
 that was never built, it belongs in `verify.check_placements`, which has
 `_Occupancy` for asking "is there solid matter at this point".
 
+**Never optimise away geometry a check samples.** 38% of the rampart's body
+cells have no visible face, so dropping their lower courses saved 495 blocks
+and looked identical — and emptied precisely the cells `town_wall_gaps` reads,
+which cannot tell a sealed void from daylight straight through the circuit.
+That check exists because see-through wall shipped once, on 1,234 tiles. If an
+optimisation makes a check fail, the check is usually the older and wiser of
+the two; the burden is on the optimisation.
+
+## Before reverse-engineering the game, check the modding community
+
+Twenty minutes on [Thunderstore](https://thunderstore.io/c/talespire/) and
+GitHub, *first*. Several sessions went into measuring how `Ctrl+V` seats a slab
+— the ray-hit anchor, the slide on a tilted camera, the bounding-box centre,
+the even-extent tie — and then into the machinery that works around it. That
+whole problem is solved: LordAshes' `MultiPasteSlabsPlugin` and
+`SlabPlugin_CCM` read a JSON document stating each slab's position.
+`build --multi-slab` emits it.
+
+Also worth knowing before you build a tool: **Tales Tavern's asset archive**
+browses every in-game tile *with pictures* (many probe sessions were spent
+answering questions a picture answers in a second); `SlabelFish` and
+`talespireDeserialize` are existing Python slab codecs; `TaleSpire_Generator`
+already reads `index.json` and emits slabs.
+
 ## Debugging technique
 
 **Decode the slab and measure it. Do not judge from a screenshot.** Screenshots
@@ -176,6 +207,22 @@ you do not know which way a piece faces at `rot=0`, do not guess:
 - Emit a probe slab laying the asset at all four quarter turns, each on its own
   pad with a stub wall marking north. `tools/roof_probe.py` and
   `tools/rev6_probe.py` are the working templates.
+- **Sweep the whole space; never report one guess as a survey.** Trying a
+  single candidate corner per roof kit, seeing it fail and concluding "these
+  kits have no 1x1 hip pieces" was wrong in every clause — the pieces exist
+  one-for-one and only the rotation differed. The user pushed back with "it
+  seems to me the pieces exist, but the rotations are wrong", and was right.
+  The fix is an artifact that enumerates the space (`roofrot_probe.py --hips`
+  lays the same hip once per offset, so exactly one closes), not an assertion.
+- **Label a probe so the label survives the angle you read it from.** A
+  vertical tally stack reads at a low oblique and vanishes in plan; a bar of N
+  cells on the ground reads in plan and vanishes at an oblique. Put the count
+  on the thing being judged when you can — `stairrot2` stacks pips on each
+  flight's own wall — because a marker you cannot match to a candidate makes
+  the probe worthless. Two findings were nearly misattributed this way.
+- **Run one dark kit at a time against a light control.** Castle and Haunted
+  are both dark weathered timber and were told apart on a four-kit board only
+  by counting a tally at a grazing angle, which read wrong.
 - Or decode a build that already works. `tools/harvest_slabs.py` pulls community
   slabs into `library/`; `tools/analyse_library.py` decodes them and prints, per
   group tag, the asset names used plus rotation and `y` histograms. That is how
@@ -196,13 +243,41 @@ and `WALL_SEGMENT_ROLES` must match the wall's footprint.
 Derive every placement offset from the asset's collider bounds
 (`size_x/size_y/size_z`); never hardcode one.
 
-The roof kit rotations (`ROOF_EDGE_ROT` N=6 E=0 S=18 W=12, `ROOF_CORNER_ROT`
-NW=12 NE=6 SW=18 SE=0 in `build.py`) are a quarter turn off the wall convention
-(`ROT_N,E,S,W = 0,6,12,18`). That is measured. Do not "fix" it.
+**The kit is the catalog's `folder`.** `pack` is the DLC ("Medieval Fantasy"
+covers castle, rural, tavern and thatch alike) and `group_tag` is a *form*, so
+neither says whether two pieces belong together. `Village Roof Side Wall 02`
+lives in folder **Tavern**. Getting this wrong meant hunting a corner named
+"village *", finding none, and mitring one — while the kit's own corner sat
+unused. `python tools/kit_index.py --complete` answers "which kits can build a
+whole house"; `--kit X` dumps one.
+
+**The roof rotations are PER KIT.** `ROOF_EDGE_ROT` (N=6 E=0 S=18 W=12) and
+`ROOF_CORNER_ROT` (NW=12 NE=6 SW=18 SE=0) were read out of one community-built
+cottage, and that cottage is *thatched*. No other kit shares them:
+
+| kit | edge | corner | material |
+|---|---|---|---|
+| `Rural` | +0 | +0 | thatch — the baseline the constants encode |
+| `Tavern` | +6 | +6 | terracotta tile |
+| `Castle Fortified` | +6 | +0 | brown shingle |
+| `Abandoned Village` | +6 | +0 | grey slate |
+
+`build.ROOF_ROT_OFFSET` holds the table, keyed on `folder`. Measure a new kit
+with `tools/roofrot_probe.py --hips`, which lays the same hip once per quarter
+turn so exactly one closes — and note the edge and corner do **not** have to
+share an offset, so sweep them separately (`--edge-off`).
 
 ## Handing off to the user
 
-Pasting is the only ingestion path — `talespire://` links do not import boards.
+Pasting is the only ingestion path — `talespire://` links do not import boards
+(confirmed against the official scheme docs: dice, single assets by UUID,
+published-board links, bookmarks; no slab import).
+
+If they are willing to run BepInEx, `build --multi-slab` writes one JSON
+document that a paste plugin places in a single keystroke — no cursor aiming,
+no shared bounding box, no paste order, no camera discipline. Offer it, but
+keep the chunk files as the default: the plugin breaks on game updates, and
+nobody should have to mod their game to see a town.
 When you deliver slabs, tell the user: run TaleSpire **windowed**, `Ctrl+V` puts
 the slab in hand, a left press **held ~0.2 s** commits it (an instant click is
 swallowed), right-click clears the hand, and multi-chunk maps must all be
