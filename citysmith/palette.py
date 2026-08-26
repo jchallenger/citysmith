@@ -41,7 +41,8 @@ WALL_COURSE_ROLES = ("wall_corner", "wall_corner_civic")
 #: in a 1-wide wall and dragged an entire board half a tile off the grid.
 CELL_ROLES = (
     "floor", "floor_upper", "floor_civic", "ground", "street", "water",
-    "gravel", "roof", "bridge_deck", "marsh",
+    "gravel", "roof", "bridge_deck", "marsh", "court",
+    "palisade_wall", "palisade_corner",
 ) + WALL_COURSE_ROLES
 
 #: Roles laid across a 2x2 block of cells.
@@ -649,6 +650,41 @@ MEDIEVAL = Style(
         "field_hedge": [
             _prop(name=("hedge_piece_01",), **_MED),
         ],
+        # -- palisade: a barricade rather than a boundary ---------------------
+        #
+        # A whole kit, in its own folder, and it took asking the catalog for
+        # "thin and over 1.4 tall" to find -- `Wooden Fence`, which every
+        # timber boundary here was built from, is **0.68 tall**. That is 3.4 ft:
+        # a garden paling you step over, standing in for the barricade round a
+        # keep. Nothing measured it until the board was looked at.
+        #
+        # The kit is nine pieces on a 1.0-deep full cell (so no curtain-piece
+        # daylight), in short 1.0 and tall 2.0 heights with a corner and a cap
+        # for each. **Its names are width x HEIGHT, not footprint**: `tall 1x2`
+        # is 1.00 x 2.00 x 1.00. One more entry for "asset names are
+        # inconsistent"; the collider is the only thing that says the shape.
+        #
+        # Read as pictures before pinning (`tools/asset_shots.py --kit
+        # Palisade`, links verified against our own UUIDs): the wall is
+        # pointed stakes with a rail, and it is **directional** -- diagonal
+        # bracing and a walk on one face, which has to end up inside. The
+        # corner is a bundle of round posts and is near enough symmetric to
+        # rotate anywhere.
+        # **The 1x1 piece, not the 2x2**, because a palisade is laid on the
+        # cell lattice (see `FenceStyle.on_cells`) and a 2-wide piece cannot
+        # be. 1.00 x 2.00 x 1.00 -- one cell of ground, two tiles of height,
+        # a full cell deep so a stair-stepped run has no daylight in it.
+        "palisade_wall": [
+            _tile(name=("Palisade wall tall 1x2",), **_MED),
+        ],
+        "palisade_corner": [
+            _tile(name=("Palisade wall tall corner",), **_MED),
+        ],
+        # The short course, for a compound that wants enclosing rather than
+        # defending -- a stock pen, a yard that means it.
+        "palisade_wall_short": [
+            _tile(name=("Palisade wall short 1x2",), **_MED),
+        ],
         # Outdoor surfaces beyond the three the map used to have. Every pick
         # here was read off a board (`tools/surface_probe.py` under
         # `review.ps1 360`), because nothing in the catalog says what a tile
@@ -672,6 +708,15 @@ MEDIEVAL = Style(
         "plaza": [
             _tile(name="castle floor 1x1", **_MED),
             _tile(name="Castle Ruins floor stone 1x1", **_MED),
+        ],
+        # The forecourt of a walled property. Laid stone, like the plaza, but
+        # the grey rather than the cream: a market square is the surface a
+        # town spends money on and a courtyard is the one it works on. Keeping
+        # them different materials is also what stops a keep's court reading
+        # as a second market square from the air.
+        "court": [
+            _tile(name=("Castle Ruins floor stone 1x1",
+                        "Castle Ruins Stone Floor 2"), **_MED),
         ],
         # A back lane: dark wet brown, and it is not a road surface at all --
         # it is what a way looks like when nobody has paved it. Reads as earth

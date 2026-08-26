@@ -2675,6 +2675,9 @@ YARD_MIN_GAP = 3
 
 #: Which surface a trade works on. Anything not here gets the default.
 YARD_SURFACE = {
+    # A walled property's ground is swept hard standing, not a trodden lane.
+    # `yard_cells` keys a compound's pooled yard as "compound-NN".
+    "compound": "yard_gravel",
     "smithy": "yard_gravel",
     "stable": "lane_earth",
     "warehouse": "yard_gravel",
@@ -2716,9 +2719,17 @@ def yard_cells(tm) -> dict[str, set[tuple[int, int]]]:
                     # neighbours do not both fence the same strip.
                     claimed.setdefault((nx, nz), bid)
 
+    # **Buildings inside one enclosure share one yard.** Keyed per building,
+    # a keep and its garrison range each claimed their own apron and each
+    # fenced it, so the board showed two paling rectangles nested inside the
+    # barricade that already enclosed them both -- three fences deep, and the
+    # two halves of one property reading as two smallholdings. Pooling them
+    # under the compound id makes the ground between the buildings *theirs*
+    # rather than a no-man's-land the first one to reach it happened to win.
+    inside = R.compounds(tm)
     out: dict[str, set[tuple[int, int]]] = {}
     for cell, bid in claimed.items():
-        out.setdefault(bid, set()).add(cell)
+        out.setdefault(inside.get(bid, bid), set()).add(cell)
     return {b: cs for b, cs in out.items() if len(cs) >= YARD_MIN_CELLS}
 
 
@@ -2799,7 +2810,13 @@ def _lay_yards(b: Builder, tm, grade: float,
     ways = frozenset({R.STREET, R.PLAZA, R.LANE, R.PIER})
     laid = 0
 
+    # **A compound is already enclosed, so its yard is not fenced again.**
+    # The barricade round a keep *is* the yard fence; putting a paling round
+    # the buildings inside it as well is the third boundary in twenty feet.
+    enclosed = set(R.compounds(tm).values())
+
     for bid, cells in sorted(yards.items()):
+        fence_this = fence if bid not in enclosed else None
         # **The surface is laid by `_lay_terrain`, not here.** It used to be
         # laid here, over ground that pass had already sheeted -- two coplanar
         # tiles in every yard cell, which TaleSpire keeps and lets z-fight.
@@ -2817,7 +2834,7 @@ def _lay_yards(b: Builder, tm, grade: float,
             here = grade - drop
             laid += 1
 
-            if fence is None:
+            if fence_this is None:
                 continue
             for side, dx, dz in SIDE_OFFSETS:
                 nx, nz = x + dx, z + dz
@@ -2827,7 +2844,7 @@ def _lay_yards(b: Builder, tm, grade: float,
                     continue          # inside the yard, or against its building
                 if tm.surface[nz][nx] in ways:
                     continue          # the way in
-                b.add(place_wall(fence, x, z, side, here), prop=True)
+                b.add(place_wall(fence_this, x, z, side, here), prop=True)
     return laid
 
 
@@ -3048,6 +3065,24 @@ class FenceStyle:
     #: rotation step. A surveyed line built exactly is an extruded ribbon; a
     #: hedge in particular wants to have grown rather than been placed.
     jitter: float = 0.0
+    #: Lay on the cell lattice rather than along the surveyed bearing.
+    #:
+    #: **Set by whether the pieces are tiles or props, and that is not a
+    #: detail.** Every other style here resolves to a `kind="prop"` asset, and
+    #: a prop is *allowed* off the lattice -- it stores its collider centre, so
+    #: `verify`'s off-grid canary exempts it. The palisade kit is `kind="tile"`,
+    #: and laying tiles along an arbitrary bearing put **166 of them off the
+    #: half-tile grid** on the first build: a real FAIL, from the check that
+    #: exists because one fractional overhang drags a whole board off the grid
+    #: and breaks mini snapping.
+    #:
+    #: So a tile boundary stair-steps, and for this kit that is right rather
+    #: than a compromise. `docs/fencing.md` §2.2 argues against stair-stepping
+    #: because a thin panel run leaves daylight at every step -- the comb, the
+    #: rank of fins. A palisade piece is a **full cell deep**, so there is no
+    #: daylight to leave, which is the same reasoning `city_wall_core` is
+    #: built on.
+    on_cells: bool = False
 
 
 #: The designs. Named so `--fence-style` reads as a choice about the map
@@ -3068,6 +3103,12 @@ FENCE_STYLES: dict[str, FenceStyle] = {
     # Timber paling, cornered from its own kit at hard turns only -- the piece
     # is an L and there is nothing else in that kit to joint with.
     "paling": FenceStyle("yard_fence", "yard_fence_corner", post_min_turn=45.0),
+    # A barricade, and the only style here you cannot step over: the palisade
+    # wall is **2.0 tall against paling's 0.68**. That gap is why a keep's
+    # enclosure read as a garden fence on the board -- `paling` was the
+    # tallest timber the palette had, and nothing had measured it. Corners are
+    # a bundle of posts, so unlike the paling L they can take any turn.
+    "palisade": FenceStyle("palisade_wall", "palisade_corner", on_cells=True),
     # A hedge built exactly like the wall, to see whether a living boundary
     # survives being laid on a survey line.
     "hedge": FenceStyle("field_hedge", None),
@@ -3079,11 +3120,106 @@ FENCE_STYLES: dict[str, FenceStyle] = {
 #: Default when nothing asks for another.
 DEFAULT_FENCE_STYLE = "drystone"
 
+#: What a CLOSED run is built from, whatever the field walls are.
+#: A perimeter round a property is a barricade and a field wall is a
+#: field wall; see `_lay_fences`.
+DEFAULT_ENCLOSURE_STYLE = "palisade"
+
+
+def _is_closed(run) -> bool:
+    """Does this boundary run come back to where it started?
+
+    The one test that separates a *perimeter* from a *field wall*, and it is
+    the same test `raster.compounds` uses to decide what a property is.
+    """
+    if len(run) < 4:
+        return False
+    (x0, z0), (x1, z1) = run[0], run[-1]
+    return abs(x0 - x1) <= 0.01 and abs(z0 - z1) <= 0.01
+
+
+def _lay_palisade(b: Builder, tm, grade: float,
+                  taper: dict[tuple[int, int], float | None],
+                  scatter: "Scatter | None",
+                  panel, post, paved: frozenset, runs) -> int:
+    """Lay a boundary of full-cell tiles on the cell lattice.
+
+    The counterpart to the surveyed-line pass above, for a kit whose pieces
+    are tiles rather than props. See `FenceStyle.on_cells` for why the two
+    cannot share one placement rule: a prop may sit off the half-tile grid and
+    a tile may not, and 166 palisade pieces failed the off-grid canary before
+    this existed.
+
+    One piece per cell of the stroked run, turned so its face is square to the
+    run rather than to the world -- a stair-stepped line of full-cell pieces
+    has no daylight in it, but a rank of pieces all facing north through a
+    corner still reads as a mistake. The turn is taken from which of the
+    cell's neighbours are also on the run, which is the cell-grid equivalent
+    of the bearing the other pass uses.
+    """
+    from . import raster as R
+
+    laid = 0
+    for run in runs:
+        on_run = {c for c in R._stroke_line(run, 1.0, tm.width, tm.depth)}
+        if not on_run:
+            continue
+        # **Which way the bracing faces, and it is not cosmetic.** The panel
+        # is directional -- pointed stakes on one face, diagonal bracing and a
+        # walk on the other -- so a rank of them turned the wrong way reads as
+        # scaffolding stood outside the wall, which is what the first run
+        # looked like on the board. For a closed run, "the wrong way" has a
+        # definition: the braced side belongs toward the middle of what is
+        # being enclosed.
+        cx = sum(p[0] for p in run) / len(run)
+        cz = sum(p[1] for p in run) / len(run)
+
+        for x, z in sorted(on_run):
+            if not tm.inside(x, z):
+                continue
+            # The same three exemptions the surveyed pass makes: a boundary
+            # never crosses a carriageway, stands in a building, or floats
+            # where the border taper took the ground away.
+            if tm.building[z][x] or tm.wall[z][x]:
+                continue
+            if tm.surface[z][x] in paved:
+                continue
+            drop = taper.get((x, z), 0.0)
+            if drop is None:
+                continue
+
+            along_x = (x - 1, z) in on_run or (x + 1, z) in on_run
+            along_z = (x, z - 1) in on_run or (x, z + 1) in on_run
+            piece = panel
+            if along_x and along_z and post is not None:
+                piece = post                  # the run turns here
+                rot = 0
+            elif along_x:
+                # Runs east-west, so it presents a north or a south face.
+                # **Which of the two was read off the board, not reasoned
+                # out.** The first version put the bracing and the walk
+                # platform on the OUTSIDE of the whole circuit -- a stockade
+                # with its scaffolding facing the field, which is exactly
+                # backwards and obvious from any angle once built. rot=0 on a
+                # southern run showed braced-south, so the braced face is the
+                # one the rotation points away from, and the turn is the
+                # opposite of the intuitive one.
+                rot = 12 if cz < z else 0
+            else:
+                rot = 18 if cx < x else 6
+            here = grade - drop
+            b.add(place_tile(piece, x, z, here, rot))
+            if scatter is not None:
+                scatter.reserve(piece, x + 0.5, z + 0.5, here, rot)
+            laid += 1
+    return laid
+
 
 def _lay_fences(b: Builder, tm, grade: float,
                 taper: dict[tuple[int, int], float | None],
                 scatter: "Scatter | None" = None,
-                style: str = DEFAULT_FENCE_STYLE) -> int:
+                style: str = DEFAULT_FENCE_STYLE,
+                enclosure_style: str | None = DEFAULT_ENCLOSURE_STYLE) -> int:
     """Build the field boundaries along their surveyed lines.
 
     This is the one pass that does not work in cells, and `docs/fencing.md` §4
@@ -3130,7 +3266,33 @@ def _lay_fences(b: Builder, tm, grade: float,
     rng = random.Random(f"fences:{style}")
     laid = 0
 
-    for run in tm.fences:
+    # **A closed run and an open run are different things, and one style
+    # cannot serve both.** `--fence-style palisade` built the outlying farms'
+    # field boundaries as ten-foot timber stockades: correct for the keep's
+    # barricade, absurd across a wheat field, and visible from the air as a
+    # fortification cutting through somebody's crop. The same closed-versus-
+    # open test that decides what a property is decides what fences it.
+    field_runs = [r for r in tm.fences if not _is_closed(r)]
+    ring_runs = [r for r in tm.fences if _is_closed(r)]
+
+    if spec.on_cells:
+        # The chosen style is a cell-laid one, so it was asked for by name:
+        # honour it on everything.
+        return _lay_palisade(b, tm, grade, taper, scatter, panel_asset,
+                             post_asset, paved, tm.fences)
+
+    laid_rings = 0
+    if ring_runs and enclosure_style and enclosure_style != style:
+        ring_spec = FENCE_STYLES.get(enclosure_style)
+        if ring_spec is not None:
+            ring_panel = b.palette.resolve(ring_spec.panel)
+            ring_post = b.palette.resolve(ring_spec.post) if ring_spec.post else None
+            if ring_panel is not None and ring_spec.on_cells:
+                laid_rings = _lay_palisade(b, tm, grade, taper, scatter,
+                                           ring_panel, ring_post, paved, ring_runs)
+                ring_runs = []
+
+    for run in field_runs + ring_runs:
         panels, joints = run_along_polyline(run)
         if not panels:
             continue
@@ -3183,7 +3345,7 @@ def _lay_fences(b: Builder, tm, grade: float,
             laid += 1
             if scatter is not None:
                 scatter.reserve(post_asset, jx, jz, here, 0)
-    return laid
+    return laid + laid_rings
 
 
 def _fence_ground(tm, taper: dict[tuple[int, int], float | None], grade: float,
@@ -4382,6 +4544,9 @@ def build_from_tilemap(
         R.FIELD: "field_edge",
         R.STREET: "street",
         R.PLAZA: "plaza",
+        # A walled property's forecourt. Its own role rather than the plaza's,
+        # so a keep's courtyard and a market square are not the same stone.
+        R.COURT: "court",
         # A lane is trodden earth, not laid cobble -- that is the whole point
         # of distinguishing it from the street it opens off. It used to be
         # `lane`, which is the same gravel the field edge was built from.

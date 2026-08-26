@@ -28,6 +28,11 @@ WATER = "water"
 MARSH = "marsh"
 STREET = "street"
 PLAZA = "plaza"
+#: The paved forecourt of a walled property -- see :func:`_lay_courts`.
+#: Distinct from ``PLAZA`` on purpose: a market square is dressed with goods,
+#: and a keep's courtyard full of market stalls is the surface-class-without-
+#: context mistake this module already records against hedgerows and lilies.
+COURT = "court"
 PIER = "pier"
 LANE = "lane"
 FLOOR = "floor"
@@ -46,7 +51,7 @@ FLOOR = "floor"
 #: wide and **0.5 tall**, exactly like grass, so a marsh cell is solid matter
 #: at grade that a creature stands on with its feet dry-ish. Open water is
 #: dropped ``build.WATER_SURFACE_DROP`` below grade with a bed under it.
-WALKABLE = frozenset({GROUND, FIELD, MARSH, STREET, PLAZA, PIER, LANE, FLOOR})
+WALKABLE = frozenset({GROUND, FIELD, MARSH, STREET, PLAZA, COURT, PIER, LANE, FLOOR})
 
 #: Surfaces that count as public open space for door placement and routing.
 #: A lane belongs here: it is a way people walk, and leaving it out silently
@@ -56,7 +61,11 @@ WALKABLE = frozenset({GROUND, FIELD, MARSH, STREET, PLAZA, PIER, LANE, FLOOR})
 #: ``MARSH`` is deliberately absent. It is walkable, but it is not a *way*:
 #: nobody puts their front door onto a bog, and routing that treats a fen as
 #: public open space will happily send the street network through it.
-OPEN = frozenset({GROUND, STREET, PLAZA, PIER, LANE})
+#:
+#: ``COURT`` belongs here and ``MARSH`` does not: a forecourt is exactly a way
+#: -- it is the ground the front doors open onto, and the whole point of
+#: laying one is that the doors are reachable across it.
+OPEN = frozenset({GROUND, STREET, PLAZA, COURT, PIER, LANE})
 
 SIDES = (("n", 0, -1), ("s", 0, 1), ("w", -1, 0), ("e", 1, 0))
 
@@ -630,7 +639,206 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
     _trace_lanes(tm)
     _find_perimeters(tm, layout)
     _place_doors(tm, layout)
+    # After the doors, because a court is laid to reach them.
+    _lay_courts(tm)
     return tm
+
+
+#: How wide a court corridor is laid, in cells. Two is 10 ft -- the same floor
+#: every other way on the map is held to, because a forecourt somebody cannot
+#: walk down two abreast is a path, not a court.
+COURT_WIDTH = 2
+
+
+def compounds(tm: TileMap) -> dict[str, str]:
+    """Building id -> the id of the enclosure it stands in, where there is one.
+
+    **A closed boundary run means one property, and that is read from the
+    input rather than declared.** A keep and its garrison range inside a
+    barricade are not two houses that happen to stand near each other: they
+    share a wall, a gate and a forecourt, and on the board they have to read
+    that way -- rather than as two cottages that each fenced their own garden
+    inside somebody else's stockade, which is what they did look like.
+
+    The signal is a *closed* run in :attr:`TileMap.fences`. An open run is a
+    field boundary and encloses nothing; a closed one is somebody's perimeter.
+    That distinction already survives the import and the clip, so nothing new
+    has to be carried, and anything else with a perimeter -- a stock pen, a
+    temple precinct, a walled farmstead -- gets the same treatment for free,
+    because the test is the geometry and never the kind.
+
+    Buildings are tested by centroid, which is enough: a footprint straddling
+    an enclosure line is a map error rather than a case to handle.
+    """
+    from .layout import point_in_polygon
+
+    rings: list[tuple[str, list[Point]]] = []
+    for i, run in enumerate(tm.fences or ()):
+        if len(run) < 4:
+            continue
+        (x0, z0), (x1, z1) = run[0], run[-1]
+        if abs(x0 - x1) > 0.01 or abs(z0 - z1) > 0.01:
+            continue                      # an open run is a boundary, not a pen
+        rings.append((f"compound-{i:02d}", list(run)))
+    if not rings:
+        return {}
+
+    cells: dict[str, list[tuple[int, int]]] = {}
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            bid = tm.building[z][x]
+            if bid:
+                cells.setdefault(bid, []).append((x, z))
+
+    out: dict[str, str] = {}
+    for bid, cs in cells.items():
+        cx = sum(c[0] for c in cs) / len(cs) + 0.5
+        cz = sum(c[1] for c in cs) / len(cs) + 0.5
+        for cid, ring in rings:
+            if point_in_polygon(ring, (cx, cz)):
+                out[bid] = cid
+                break
+    return out
+
+
+def _walk_to(tm: TileMap, starts: set[tuple[int, int]], goal,
+             passable: frozenset[str]) -> list[tuple[int, int]]:
+    """Shortest path from any of ``starts`` to the first cell ``goal`` accepts.
+
+    **Breadth-first and not a straight line, because a compound has buildings
+    in it.** The first cut of this ran an L-shaped corridor between doors, and
+    on Sedgewater the L from the keep's door to the garrison's north door goes
+    straight through the garrison: every cell of it is a building cell, every
+    one is skipped, and the court silently stopped short. A courtyard path has
+    to go *round* what is standing in it, which is what a path is.
+
+    Returns the cells walked, excluding the goal itself -- the goal is either
+    an existing way or already-laid court, and neither wants repainting.
+    Empty when there is no route.
+    """
+    prev: dict[tuple[int, int], tuple[int, int] | None] = {c: None for c in starts}
+    queue = deque(starts)
+    found: tuple[int, int] | None = None
+    while queue and found is None:
+        x, z = queue.popleft()
+        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            n = (x + dx, z + dz)
+            if n in prev or not tm.inside(*n):
+                continue
+            if tm.building[n[1]][n[0]] or tm.wall[n[1]][n[0]]:
+                continue
+            if goal(n):
+                prev[n] = (x, z)
+                found = n
+                break
+            if tm.surface[n[1]][n[0]] not in passable:
+                continue
+            prev[n] = (x, z)
+            queue.append(n)
+    if found is None:
+        return []
+    out: list[tuple[int, int]] = []
+    node = prev[found]
+    while node is not None:
+        out.append(node)
+        node = prev[node]
+    return out
+
+
+def _widen(cells, width: int) -> set[tuple[int, int]]:
+    """Fatten a one-cell path to ``width`` across, so it is a court and not a trail."""
+    out: set[tuple[int, int]] = set()
+    half = width // 2
+    for x, z in cells:
+        for dz in range(-half, width - half):
+            for dx in range(-half, width - half):
+                out.add((x + dx, z + dz))
+    return out
+
+
+def _lay_courts(tm: TileMap) -> None:
+    """Pave the forecourt of every enclosed property.
+
+    A compound's buildings share one entrance, so the ground between their
+    doors is a *court* -- laid stone somebody keeps swept -- and not the strip
+    of trodden earth each would have claimed on its own. Three things get
+    paved, and each answers a different half of "can you walk in and get to
+    the doors":
+
+    * the cell each door opens onto, so no door opens onto grass
+    * a corridor joining every door to the first, so the doors connect to each
+      other rather than to two separate patches of paving. On Sedgewater the
+      keep and its garrison stand 6.4 tiles apart while a yard apron reaches
+      2, so without this there is a bare strip between two paved aprons.
+    * a spur from the court to the nearest way outside, which is the walkway
+      in. Without it the court is a paved island inside a stockade.
+
+    Only ``GROUND`` and ``MARSH`` are overpainted. A court never eats a
+    street, a building, water or the enclosure itself.
+    """
+    from collections import deque
+
+    by_compound: dict[str, list[str]] = {}
+    for bid, cid in compounds(tm).items():
+        by_compound.setdefault(cid, []).append(bid)
+    if not by_compound:
+        return
+
+    pavable = frozenset({GROUND, MARSH})
+
+    def paint(cells) -> None:
+        for x, z in cells:
+            if not tm.inside(x, z):
+                continue
+            if tm.building[z][x] or tm.wall[z][x]:
+                continue
+            if tm.surface[z][x] in pavable:
+                tm.surface[z][x] = COURT
+
+    for cid, bids in sorted(by_compound.items()):
+        aprons: list[tuple[int, int]] = []
+        for bid in sorted(bids):
+            for x, z, side in tm.doors.get(bid, ()):
+                dx, dz = next((d, e) for s, d, e in SIDES if s == side)
+                aprons.append((x + dx, z + dz))
+        if not aprons:
+            continue
+
+        ways = frozenset({STREET, LANE, PLAZA, PIER})
+        paint(aprons)
+
+        # Join every door to the court already laid, going round whatever
+        # stands between them.
+        #
+        # **Seeded with ONE apron and grown, not with all of them.** Seeded
+        # with the lot, each apron only had to reach *some* other apron, so a
+        # four-door compound came out as two joined pairs -- a court in two
+        # pieces, which is the failure this is supposed to prevent and which
+        # passed on the real map by luck of the geometry. The region has to be
+        # a single growing thing for "one property" to mean anything.
+        crossable = pavable | {COURT}
+        laid = {aprons[0]}
+        for apron in aprons[1:]:
+            if apron in laid:
+                continue
+            walk = _walk_to(tm, {apron}, lambda n: n in laid, crossable)
+            if not walk:
+                continue
+            fat = _widen(walk, COURT_WIDTH)
+            paint(fat)
+            laid |= fat | {apron}
+
+        # The way in. **Started from the court and not from the doors**: on
+        # Sedgewater the garrison's north door already opens straight onto the
+        # road, so a search seeded with the doors found a way in its first step
+        # and paved nothing, while the court itself stayed an island behind the
+        # buildings. The question is whether the *court* reaches a way.
+        if laid and not any(
+                tm.inside(x + dx, z + dz) and tm.surface[z + dz][x + dx] in ways
+                for (x, z) in laid for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+            walk = _walk_to(tm, set(laid),
+                            lambda n: tm.surface[n[1]][n[0]] in ways, pavable)
+            paint(_widen(walk, COURT_WIDTH))
 
 
 def components(tm: TileMap, min_size: int = 1) -> list[list[tuple[int, int]]]:

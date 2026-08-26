@@ -579,6 +579,41 @@
         "marsh",
         "probe"
       ]
+    },
+    {
+      "id": "compound-one-property",
+      "what": "Treat buildings inside one enclosure as a single property",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_the_buildings_of_a_compound_share_one_yard",
+      "note": "A keep and its garrison range each fenced their own yard inside the barricade that already enclosed them both -- three boundaries in twenty feet. A CLOSED run in tm.fences now means one property: pooled yard, no inner fence, one court. Read off the geometry, so a stock pen or temple precinct gets it free.",
+      "tags": [
+        "fencing",
+        "yards"
+      ]
+    },
+    {
+      "id": "compound-court",
+      "what": "Pave a forecourt joining the doors of an enclosed property",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_the_court_joins_every_door_in_one_piece",
+      "note": "Its own COURT surface, not PLAZA -- a market square is dressed with goods and a keep's courtyard full of stalls is the surface-class-without-context mistake. Pathfinds ROUND buildings: the first L-corridor ran straight through the garrison range and the court silently stopped short of the door it was laid for.",
+      "tags": [
+        "surfaces"
+      ]
+    },
+    {
+      "id": "enclosure-material",
+      "what": "Build a perimeter as a barricade and a field wall as a field wall",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_a_field_wall_is_not_built_as_a_barricade",
+      "note": "Wooden Fence is 0.68 tall -- 3.4 ft, a garden paling -- and was the tallest timber the palette had. The Palisade kit is 2.0. But --fence-style palisade then built the outlying farms' boundaries as ten-foot stockades across a wheat field, so the style is chosen per run by the same closed-versus-open test. Tiles lay on CELLS: laying them along a bearing put 166 off the half-tile grid.",
+      "tags": [
+        "fencing",
+        "palette"
+      ]
     }
   ]
 }

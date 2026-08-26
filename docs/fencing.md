@@ -472,3 +472,71 @@ Two consequences:
 follow their surveyed bearings across open field as single continuous walls --
 no stair-step, no comb, no fins. That was the whole argument of §2.2 and §4,
 and it holds.
+
+
+## 8. A perimeter is not a field wall (2026-08-26)
+
+Everything above is about a **boundary between fields**: an open, surveyed
+line, laid along its true bearing out of prop-kind pieces. It turns out that
+covers only half of what a fence run can be, and the other half wants the
+opposite of every decision in §4.
+
+### 8.1 The test is closed versus open
+
+A *closed* run in `Layout.fences` -- one that comes back to its first point --
+is somebody's **perimeter**, not a boundary between two fields. `_is_closed`
+is the whole test, and `raster.compounds` uses the same one to decide what a
+property is (`docs/marsh.md` has the neighbouring case). It needs no new
+vocabulary in the export and no new flag: a hamlet's field walls are open runs
+and a keep's barricade is a closed one, and the two get built differently
+because they are different things.
+
+Three consequences fall out, and each was a defect first:
+
+**The material.** `--fence-style palisade` built the outlying farms' field
+boundaries as ten-foot timber stockades -- correct for the keep, absurd across
+a wheat field, and unmissable from the air as a fortification cutting through
+somebody's crop. `DEFAULT_ENCLOSURE_STYLE` is now applied to closed runs and
+`DEFAULT_FENCE_STYLE` to open ones, so the default gets both right with no
+flag at all. Measured on Sedgewater: 4 open runs -> 91 `Stone fence 02`,
+1 closed run -> 92 `Palisade wall tall 1x2` + 21 corners.
+
+**The lattice.** Every style in §4 resolves to a `kind="prop"` asset, and a
+prop is *allowed* off the half-tile grid -- it stores its collider centre, so
+`verify`'s off-grid canary exempts it. The `Palisade` kit is `kind="tile"`,
+and laying tiles along an arbitrary bearing put **166 of them off the grid**
+on the first build. That is a real FAIL from the check that exists because one
+fractional overhang drags a whole board off the lattice and breaks mini
+snapping.
+
+So a tile boundary is laid on **cells** (`FenceStyle.on_cells`), and for this
+kit that is right rather than a compromise. §2.2 argues against stair-stepping
+because a thin panel run leaves daylight at every step -- the comb, the rank of
+fins. A palisade piece is a **full cell deep**, so there is no daylight to
+leave; the same reasoning `city_wall_core` is built on. Use the 1x1 piece
+(`Palisade wall tall 1x2`, 1.00 x 2.00 x 1.00) and not the 2x2, because a
+2-wide piece cannot sit on a one-cell lattice run.
+
+**The facing, which is the one that had to be read off a board.** The panel is
+directional: pointed stakes on one face, diagonal bracing and a walk platform
+on the other. The first build put the bracing on the OUTSIDE of the entire
+circuit -- a stockade with its scaffolding facing the field. Reasoning about
+which way `rot=0` points produced exactly the wrong answer; the board settled
+it in one look, and `_lay_palisade` now carries the measurement rather than
+the reasoning. **A directional piece needs an in-game look before it is
+trusted, whatever the collider says** -- which is this file's neighbour rule
+about roof rotations, arriving again from a different direction.
+
+### 8.2 The number that started it
+
+`Wooden Fence` -- what every timber boundary here was built from, and what a
+keep's barricade was built from -- is **0.68 tall**. That is 3.4 ft: a garden
+paling you step over. It had never been measured, and on the board a keep's
+enclosure read as somebody's vegetable patch.
+
+The `Palisade` folder is nine pieces at 1.0 and 2.0 tall with a corner and a
+cap for each, and it was found by asking the catalog for "thin and over 1.4
+tall" rather than by searching names. Its names are **width x HEIGHT, not
+footprint** -- `tall 1x2` is 1.00 x 2.00 x 1.00 -- which is one more entry for
+"asset names are inconsistent, the collider is the only thing that says the
+shape".
