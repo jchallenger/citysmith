@@ -3139,35 +3139,44 @@ def _is_closed(run) -> bool:
     return abs(x0 - x1) <= 0.01 and abs(z0 - z1) <= 0.01
 
 
-def _close_diagonals(cells: set) -> set:
-    """Add the cells that stop a stair-stepped run being see-through.
+def _bearing_rot(cells: set, x: int, z: int, cx: float, cz: float) -> int:
+    """Which of the 24 steps turns this piece along the run, braced side in.
 
-    **A full cell of daylight is closed by a full-cell piece; a DIAGONAL step
-    is not.** `FenceStyle.on_cells` argues that stair-stepping is safe for
-    this kit because the piece fills its cell, and that is true where two
-    cells meet along an edge. Where the run steps corner-to-corner the two
-    pieces touch at a *point*, and what is between them is a slit straight
-    through the wall.
+    **A 1x1 tile may be turned to ANY of the 24 steps and stay on the
+    half-tile lattice** -- `rotated_footprint` returns 1.000 x 1.000 at every
+    step, so the min corner never moves. Fractional *position* is what breaks
+    the off-grid canary; fractional *rotation* costs nothing. Those two were
+    conflated, and the conflation is the whole reason a barricade was ever
+    stair-stepped: the piece can simply be turned to follow the line.
 
-    Measured on Sedgewater's barricade before this existed: 116 cells in
-    **34 four-connected pieces**, 14 of them with no orthogonal neighbour at
-    all. On the board that is a stockade you can see the field through, which
-    is the failure this repo already records three times over as a comb, a
-    rank of fins and a lattice of piers -- arrived at once more from a
-    direction that looked safe.
+    The direction is a LINE THROUGH the neighbours, not a vector sum. Summing
+    offsets makes the two neighbours of any straight or diagonal run cancel
+    exactly, which sends every cell to the axis fallback -- a version of this
+    produced a probe with no 45 degree rotation in it at all, and was caught
+    by counting rotations in the emitted slab rather than by looking.
 
-    One connector per diagonal, chosen deterministically so a rebuild is
-    byte-identical.
+    `rot=0` lays the stake plane east-west and the braced face south, so the
+    bearing is the step directly; the half-turn that puts the bracing inside
+    is chosen against the enclosure's centroid.
     """
-    out = set(cells)
-    for x, z in sorted(cells):
-        for dx, dz in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
-            if (x + dx, z + dz) not in cells:
-                continue
-            if (x + dx, z) in out or (x, z + dz) in out:
-                continue
-            out.add((x + dx, z))
-    return out
+    nb = [(nx, nz) for nx in (x - 1, x, x + 1) for nz in (z - 1, z, z + 1)
+          if (nx, nz) in cells and (nx, nz) != (x, z)]
+    if not nb:
+        return 0
+    if len(nb) >= 2:
+        far = max(((a, b) for i, a in enumerate(nb) for b in nb[i + 1:]),
+                  key=lambda ab: (ab[0][0] - ab[1][0]) ** 2 + (ab[0][1] - ab[1][1]) ** 2)
+        dx, dz = far[0][0] - far[1][0], far[0][1] - far[1][1]
+    else:
+        dx, dz = nb[0][0] - x, nb[0][1] - z
+    rot = int(round(math.degrees(math.atan2(dz, dx)) / 15.0)) % 12
+    # The braced face belongs toward the middle of what is enclosed. The
+    # plane's normal at `rot` points to rot+6; take the half turn whose
+    # normal points away from the centroid.
+    nx_, nz_ = math.cos(math.radians((rot + 6) * 15)), math.sin(math.radians((rot + 6) * 15))
+    if (cx - x) * nx_ + (cz - z) * nz_ > 0:
+        rot += 12
+    return rot % 24
 
 
 def _lay_palisade(b: Builder, tm, grade: float,
@@ -3208,8 +3217,14 @@ def _lay_palisade(b: Builder, tm, grade: float,
 
     laid = 0
     for run in runs:
-        on_run = _close_diagonals(
-            {c for c in R._stroke_line(run, 1.0, tm.width, tm.depth)})
+        # **No diagonal connectors.** They exist to patch a stair-step, and
+        # a run whose pieces follow the bearing does not stair-step. Probed
+        # side by side on their own boards: connectors sit at quarter turns
+        # while their neighbours sit at 45, so they stand out as T-junctions
+        # and reintroduce exactly the artifact the rotation removes -- the
+        # connectored specimen read WORSE than the plain one, at 23 pieces
+        # against 16.
+        on_run = {c for c in R._stroke_line(run, 1.0, tm.width, tm.depth)}
         if not on_run:
             continue
 
@@ -3266,31 +3281,12 @@ def _lay_palisade(b: Builder, tm, grade: float,
             if drop is None:
                 continue
 
-            # **The DOMINANT local axis, not "east-west if there is any
-            # east-west neighbour".** At a stair-step both are true, and
-            # taking the first one made the panel face across the run for
-            # every second cell of a diagonal. Looking two cells each way
-            # settles which direction the run is actually going.
-            span_x = sum(1 for d in (-2, -1, 1, 2) if (x + d, z) in on_run)
-            span_z = sum(1 for d in (-2, -1, 1, 2) if (x, z + d) in on_run)
-            along_x = span_x >= span_z
             piece = panel
             if (x, z) in corners and post is not None:
                 piece = post                  # a real turn in the source line
                 rot = 0
-            elif along_x:
-                # Runs east-west, so it presents a north or a south face.
-                # **Which of the two was read off the board, not reasoned
-                # out.** The first version put the bracing and the walk
-                # platform on the OUTSIDE of the whole circuit -- a stockade
-                # with its scaffolding facing the field, which is exactly
-                # backwards and obvious from any angle once built. rot=0 on a
-                # southern run showed braced-south, so the braced face is the
-                # one the rotation points away from, and the turn is the
-                # opposite of the intuitive one.
-                rot = 12 if cz < z else 0
             else:
-                rot = 18 if cx < x else 6
+                rot = _bearing_rot(on_run, x, z, cx, cz)
             here = grade - drop
             b.add(place_tile(piece, x, z, here, rot))
             if scatter is not None:

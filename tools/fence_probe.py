@@ -45,6 +45,7 @@ piece, given it already exempts every prop for the same reason".
 
 from __future__ import annotations
 
+import math
 import sys
 
 sys.path.insert(0, ".")
@@ -117,6 +118,67 @@ def lay_blocks(ox, oz, cells, piece) -> None:
                                      0 if dominant(cs, x, z) else 6))
 
 
+def bearing_rot(cs, x, z) -> int:
+    """The run's local bearing here, as one of the 24 rotation steps.
+
+    **A 1x1 tile may be turned to any of the 24 steps and stay on the
+    half-tile lattice** -- `rotated_footprint` returns 1.000 x 1.000 at every
+    step, so the min corner never moves. Fractional POSITION is what breaks
+    the off-grid canary (the 166 failures that sent the palisade onto cells in
+    the first place); fractional ROTATION costs nothing. Those two were
+    conflated, and the conflation is why this was never tried.
+
+    rot=0 lays the stake plane east-west, so the step is just the bearing in
+    15 degree units. On a 45 degree run every piece turns to step 3 and their
+    planes are collinear -- a continuous diagonal wall with no stair-step to
+    patch.
+    """
+    nb = [(nx, nz) for nx in (x - 1, x, x + 1) for nz in (z - 1, z, z + 1)
+          if (nx, nz) in cs and (nx, nz) != (x, z)]
+    if not nb:
+        return 0
+    # **The direction is a LINE through the neighbours, not a vector sum.**
+    # Summing offsets makes the two neighbours of any straight or diagonal run
+    # cancel exactly, which sent every cell to the axis fallback and produced
+    # a probe with no 45 degree rotation in it at all -- caught by counting
+    # the rotations before pasting, not by looking at the board.
+    if len(nb) >= 2:
+        far = max(((a, b) for i, a in enumerate(nb) for b in nb[i + 1:]),
+                  key=lambda ab: (ab[0][0] - ab[1][0]) ** 2 + (ab[0][1] - ab[1][1]) ** 2)
+        dx, dz = far[0][0] - far[1][0], far[0][1] - far[1][1]
+    else:
+        dx, dz = nb[0][0] - x, nb[0][1] - z
+    # A wall plane is undirected, so fold onto a half turn; the facing is a
+    # separate question the ring's centroid answers.
+    return int(round(math.degrees(math.atan2(dz, dx)) / 15.0)) % 12
+
+
+def lay_bearing(ox, oz, cells, piece) -> None:
+    """One piece per cell, each turned to the run's local bearing."""
+    cs = set(cells)
+    for x, z in sorted(cs):
+        placements.append(place_tile(piece, ox + x, oz + z, GRADE,
+                                     bearing_rot(cs, x, z)))
+
+
+def lay_diag_piece(ox, oz, cells, straight, diag) -> None:
+    """A purpose-built diagonal blade on the stepped cells, straight elsewhere.
+
+    `md_wall_1x1_diag_01` is a blade cutting its cell corner to corner --
+    which `CLAUDE.md` records as the reason it was thrown out as a rampart
+    MASS, and which is exactly what a diagonal boundary is. Stone, not timber,
+    so this tests the idea and not the material.
+    """
+    cs = set(cells)
+    for x, z in sorted(cs):
+        rot = bearing_rot(cs, x, z)
+        if rot % 6 == 0:
+            placements.append(place_tile(straight, ox + x, oz + z, GRADE, rot))
+        else:
+            placements.append(place_tile(diag, ox + x, oz + z, GRADE,
+                                         (rot // 6) * 6))
+
+
 def lay_curtain(ox, oz, cells, piece) -> None:
     """On every cell EDGE the run does not continue through.
 
@@ -141,21 +203,17 @@ def lay_surveyed(ox, oz, piece) -> None:
 
 
 SPECIMENS = [
-    # **Two, side by side, and nothing else.** Five in a row did not fit the
-    # frame `review.ps1 360` gives and twelve in a grid could not be
-    # attributed; both times the probe answered nothing. The decisive question
-    # is one comparison, so the board carries one comparison and left-versus-
-    # right is the label.
-    #
-    # And it has to be judged by EYE. `tools/fence_seal.py` scores every
-    # cell-laid strategy here at 100% sealed, including the one with no
-    # connectors at all, because `_Occupancy` reads collider bounds and the
-    # defect is in the mesh. That is the same blind spot `md_wall_1x1_diag_01`
-    # exploited, and it is why this file exists rather than a unit test.
-    ("WEST: blocks + connectors (SHIPPED)",
+    ("1 blocks + connectors (SHIPPED)",
      lambda ox, oz: lay_blocks(ox, oz, _close_diagonals(set(cells_of(1.0))), PALISADE)),
-    ("EAST: curtain on the outward face",
+    ("2 curtain on every outward face",
      lambda ox, oz: lay_curtain(ox, oz, _close_diagonals(set(cells_of(1.0))), PALISADE)),
+    ("3 one per cell, turned to the run bearing",
+     lambda ox, oz: lay_bearing(ox, oz, cells_of(1.0), PALISADE)),
+    ("4 bearing + diagonal connectors",
+     lambda ox, oz: lay_bearing(ox, oz, _close_diagonals(set(cells_of(1.0))), PALISADE)),
+    ("5 md diagonal blade on the steps (STONE)",
+     lambda ox, oz: lay_diag_piece(ox, oz, cells_of(1.0),
+                                   asset("md_wall_1x1_01"), asset("md_wall_1x1_diag_01"))),
 ]
 
 for i, (label, fn) in enumerate(SPECIMENS):

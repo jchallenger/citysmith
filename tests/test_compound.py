@@ -323,39 +323,38 @@ def _four_connected_pieces(cells):
     return comps
 
 
-def test_a_stair_stepped_barricade_is_not_see_through():
-    """**A full-cell piece closes a full cell of daylight; it does not close a
-    DIAGONAL step.** Two pieces stepping corner-to-corner touch at a point,
-    and what is between them is a slit straight through the wall.
+def test_a_diagonal_run_follows_its_bearing_instead_of_stair_stepping():
+    """**The fix that replaced diagonal connectors, and it is cheaper.**
 
-    `FenceStyle.on_cells` argued stair-stepping was safe for this kit because
-    the piece fills its cell -- true along an edge, false at a corner.
-    Measured on Sedgewater before the fix: 116 ring cells in **34
-    four-connected pieces**, 14 of them with no orthogonal neighbour at all.
-    That is a stockade you can see the field through, and it is this repo's
-    comb / fins / lattice-of-piers failure arriving from a direction that
-    looked safe.
+    A 1x1 tile may be turned to any of the 24 steps and stay on the half-tile
+    lattice -- `rotated_footprint` returns 1.000 x 1.000 at every step, so the
+    min corner never moves. Fractional *position* breaks the off-grid canary;
+    fractional *rotation* costs nothing. Conflating those two is the whole
+    reason a barricade was ever stair-stepped: the piece can just be turned to
+    follow the line.
+
+    Probed one specimen per board: connectors (23 pieces) read as a staircase
+    of separate frames, bearing rotation (16) as one wall, and bearing PLUS
+    connectors read worse than bearing alone, because a connector sits at a
+    quarter turn while its neighbours sit at 45 and stands out as a
+    T-junction.
     """
-    from citysmith.build import _close_diagonals
-
+    p = _palette()
     tm = R.rasterize(_keep())
-    ring = [r for r in tm.fences if len(r) >= 4][0]
-    raw = set(R._stroke_line(ring, 1.0, tm.width, tm.depth))
-    assert _four_connected_pieces(raw) > 1, \
-        "fixture is too axis-aligned to exercise the diagonal case"
-
-    closed = _close_diagonals(raw)
-    assert _four_connected_pieces(closed) == 1
-    assert all(any((c[0] + dx, c[1] + dz) in closed
-                   for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))
-               for c in closed), "a cell is still joined only at a corner"
+    builder = build_from_tilemap(tm, p, storeys=2)
+    wall = p.resolve("palisade_wall")
+    rots = {pl.rot for pl in builder.placements if pl.asset_id == wall.id}
+    assert rots - {0, 6, 12, 18},         f"a diagonal ring produced only quarter turns: {sorted(rots)}"
 
 
-def test_closing_the_diagonals_is_deterministic():
-    """A rebuild has to be byte-identical; `boards.digest_of` depends on it."""
-    from citysmith.build import _close_diagonals
+def test_turning_a_piece_off_a_quarter_turn_stays_on_the_lattice():
+    """The measurement the fix rests on. If this ever stops being true, the
+    off-grid canary starts firing on every angled boundary on the map."""
+    from citysmith.build import place_centered, rotated_footprint
 
-    tm = R.rasterize(_keep())
-    raw = set(R._stroke_line([r for r in tm.fences if len(r) >= 4][0],
-                             1.0, tm.width, tm.depth))
-    assert _close_diagonals(raw) == _close_diagonals(set(sorted(raw)))
+    piece = _palette().resolve("palisade_wall")
+    for rot in range(24):
+        sx, sz = rotated_footprint(piece, rot)
+        assert (sx, sz) == (1.0, 1.0), (rot, sx, sz)
+        pl = place_centered(piece, 10.5, 10.5, 0.5, rot)
+        assert all(abs(v * 2 - round(v * 2)) < 1e-9 for v in (pl.x, pl.z)), (rot, pl)

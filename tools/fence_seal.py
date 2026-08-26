@@ -25,8 +25,8 @@ import sys
 sys.path.insert(0, ".")
 
 from citysmith import raster as R
-from citysmith.build import (_close_diagonals, place_centered, place_tile,
-                             place_wall, run_along_polyline)
+from citysmith.build import (place_centered, place_tile, place_wall,
+                             run_along_polyline)
 from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
 from citysmith.verify import _Occupancy
@@ -115,7 +115,7 @@ def seal(bag) -> float:
 
 
 thin = set(cells_of(1.0))
-closed = _close_diagonals(thin)
+closed = thin       # `_close_diagonals` is retired; see build._bearing_rot
 
 CASES = [
     ("1  blocks, no connectors", lambda g: blocks(g, thin, PALISADE)),
