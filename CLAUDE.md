@@ -47,6 +47,7 @@ This file is the internal engineering notes. User-facing docs:
 | `render.py` | Hand-written SVG for city and floorplan reference maps. |
 | `ai.py` | Claude translation layer. Optional; never emits geometry. |
 | `slabchat.py` | One small slab from a sentence: spec in, geometry in Python. |
+| `chatsession.py` | Holds the chat's spec history, and states what it cannot see. |
 | `pipeline.py` | One `build_town()` the CLI and the UI both call. Side effects live here. |
 | `cli.py` | Argument parsing and printing. Every decision is in `pipeline`. |
 
@@ -278,6 +279,21 @@ actually matters, all confirmed in-game:
   `scan = 0` arrives as no key at all -- Ctrl+V silently did nothing while the
   clipboard, the foreground window and the mouse all checked out. Fill it from
   `MapVirtualKey(vk, 0)`. `tools/ts.ps1` is the one implementation of all this.
+- **A slab does not fit on a command line, and the limit is not the payload's
+  (MEASURED 2026-08-26).** `ts.ps1 setclip -Text <base64>` fails with
+  `WinError 206, "The filename or extension is too long"` once the *whole*
+  command line passes 32,767 characters -- the documented `CreateProcess`
+  `lpCommandLine` limit. Bisected twice with different prefixes: 32,588
+  payload chars from a deep worktree path, 32,711 from a shorter one. The
+  budget is 32,767 minus the interpreter path, the script path and the flags,
+  so **it shrinks when the repo moves** and a payload that worked yesterday
+  fails after a rename. This is not a theoretical margin: the compressed cap
+  is 30,720 bytes, which is **40,960 base64 characters**, so a perfectly legal
+  slab exceeds the entire command line. `chatsession` writes the base64 to a
+  `mkstemp` file and has PowerShell read it back
+  (`-Text ((Get-Content -Raw -LiteralPath '...').Trim())`), which carries
+  42,000 characters through a 279-character command line, byte-exact.
+
 - **Every binding is in the table in `docs/pasting-into-talespire.md`.** Do not
   duplicate it here; it is read off the game's own hint bar and it is the one
   copy. What belongs here is *why* the ones that bite, bite:

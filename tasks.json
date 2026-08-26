@@ -445,10 +445,10 @@
     {
       "id": "ui-chat-modify",
       "what": "Chat: edit the spec and rebuild, and be honest that it is not reading the board",
-      "state": "open",
+      "state": "done",
       "doc": "docs/sidecar-ui.md",
       "evidence": "test:test_a_modification_edits_the_spec_rather_than_the_board",
-      "note": "'Make it two storeys', 'put the bar on the north wall' -- edits the held spec and rebuilds. That works and is most of what anyone wants. **'Add a fireplace to the room I already pasted' does not, and the UI must not pretend otherwise**: that needs the board read back, and CLAUDE.md records copy-out as HALF SOLVED -- returns structure and never terrain, behaves as a thin slice at the elevation plane, and only one marquee can be driven per board. So 'modify an existing board' means modify the thing THIS SESSION built; the UI keeps that history visibly and says what it cannot see.",
+      "note": "BUILT as citysmith/chatsession.py -- ChatSession over a tuple of Steps, where **the history IS the state**: history[-1].spec is the current spec, so there is no second copy to drift. That is the same rule as 'metrics must read the artifact, not the plan', applied to session state. history[0] is the opening spec, so it is never empty and undo() always has somewhere to land.\n\n**Kept in its own module rather than inside slabchat, deliberately.** slabchat's guarantee is that the generation half is pure and offline, proven in a subprocess with anthropic unimportable and socket.socket replaced by a raiser. The session holds mutable state and shells out to PowerShell; putting subprocess in that file would make 'nothing below slabchat.edit reaches the network' a matter of careful reading rather than a property of a file.\n\n**What it cannot see is a queryable property, not a comment.** ChatSession.blind_spots returns BlindSpot records with a REQUIRED `because` field -- 'cannot read the board' invites somebody to go and make it read the board, so the entry carries the copy-out measurements that say what they would be signing up for. Two standing entries and two more once something has been handed off, including that the board may hold the OLDER build and there is no erase. Three separations are tested: `problems` is what Python repaired, `unapplied` is what the SPEC has no field for, `blind_spots` is what the session cannot know about the WORLD. Undo never unpastes what was handed over.",
       "tags": [
         "ui",
         "ai"
@@ -457,10 +457,10 @@
     {
       "id": "ui-chat-clipboard",
       "what": "Send a small slab to the clipboard rather than driving the game",
-      "state": "open",
+      "state": "done",
       "doc": "docs/sidecar-ui.md",
       "evidence": "test:test_a_chat_slab_goes_to_the_clipboard_not_through_the_game",
-      "note": "A town is 8 to 135 chunks and has to be driven -- camera straight down, one cursor cell, paste order. A single small slab does not: `ts.ps1 setclip` already exists, so the UI puts the base64 on the clipboard and the user presses Ctrl+V themselves. No synthetic input, no camera discipline, no anchor rules, and nothing can go wrong that the user did not do. This should be the chat's default and driving the game should stay with the town-scale flow.",
+      "note": "BUILT as chatsession.to_clipboard / hand_off -- exactly one command, `ts.ps1 setclip`, and nothing else. No click, no keystroke, no camera; the user presses Ctrl+V. A structural test scans the module for all 27 game-driving ts.ps1 verbs and fails on any of them, so the no-synthetic-input property is enforced rather than remembered.\n\n**The base64 cannot go on the command line, and the reason is measured.** WinError 206 fires once the WHOLE command line passes 32,767 chars (the CreateProcess lpCommandLine limit) -- bisected twice at different prefix lengths, 32,588 and 32,711 payload chars, which is how we know the budget is 32,767 minus the command and **shrinks when the repo moves**. The compressed cap is 30,720 bytes = 40,960 base64 chars, so a legal slab exceeds the entire command line. It goes to a mkstemp file that PowerShell reads back instead: 42,000 chars through a 279-char command line, byte-exact, removed in a finally. mkstemp rather than a pid-derived name because the sidecar is a threaded server.\n\nHandoff.text is populated on EVERY path including every failure -- off Windows, no PowerShell, ts.ps1 missing, non-zero exit, timeout -- with how=MANUAL and 'copy the N characters yourself'. A chat that built a good slab and lost it to a missing shell has failed at the last inch. Verified end to end: a 16x12 tavern, 3,624 chars, on the clipboard and read back byte-identical, decoding to 621 placements.",
       "tags": [
         "ui",
         "talespire"
