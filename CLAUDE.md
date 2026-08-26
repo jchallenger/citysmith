@@ -687,6 +687,17 @@ ten did not reliably restore it. What does work:
   fly -Keys w -Hold 2.0`); WASD preserves focus, height changes do not.
 - Judge focus on the capture, not on the composition -- the blur is even enough
   across the frame to be missed at a glance.
+- **Camera height PERSISTS ACROSS BOARD SWITCHES, and so does the blur it
+  causes (MEASURED 2026-08-26).** One `Ctrl`+scroll poisons every board you
+  visit afterwards, and the tell is not obvious: a soft frame reads as
+  atmosphere, and this project already has an Atmosphere Settings panel and a
+  documented distance fog to blame it on. Three boards were read in a row as
+  "hazy" and taken to have fog turned up, when the only difference from the
+  crisp one before them was a height change made on a different board. The
+  diagnostic is one nudge in either direction: if it gets *worse* both ways it
+  is focus, not fog. Restoring the height does not reliably restore focus
+  either, so the cheap fix when comparing boards is to set a height once and
+  never touch it -- `fly` horizontally instead.
 - Turning the setting off would remove the whole problem, but it is the user's
   graphics setting; ask before changing it.
 
