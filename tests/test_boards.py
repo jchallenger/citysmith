@@ -234,15 +234,22 @@ def test_a_superseded_board_is_prunable(tmp_path):
     assert names == ["The Fox - Graybank interior"]
 
 
-def test_an_unnamed_board_is_prunable_and_a_named_one_never_is(tmp_path):
-    """**The bug this guards against offered to delete the finished towns.**
+def test_an_unnamed_board_is_never_prunable_on_its_name_alone(tmp_path):
+    """**Two bugs, and the second one was caught with live work in the frame.**
 
-    The registry only ever tracked *scene* boards. The town boards -- East
-    Tradebourne, Graybank, Pelvesthollow -- are named by hand and recorded
-    nowhere, so a rule of "prune whatever the registry does not claim" listed
-    all three for deletion. A name somebody typed is evidence the board
-    mattered; `Unknown Realm N` is what `newboard` hands out to a paste nobody
-    came back to.
+    The first: the registry only ever tracked *scene* boards. The town boards
+    -- East Tradebourne, Graybank, Pelvesthollow -- are named by hand and
+    recorded nowhere, so a rule of "prune whatever the registry does not
+    claim" listed all three for deletion.
+
+    The second: the fix for that treated `Unknown Realm N` as *provably*
+    disposable, on the grounds that the default name is what `newboard` hands
+    out to a paste nobody came back to. On 2026-08-26 the board in front of us
+    was `Unknown Realm 22`, holding the newest build of a town its owner
+    wanted -- so the rule offered up live work, in the one operation with no
+    undo. **A default name is the absence of evidence, not evidence of
+    absence.** Unnamed boards are a work list, not a delete list; deciding
+    means switching to each and looking, which is a thing only a person does.
     """
     from citysmith import boards
 
@@ -250,8 +257,10 @@ def test_an_unnamed_board_is_prunable_and_a_named_one_never_is(tmp_path):
     seen = ["East Tradebourne", "Pelvesthollow", "Probe - old paste",
             "Unknown Realm 7", "Unknown Realm 22"]
 
-    gone = {p.board for p in boards.prunable(reg, seen)}
-    assert gone == {"Unknown Realm 7", "Unknown Realm 22"}
+    # Nothing is prunable on a default name: prunable means *provable*, and
+    # the only proof available is a supersession the registry recorded.
+    assert boards.prunable(reg, seen) == []
+    assert boards.unnamed(reg, seen) == ["Unknown Realm 22", "Unknown Realm 7"]
 
     # The named ones are reported, but as untracked rather than as rubbish.
     assert boards.unclaimed(reg, seen) == [

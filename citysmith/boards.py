@@ -294,9 +294,16 @@ def prunable(registry: "Registry", seen: list[str] | None = None) -> list[Prunab
       erase -- so `-Rebuild` makes a second board and leaves the first sitting
       there under the old name. Every entry in a record's ``superseded`` is a
       real board in the campaign that nothing points at.
-    * **Boards nobody ever named.** ``Unknown Realm N`` is what `newboard`
-      hands out, so every one of them is a paste nobody came back to: a probe,
-      or a town rebuild from `review.ps1`. This campaign has twenty-two.
+    Unnamed boards are **not** here, and the reason is a counterexample from
+    the campaign itself. This function used to list every ``Unknown Realm N``
+    on the grounds that the name is what `newboard` hands out, so the board
+    must be a probe nobody came back to. On 2026-08-26 the board in front of
+    us was ``Unknown Realm 22``, and it held the newest build of a town its
+    owner very much wanted -- so the rule offered up live work, in the one
+    operation with no undo. **A default name is the absence of evidence, not
+    evidence of absence**, and the skill file says as much a few lines later:
+    a board with somebody's work on it looks exactly like an empty one from
+    the list. They go to :func:`unnamed` now, which recommends looking.
 
     **A board with a name a person typed is never listed here**, even when no
     scene record claims it, and that is the whole reason this function is not
@@ -319,11 +326,28 @@ def prunable(registry: "Registry", seen: list[str] | None = None) -> list[Prunab
                 old, "superseded by a rebuild; nothing points at it",
                 record.scene_id))
 
-    for name in sorted(set(seen or [])):
-        if name in claimed or not name.startswith(UNNAMED_PREFIX):
-            continue
-        out.append(Prunable(name, "never named, so it is a probe or a rebuild"))
     return out
+
+
+def unnamed(registry: "Registry", seen: list[str] | None = None) -> list[str]:
+    """Boards still carrying `newboard`'s default name, contents unknown.
+
+    Almost always a probe or a rebuild nobody came back to -- and *almost* is
+    the whole point, which is why these are not in :func:`prunable`. Nothing
+    readable distinguishes a scratch board from the one holding this week's
+    town: the campaign list gives a name and nothing else, and the name here
+    is the one the game invented. Deciding means switching to each and looking.
+
+    Useful as a work list, dangerous as a delete list. Two cheap habits empty
+    it safely: name a board the moment a paste lands on it (`ts.ps1 rename`),
+    and give throwaways a ``Probe - `` prefix so they read as disposable
+    without anyone having to remember.
+    """
+    claimed = _claimed(registry)
+    return sorted({
+        n for n in (seen or [])
+        if n not in claimed and n.startswith(UNNAMED_PREFIX)
+    })
 
 
 def unclaimed(registry: "Registry", seen: list[str] | None = None) -> list[str]:

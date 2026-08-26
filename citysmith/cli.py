@@ -607,6 +607,7 @@ def cmd_boards(args) -> int:
         gone = boards.prunable(registry, seen)
         keep = boards.keepers(registry)
         other = boards.unclaimed(registry, seen)
+        blank = boards.unnamed(registry, seen)
         print(f"KEEP -- {len(keep)} board(s) a scene points at:")
         for record in keep:
             print(f"  {record.board}")
@@ -616,6 +617,14 @@ def cmd_boards(args) -> int:
                   "the town boards are. Listed, not recommended:")
             for name in other:
                 print(f"  {name}")
+        if blank:
+            print(f"\nLOOK FIRST -- {len(blank)} board(s) still called "
+                  f"'{boards.UNNAMED_PREFIX} N'. Usually a probe or a rebuild, "
+                  "and NOT safe to delete on the name alone: one of these was "
+                  "the newest build of a town its owner wanted. Switch to each "
+                  "and look, then name the ones worth keeping:")
+            for name in blank:
+                print(f"  {name}")
         print(f"\nPRUNE -- {len(gone)} board(s) nothing points at:")
         for item in gone:
             print(f"  {item.describe()}")
@@ -623,7 +632,7 @@ def cmd_boards(args) -> int:
             print("\n(No campaign list given, so only superseded names are "
                   "listed. Run `tools\\ts.ps1 boards`, read the rows off the "
                   "screenshot and pass them with --seen-file to catch the "
-                  "probe and rebuild boards too.)")
+                  "unnamed boards too.)")
         print("\nNothing here deletes anything. Delete board sits behind the "
               "per-board triangle in the campaign list, right beside the play "
               "arrow, and the rows move on every rename -- so a click that "

@@ -157,15 +157,32 @@ off a `ts.ps1 boards` screenshot. `prune` then sorts them into three:
 
 | bucket | what it means | what to do |
 |---|---|---|
-| **prunable** | provably disposable -- a superseded scene name, or a board nobody ever named (`Unknown Realm N`) | safe to delete |
-| **unclaimed** | named by hand, claimed by no scene | **reported with no recommendation** -- ask |
 | **keepers** | a scene in `campaign/boards.json` points at it | leave alone |
+| **prunable** | *provably* disposable: a scene name the registry itself recorded as superseded | safe to delete |
+| **unnamed** | still called `Unknown Realm N` | **switch to each and look**, then name the keepers |
+| **unclaimed** | named by hand, claimed by no scene | **no recommendation** -- ask |
 
-**`unclaimed` is deliberately not a delete list**, and the reason is a bug that
-was caught before it ran: the registry only ever tracked *scene* boards, so
+**Two of those four are deliberately not delete lists, and each cost a bug.**
+
+`unclaimed` exists because the registry only ever tracked *scene* boards, so
 East Tradebourne, Graybank and Pelvesthollow are claimed by nothing, and a
 first version that offered to delete "whatever the registry does not own"
 listed all three finished towns. Anything a human named, a human decides on.
+
+`unnamed` exists because the fix for *that* went too far the other way. It
+treated `Unknown Realm N` as provably disposable -- the default name is what
+`newboard` hands out, so surely nobody came back to it. On 2026-08-26 the
+board in front of us was `Unknown Realm 22`, holding the newest build of a
+town its owner wanted, and `prune` listed it for deletion. **A default name is
+the absence of evidence, not evidence of absence**, which is the same sentence
+this file already uses about the list two sections down: a board with
+somebody's work on it looks exactly like an empty one from the list. Unnamed
+boards are a work list. Switching to each and looking is the only way to
+decide, and that is a person's job.
+
+Two cheap habits keep the bucket small: **rename a board the moment a paste
+lands on it**, and give throwaways a `Probe - ` prefix so they read as
+disposable without anyone having to remember which they were.
 
 There is a delete, and it is deliberately awkward. Expand a row with the `▶` at
 its **left** (x=79) — not the play arrow at x=360, which switches to the board —
