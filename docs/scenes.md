@@ -264,6 +264,39 @@ answer where the list could not show it.
 
 ---
 
+## Getting the party onto the board
+
+This is the step *after* everything citysmith does, and it was unwritten — the
+tool builds a board and then stops, and how five people actually get onto it
+was left to the reader. There are two ways and the choice is not a detail.
+
+**The GM summons everyone.** Players menu → *"Summon Players To This Board"*.
+One click, nobody has to navigate. The catch is that it takes **everyone
+loaded in the campaign**, so it cannot move half a party — if the rogue is
+casing the warehouse while the rest drink in the tavern, this ends that.
+
+**Or the GM names the board and the players navigate.** `Space` → the top-left
+icon → pick the row. This is the one that handles a split party, and it is why
+the naming scheme in this document is load-bearing for *players* and not only
+for our own bookkeeping: the row they are looking for is the row that gets
+clipped at sixteen capitals. `GRB/T14 The Half…` is findable; `Interior -
+Graybank - The Halfling and the Fox` is one of nine identical rows.
+
+Two things that follow, both from `docs/board-strategy.md`:
+
+- **A player who arrives on a board with no GM is locked to a fixed view**
+  until a GM joins. If you send them ahead, get there first.
+- **Minis are campaign-level, not board-level**, and one can be marked
+  "unique". So the hand-placing that a scene's party marks imply is **once per
+  campaign, not once per scene** — the same mini walks onto every board. The
+  marks are still the right output; they cost less than `CLAUDE.md` implies.
+
+The same applies to the NPC marks a *town* board carries (`docs/npcs.md`): the
+board says where, `<stem>-npcs.json` says who, and the minis are placed once
+and travel.
+
+---
+
 ## Settings
 
 Everything is in `config/scene.json`, read by the builder *and* by the driver —

@@ -250,3 +250,111 @@ def _apart(a, b) -> float:
 
 def _now() -> str:
     return datetime.datetime.now().replace(microsecond=0).isoformat()
+
+
+# -- what nothing needs any more ----------------------------------------------
+#
+# TaleSpire will tell you *nothing* about a board: no size, no date, no
+# contents, no API, and a campaign list that clips a row at sixteen capitals.
+# So a board accumulates and there is no way to look at the list and say which
+# of nine `Unknown Realm N` rows is last week's probe. That is what this is
+# for: name the disposable ones from what the registry already knows, before
+# anyone opens the campaign list.
+#
+# **Deleting is deliberately not automated.** Delete board sits behind the
+# per-board triangle in the campaign list, immediately beside the play arrow,
+# and the row order changes on every rename -- so a synthetic click that misses
+# by one row deletes the wrong board, and there is no undo. This prints; a
+# person clicks.
+
+#: A board name the generator hands out when it has nothing better. Every one
+#: of these is a paste nobody named, which is what a probe or a rebuild leaves.
+UNNAMED_PREFIX = "Unknown Realm"
+
+
+@dataclass
+class Prunable:
+    """A board nothing points at any more, and why."""
+
+    board: str
+    why: str
+    scene_id: str = ""
+
+    def describe(self) -> str:
+        owner = f"  ({self.scene_id})" if self.scene_id else ""
+        return f"{self.board} -- {self.why}{owner}"
+
+
+def prunable(registry: "Registry", seen: list[str] | None = None) -> list[Prunable]:
+    """Boards that are *provably* disposable. Deliberately conservative.
+
+    Two sources, and only two, because there is no undo:
+
+    * **Superseded names.** A rebuild does not erase a board -- there is no
+      erase -- so `-Rebuild` makes a second board and leaves the first sitting
+      there under the old name. Every entry in a record's ``superseded`` is a
+      real board in the campaign that nothing points at.
+    * **Boards nobody ever named.** ``Unknown Realm N`` is what `newboard`
+      hands out, so every one of them is a paste nobody came back to: a probe,
+      or a town rebuild from `review.ps1`. This campaign has twenty-two.
+
+    **A board with a name a person typed is never listed here**, even when no
+    scene record claims it, and that is the whole reason this function is not
+    simply "everything the registry does not own". The registry tracks *scene*
+    boards only; the town boards -- ``East Tradebourne``, ``Graybank``,
+    ``Pelvesthollow`` -- are named by hand and recorded nowhere, so treating
+    "unclaimed" as "disposable" would have offered to delete the three finished
+    towns. :func:`unclaimed` reports those separately, without a recommendation.
+
+    ``seen`` has to be supplied by a person reading `ts.ps1 boards`, because
+    nothing here can read text off the screen -- the same limit that stops
+    `scene.ps1 enter` switching boards unattended.
+    """
+    out: list[Prunable] = []
+    claimed = _claimed(registry)
+
+    for record in sorted(registry.records.values(), key=lambda r: r.board):
+        for old in record.superseded:
+            out.append(Prunable(
+                old, "superseded by a rebuild; nothing points at it",
+                record.scene_id))
+
+    for name in sorted(set(seen or [])):
+        if name in claimed or not name.startswith(UNNAMED_PREFIX):
+            continue
+        out.append(Prunable(name, "never named, so it is a probe or a rebuild"))
+    return out
+
+
+def unclaimed(registry: "Registry", seen: list[str] | None = None) -> list[str]:
+    """Named boards the registry knows nothing about.
+
+    Reported, never recommended. A name somebody typed is evidence that the
+    board mattered to them once, and the registry only ever tracked scenes --
+    so this list is where the town boards live, and it is also where a board
+    the registry has *lost* would show up.
+    """
+    claimed = _claimed(registry)
+    return sorted({
+        n for n in (seen or [])
+        if n not in claimed and not n.startswith(UNNAMED_PREFIX)
+    })
+
+
+def _claimed(registry: "Registry") -> set[str]:
+    out = set()
+    for record in registry.records.values():
+        out.add(record.board)
+        out.update(record.superseded)
+    return out
+
+
+def keepers(registry: "Registry") -> list[BoardRecord]:
+    """The boards worth keeping: one live board per scene.
+
+    The complement of :func:`prunable` over what the registry knows. A board is
+    where something happened -- a session, a party, notes on it -- so the
+    default is always to keep, and this is the list to check a deletion against
+    before making it.
+    """
+    return sorted(registry.records.values(), key=lambda r: r.board)

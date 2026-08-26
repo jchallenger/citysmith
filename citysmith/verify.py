@@ -459,6 +459,7 @@ def check_placements(builder, tm) -> list[str]:
             f"{planned - built} of {planned} planned doorways were not built as "
             "doors -- a doorway that resolves to nothing becomes solid wall")
 
+    problems.extend(_ground_sheet(builder, tm))
     problems.extend(_wall_solidity(builder, tm))
     problems.extend(_prop_collisions(builder))
     return problems
@@ -513,6 +514,122 @@ def tile_interpenetration(builder) -> list[str]:
     ]
 
 
+#: Below this a tile is trim or dressing rather than the ground somebody walks
+#: on. Cobble is 0.25 and grass is 0.5, so the sheet itself is never thinner.
+_GROUND_MIN_THICK = 0.2
+
+#: Two adjacent ground tops closer than this are flush. A quarter tile is 15
+#: inches, which is the kerb the top-align rule exists to stop; a hundredth of
+#: a tile is under an inch and is float noise.
+_FLUSH_TOLERANCE = 0.02
+
+
+def _ground_sheet(builder, tm) -> list[str]:
+    """The outdoor ground: one tile per cell, and all of it flush.
+
+    Two checks over one pass, both designed in `docs/district-surfaces.md` 6
+    and neither built until now -- which is the failure `tasks.json` exists to
+    stop, so they are worth stating plainly.
+
+    **One tile per cell.** This is the surface probe's own bug promoted to a
+    check: it laid grass over the whole board and then set each material pad on
+    top at the same top height, and TaleSpire does not drop a co-located tile
+    the way it drops a colliding prop -- the two simply z-fight, dithering as
+    the camera moves. With six materials now keyed on overlapping conditions
+    (surface class, road class, quarter, yard) it is easy to lay two by
+    accident and never see it in the file.
+
+    **Flush.** Surface tiles align at the *top*, not the bottom, because cobble
+    is 0.25 thick and grass is 0.5: laid from a common bottom, every street sat
+    a quarter tile under the grass beside it -- a 15 inch kerb along both sides
+    of every road, on 1,234 tiles. That rule has never been checked, and it now
+    carries nine materials rather than two.
+    """
+    catalog = builder.palette.catalog
+
+    # **A watercourse is neither of these things and both checks trip on it.**
+    # A channel is a bed with a translucent column standing on it, so the cell
+    # legitimately holds two tiles; and water sits *below* grade on purpose, so
+    # it is legitimately not flush with the bank -- that is what makes it read
+    # as a channel a creature can be pulled into rather than a blue floor.
+    # First run flagged 941 cells and 125 steps, every one of them the river.
+    wet = {
+        a.id for role in ("water", "water_2x2", "riverbed", "riverbed_2x2")
+        for a in (builder.palette.resolve(role),) if a is not None
+    }
+
+    tops: dict[tuple[int, int], list[tuple[float, str]]] = {}
+    for p in builder.placements:
+        asset = catalog.by_id(p.asset_id)
+        if asset is None or asset.kind != "tile" or p.asset_id in wet:
+            continue
+        if asset.size_y < _GROUND_MIN_THICK or asset.size_y > 0.6:
+            continue                      # trim below, walls and blocks above
+        if (asset.size_x, asset.size_z) != (1.0, 1.0):
+            continue                      # the 2x2 pass has its own lattice
+        top = p.y + asset.size_y
+        # The ground sheet only. Anything standing on a storey is a floor, and
+        # a floor is allowed to sit above the ground it shares a cell with.
+        if top > 1.0:
+            continue
+        tops.setdefault((int(p.x), int(p.z)), []).append((top, asset.name))
+
+    problems: list[str] = []
+
+    doubled = sorted(c for c, v in tops.items() if len(v) > 1)
+    if doubled:
+        x, z = doubled[0]
+        names = " + ".join(sorted(n for _, n in tops[(x, z)])[:2])
+        problems.append(
+            f"{len(doubled)} cell(s) hold more than one ground tile (first at "
+            f"x={x}, z={z}: {names}) -- co-located tiles are not dropped, they "
+            "z-fight, and the dithering moves with the camera")
+
+    # **The border taper steps down on purpose**, so two cells either side of
+    # a falloff ring legitimately differ by exactly one step -- and the check
+    # reported those two pairs on every build until it was told. A check that
+    # always says 2 is a check people stop reading.
+    from .build import edge_taper
+    taper = edge_taper(tm)
+
+    rough = 0
+    first: tuple[int, int, float, float] | None = None
+    for (x, z), here in sorted(tops.items()):
+        for dx, dz in ((1, 0), (0, 1)):
+            there = tops.get((x + dx, z + dz))
+            if not there:
+                continue
+            if taper.get((x, z), 0.0) != taper.get((x + dx, z + dz), 0.0):
+                continue
+            a, b = max(t for t, _ in here), max(t for t, _ in there)
+            if abs(a - b) > _FLUSH_TOLERANCE:
+                rough += 1
+                if first is None:
+                    first = (x, z, a, b)
+    if first is not None:
+        x, z, a, b = first
+        problems.append(
+            f"{rough} pair(s) of adjacent ground tiles differ in top height "
+            f"(first at x={x}, z={z}: {a:.2f} against {b:.2f}) -- a step of "
+            f"{abs(a - b) * TILE_FEET:.1f} ft where a creature walks")
+    return problems
+
+
+def _obb(asset, placement) -> tuple[float, ...]:
+    """A placement as an oriented box, in the same form `Scatter` uses.
+
+    The collider centre is where the stored coordinate plus
+    :func:`build.collider_offset` puts it, which is right at any rotation.
+    The box itself comes from `build.oriented_box` rather than a second copy
+    here: this check and the scatter that is supposed to prevent what it finds
+    have to measure the same thing, or one of them is always wrong.
+    """
+    from .build import collider_offset, oriented_box
+
+    ox, oz = collider_offset(asset, placement.rot)
+    return oriented_box(asset, placement.x + ox, placement.z + oz, placement.rot)
+
+
 def _prop_collisions(builder) -> list[str]:
     """Props whose colliders intersect another prop's.
 
@@ -520,70 +637,100 @@ def _prop_collisions(builder) -> list[str]:
     "missing parts" bug and reads on the board as half-built scenery. Before
     the scatter took collisions into account, 1,000 of 2,137 props on the
     Forest Church map were inside another one.
+
+    **This tests the ORIENTED box, and that is a correction rather than a
+    refinement.** It used to test the axis-aligned one, and on a fenced map
+    that is not an approximation, it is wrong: two 2-tile fence panels butted
+    end to end on an off-axis bearing overlap as boxes by +0.29 on both axes at
+    45 degrees while their meshes are disjoint, and 97-100% of surveyed fence
+    lines are off-axis. Every fenced build therefore printed ``[FAIL]`` --
+    5,672 pairs of them on East Tradebourne -- for scenery that was standing on
+    the board perfectly well.
+
+    That was defensible only while the question was open. It is not: the
+    2026-08-25 build settled that **TaleSpire's own drop test is on the
+    oriented collider** (`docs/fencing.md` 4.1) -- 78 flagged pairs, and the
+    walls came out continuous. So the check now measures what the game
+    measures, for every prop rather than by exempting fences, and a real
+    overlap between two fence panels still fails.
     """
-    from .build import placed_bounds
+    from .build import FENCE_STYLES, oriented_aabb, oriented_depth
 
     catalog = builder.palette.catalog
-    from .build import FENCE_STYLES
-
-    fence_roles = {r for spec in FENCE_STYLES.values()
-                   for r in (spec.panel, spec.post) if r}
-    fence_ids = {a.id for r in fence_roles
-                 for a in (builder.palette.resolve(r),) if a is not None}
+    boundary_ids = {
+        a.id for spec in FENCE_STYLES.values()
+        for r in (spec.panel, spec.post) if r
+        for a in (builder.palette.resolve(r),) if a is not None
+    }
+    boundary_ids |= {
+        a.id for r in ("yard_fence", "field_wall", "field_wall_post")
+        for a in (builder.palette.resolve(r),) if a is not None
+    }
 
     boxes: list[tuple[float, ...]] = []
-    is_fence: list[bool] = []
+    spans: list[tuple[float, float]] = []
+    joinable: list[float] = []
     for p in builder.placements:
         asset = catalog.by_id(p.asset_id)
         if asset is None or asset.kind != "prop":
             continue
-        x0, z0, x1, z1 = placed_bounds(asset, p)
-        boxes.append((x0, z0, p.y, x1, z1, p.y + asset.size_y))
-        is_fence.append(p.asset_id in fence_ids)
+        boxes.append(_obb(asset, p))
+        spans.append((p.y, p.y + asset.size_y))
+        # How deep two of these may meet and still be a *join* rather than a
+        # burial. Zero for anything that is not a boundary panel.
+        joinable.append(min(asset.size_x, asset.size_z)
+                        if p.asset_id in boundary_ids else 0.0)
 
     at: dict[tuple[int, int], list[int]] = {}
-    for i, bx in enumerate(boxes):
-        for cx in range(int(bx[0]), int(bx[3]) + 1):
-            for cz in range(int(bx[1]), int(bx[4]) + 1):
+    for i, box in enumerate(boxes):
+        x0, z0, x1, z1 = oriented_aabb(box)
+        for cx in range(math.floor(x0), math.floor(x1) + 1):
+            for cz in range(math.floor(z0), math.floor(z1) + 1):
                 at.setdefault((cx, cz), []).append(i)
 
     e = 1e-6
     clashing: set[int] = set()
-    fence_only: set[tuple[int, int]] = set()
+    joins = 0
+    tested: set[tuple[int, int]] = set()
     for ids in at.values():
         for a in range(len(ids)):
             for b in range(a + 1, len(ids)):
-                p, q = boxes[ids[a]], boxes[ids[b]]
-                if (p[0] < q[3] - e and q[0] < p[3] - e
-                        and p[1] < q[4] - e and q[1] < p[4] - e
-                        and p[2] < q[5] - e and q[2] < p[5] - e):
-                    clashing.update((ids[a], ids[b]))
-                    if is_fence[ids[a]] and is_fence[ids[b]]:
-                        fence_only.add((min(ids[a], ids[b]), max(ids[a], ids[b])))
-    fence_pairs = len(fence_only)
+                i, j = (ids[a], ids[b]) if ids[a] < ids[b] else (ids[b], ids[a])
+                if (i, j) in tested:
+                    continue
+                tested.add((i, j))
+                # Height first: one comparison, and it rejects a prop standing
+                # on a shelf above another without any trigonometry.
+                if not (spans[i][0] < spans[j][1] - e
+                        and spans[j][0] < spans[i][1] - e):
+                    continue
+                depth = oriented_depth(boxes[i], boxes[j])
+                if depth <= e:
+                    continue
+                # **A boundary turns corners, and a corner is an overlap by
+                # design.** Measured on Pelvesthollow: 577 of the flagged pairs
+                # are `Wooden Fence` against `Wooden Fence` at a penetration of
+                # exactly 0.180, which is that panel's own thickness -- one
+                # panel running east meeting the next running north. The yard
+                # fences on the board have complete corners, so the game is
+                # plainly not dropping them. Anything deeper than a panel's own
+                # thickness is a panel buried in another and still fails.
+                limit = min(joinable[i], joinable[j])
+                if limit > 0.0 and depth <= limit + e:
+                    joins += 1
+                    continue
+                clashing.update((i, j))
+
     if not clashing:
         return []
-    msg = [
+    out = [
         f"{len(clashing)} of {len(boxes)} props overlap another prop "
         f"({100 * len(clashing) / len(boxes):.0f}%) -- TaleSpire drops these "
         "silently on paste, so they will be missing from the board"
     ]
-    # A fence run is the one place this test is known to be pessimistic, and
-    # saying so is the difference between a diagnosable failure and a mystery.
-    # The boxes here are axis-aligned; two 2-tile fence panels butted end to
-    # end on an off-axis bearing overlap as boxes while their meshes are
-    # disjoint -- +0.29 on both axes at 45 degrees, and 97-100% of surveyed
-    # fence lines are off-axis. **Whether TaleSpire's own drop test is on the
-    # box or on the oriented collider is NOT known** (`docs/fencing.md` §4.1),
-    # so this still fails: if it is the box, these panels really are missing.
-    # It is called out separately so a fenced map's failure is not read as a
-    # scenery-scatter regression, which is what this check normally catches.
-    if fence_pairs:
-        msg.append(
-            f"    of those, {fence_pairs} pair(s) are consecutive fence panels, "
-            "which overlap as boxes but not as meshes -- see docs/fencing.md 4.1"
-        )
-    return msg
+    if joins:
+        out.append(f"    ({joins} boundary corner join(s) not counted)")
+    return out
 
 
 class _Occupancy:

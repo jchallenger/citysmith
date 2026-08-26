@@ -1,284 +1,482 @@
 {
-  "tasks": [
-    {
-      "id": "fence-run",
-      "what": "Run field boundaries along their true bearing",
-      "state": "done",
-      "doc": "docs/fencing.md",
-      "evidence": "citysmith.build._lay_fences",
-      "note": "",
-      "tags": [
-        "fencing"
-      ]
-    },
-    {
-      "id": "fence-clip",
-      "what": "Clip boundary lines to the board before laying props",
-      "state": "done",
-      "doc": "docs/fencing.md",
-      "evidence": "citysmith.raster.clip_polyline",
-      "note": "",
-      "tags": [
-        "fencing"
-      ]
-    },
-    {
-      "id": "fence-collider",
-      "what": "Settle whether TaleSpire drops props on the bounding box",
-      "state": "done",
-      "doc": "docs/fencing.md 11",
-      "evidence": "citysmith.build.FENCE_MODULE",
-      "note": "Answered on a real build: 78 flagged pairs, walls continuous. Oriented collider.",
-      "tags": [
-        "fencing"
-      ]
-    },
-    {
-      "id": "fence-exempt",
-      "what": "Exempt collinear fence panels from the prop-collision check",
-      "state": "open",
-      "doc": "docs/fencing.md 11",
-      "evidence": "citysmith.verify.FENCE_COLLISION_EXEMPT",
-      "note": "The drop test is known now, so the FAIL on every fenced build is a false positive.",
-      "tags": [
-        "fencing",
-        "verify"
-      ]
-    },
-    {
-      "id": "surf-tier1",
-      "what": "Give each road class and surface its own material",
-      "state": "done",
-      "doc": "docs/district-surfaces.md 5",
-      "evidence": "citysmith.build.QUARTER_SURFACE",
-      "note": "",
-      "tags": [
-        "surfaces"
-      ]
-    },
-    {
-      "id": "quarters",
-      "what": "Derive quarters, and only where trades actually cluster",
-      "state": "done",
-      "doc": "docs/district-surfaces.md 3",
-      "evidence": "citysmith.quarters.quarter_map",
-      "note": "",
-      "tags": [
-        "surfaces"
-      ]
-    },
-    {
-      "id": "feature-report",
-      "what": "Report what each designed feature built, per map",
-      "state": "done",
-      "doc": "docs/district-surfaces.md 6",
-      "evidence": "citysmith.verify.feature_report",
-      "note": "",
-      "tags": [
-        "verify"
-      ]
-    },
-    {
-      "id": "surf-flush",
-      "what": "Check no two adjacent ground tiles differ in top height",
-      "state": "open",
-      "doc": "docs/district-surfaces.md 6",
-      "evidence": "citysmith.verify.surfaces_are_flush",
-      "note": "Guards the top-align rule across a wider material set than it has carried before.",
-      "tags": [
-        "surfaces",
-        "verify"
-      ]
-    },
-    {
-      "id": "surf-onetile",
-      "what": "Check no cell holds two ground tiles",
-      "state": "open",
-      "doc": "docs/district-surfaces.md 6",
-      "evidence": "citysmith.verify.one_tile_per_cell",
-      "note": "The surface_probe z-fighting bug, promoted to a check.",
-      "tags": [
-        "surfaces",
-        "verify"
-      ]
-    },
-    {
-      "id": "storeys",
-      "what": "Key storeys on settlement size, kind and position",
-      "state": "done",
-      "doc": "docs/building-massing.md 2",
-      "evidence": "citysmith.layout.storeys_for",
-      "note": "",
-      "tags": [
-        "buildings"
-      ]
-    },
-    {
-      "id": "roof-mix",
-      "what": "Deal roof material per building so a quarter is not monochrome",
-      "state": "done",
-      "doc": "docs/building-massing.md 10",
-      "evidence": "citysmith.build.ROOF_MIX",
-      "note": "",
-      "tags": [
-        "buildings"
-      ]
-    },
-    {
-      "id": "yards",
-      "what": "Surface and fence the yard around a building",
-      "state": "done",
-      "doc": "docs/building-massing.md 12",
-      "evidence": "citysmith.build._lay_yards",
-      "note": "",
-      "tags": [
-        "buildings",
-        "yards"
-      ]
-    },
-    {
-      "id": "yard-clutter",
-      "what": "Cluster yard clutter by the building's trade",
-      "state": "done",
-      "doc": "docs/building-massing.md 4",
-      "evidence": "citysmith.build.YARD_CLUTTER",
-      "note": "TRADE_CLUTTER already does this for street frontage; point it at the yard.",
-      "tags": [
-        "buildings",
-        "yards"
-      ]
-    },
-    {
-      "id": "big-ranges",
-      "what": "Break a large footprint into ranges at different heights",
-      "state": "done",
-      "doc": "docs/building-massing.md 11",
-      "evidence": "citysmith.build.building_ranges",
-      "note": "Needs per-cell storeys; shell, upper floors and roof read one number today. 7% of buildings.",
-      "tags": [
-        "buildings"
-      ]
-    },
-    {
-      "id": "storeys-frontage",
-      "what": "Let frontage vary storeys, so a lane has a low workshop",
-      "state": "open",
-      "doc": "docs/building-massing.md 11",
-      "evidence": "citysmith.build.storeys_by_frontage",
-      "note": "storeys_for runs in the importer and frontage needs the raster.",
-      "tags": [
-        "buildings"
-      ]
-    },
-    {
-      "id": "rampart-solid",
-      "what": "Stop entombed() hollowing the rampart the masonry check samples",
-      "state": "open",
-      "doc": "CLAUDE.md",
-      "evidence": "citysmith.build.ENTOMBED_KEEPS_SAMPLED_COURSE",
-      "note": "Bisected to 8412ce9. 85 of 300 cells read as holed on Forest Church. The existing test passes and does not cover it, so the evidence must be something new.",
-      "tags": [
-        "walls"
-      ]
-    },
-    {
-      "id": "edge-taper",
-      "what": "Taper the map edge so it stops reading as a cropped rectangle",
-      "state": "open",
-      "doc": "CLAUDE.md",
-      "evidence": "citysmith.build.taper_map_edge",
-      "note": "",
-      "tags": [
-        "terrain"
-      ]
-    },
-    {
-      "id": "gate-doors",
-      "what": "Hang a portcullis and an arch in the gate opening",
-      "state": "open",
-      "doc": "CLAUDE.md",
-      "evidence": "citysmith.build._lay_gate_doors",
-      "note": "Passage is cut square now, so the grille finally has jambs.",
-      "tags": [
-        "walls"
-      ]
-    },
-    {
-      "id": "furnish",
-      "what": "Furnish interiors the way hand-builders do",
-      "state": "done",
-      "doc": "docs/interior-slabs.md",
-      "evidence": "citysmith.build._door_keepout",
-      "note": "Doors and stairs kept clear; props set back off cell centres (0% vs the old 100%) and 84% on quarter turns, matching the community measurements in docs/interior-slabs.md.",
-      "tags": [
-        "interiors"
-      ]
-    },
-    {
-      "id": "tower-range",
-      "what": "Handle a tower that spans a range boundary",
-      "state": "open",
-      "doc": "docs/building-massing.md 13",
-      "evidence": "citysmith.build.TOWER_RANGE_AWARE",
-      "note": "base_floors takes the max across tower cells; a tower spanning two ranges leaves a step under one side. Not seen on the five samples.",
-      "tags": [
-        "buildings"
-      ]
-    },
-    {
-      "id": "tower-relief",
-      "what": "Give the civic tower a set-back or string course",
-      "state": "open",
-      "doc": "docs/building-massing.md 13",
-      "evidence": "citysmith.build.TOWER_SETBACK",
-      "note": "Four flat faces with window bands. It reads as a bell tower now, but has no relief.",
-      "tags": [
-        "buildings"
-      ]
-    },
-    {
-      "id": "furnish-stacking",
-      "what": "Stack tabletop props on tables and shelves",
-      "state": "open",
-      "doc": "docs/interior-slabs.md",
-      "evidence": "citysmith.build.PROP_STACKING",
-      "note": "Two thirds of hand-placed props sit on furniture, not the floor; Food & Drink is 44/45 smaller than a cell.",
-      "tags": [
-        "interiors"
-      ]
-    },
-    {
-      "id": "furnish-density",
-      "what": "Raise interior prop density toward the measured 0.41-0.66 per cell",
-      "state": "done",
-      "doc": "docs/interior-slabs.md",
-      "evidence": "citysmith.build.INTERIOR_DENSITY",
-      "note": "0.12 delivered 0.07 props/cell; 0.35 delivers 0.19. Two thirds of hand-built props sit ON furniture, so the floor-only share of the published 0.41-0.66 is about 0.14-0.22 -- 0.19 is inside it. Reaching the full figure needs furnish-stacking.",
-      "tags": [
-        "interiors"
-      ]
-    },
-    {
-      "id": "scene-handover",
-      "what": "Document how a GM gets the party onto a scene board",
-      "state": "open",
-      "doc": "docs/board-strategy.md 5",
-      "evidence": "citysmith.scene.HANDOVER_HELP",
-      "note": "Summon Players To This Board takes everyone in the campaign; the alternative is naming the board and letting players navigate. The step after everything citysmith does, currently unwritten.",
-      "tags": [
-        "interiors"
-      ]
-    },
-    {
-      "id": "prop-vocab",
-      "what": "Tighten the interior prop queries: seasonal and joke assets are leaking in",
-      "state": "open",
-      "doc": "docs/interior-slabs.md",
-      "evidence": "citysmith.palette.PROP_EXCLUDE",
-      "note": "Found by looking, not measuring: a temple deals 'Tree, Festive', 'snow flake standing' and 'Altar (Evil)'; a tavern deals 'Pumpkin Pie' and 'throne aberration'; a house deals 'Table Torture 01' and 'Festive turkey 01'. This is CLAUDE.md's own rule about free-text terms over structured filters, unlearned in the prop menus.",
-      "tags": [
-        "interiors"
-      ]
-    }
-  ]
+ "tasks": [
+  {
+   "id": "fence-run",
+   "what": "Run field boundaries along their true bearing",
+   "state": "done",
+   "doc": "docs/fencing.md",
+   "evidence": "citysmith.build._lay_fences",
+   "note": "",
+   "tags": [
+    "fencing"
+   ]
+  },
+  {
+   "id": "fence-clip",
+   "what": "Clip boundary lines to the board before laying props",
+   "state": "done",
+   "doc": "docs/fencing.md",
+   "evidence": "citysmith.raster.clip_polyline",
+   "note": "",
+   "tags": [
+    "fencing"
+   ]
+  },
+  {
+   "id": "fence-collider",
+   "what": "Settle whether TaleSpire drops props on the bounding box",
+   "state": "done",
+   "doc": "docs/fencing.md 11",
+   "evidence": "citysmith.build.FENCE_MODULE",
+   "note": "Answered on a real build: 78 flagged pairs, walls continuous. Oriented collider.",
+   "tags": [
+    "fencing"
+   ]
+  },
+  {
+   "id": "fence-exempt",
+   "what": "Measure prop collisions on the oriented collider, as the game does",
+   "state": "done",
+   "doc": "docs/fencing.md 11",
+   "evidence": "citysmith.build.oriented_depth",
+   "note": "Not an exemption in the end -- the check was measuring the wrong shape, and fixing that found three real bugs underneath. (1) It tested the AXIS-ALIGNED box while the game tests the oriented collider, so every fenced build printed FAIL for scenery standing on the board perfectly well. (2) `build.rotated_footprint` only swaps the axes on QUARTER turns, so a prop at 15 degrees was measured at its unrotated extent -- and Scatter used the same function, so the scatter itself was letting through props that really did interpenetrate. (3) A fresh `Scatter` started BLIND: yard fences are laid by _lay_yards before _dress_districts builds its own scatter, so ferns, crates and stumps grew straight through fences already standing. (4) `_dress_yards` was handed a scatter and then placed with `b.prop` anyway, which does no collision test at all -- beds and crates dropped through the yard's own fence. One implementation of the geometry now (build.oriented_box / oriented_aabb / oriented_depth) used by both the scatter that prevents overlaps and the check that reports them. A boundary corner join -- two panels meeting at a penetration no deeper than a panel's own thickness, measured at exactly 0.180 on `Wooden Fence` -- is not counted, because that is how a fence turns a corner and the corners on the board are complete. Result: Pelvesthollow 22%% -> 4%%, Graybank 21%% -> 4%%, East Tradebourne 16%% -> 3%%.",
+   "tags": [
+    "fencing",
+    "verify"
+   ]
+  },
+  {
+   "id": "surf-tier1",
+   "what": "Give each road class and surface its own material",
+   "state": "done",
+   "doc": "docs/district-surfaces.md 5",
+   "evidence": "citysmith.build.QUARTER_SURFACE",
+   "note": "",
+   "tags": [
+    "surfaces"
+   ]
+  },
+  {
+   "id": "quarters",
+   "what": "Derive quarters, and only where trades actually cluster",
+   "state": "done",
+   "doc": "docs/district-surfaces.md 3",
+   "evidence": "citysmith.quarters.quarter_map",
+   "note": "",
+   "tags": [
+    "surfaces"
+   ]
+  },
+  {
+   "id": "feature-report",
+   "what": "Report what each designed feature built, per map",
+   "state": "done",
+   "doc": "docs/district-surfaces.md 6",
+   "evidence": "citysmith.verify.feature_report",
+   "note": "",
+   "tags": [
+    "verify"
+   ]
+  },
+  {
+   "id": "surf-flush",
+   "what": "Check no two adjacent ground tiles differ in top height",
+   "state": "done",
+   "doc": "docs/district-surfaces.md 6",
+   "evidence": "test:test_adjacent_ground_tiles_are_flush",
+   "note": "BUILT in the same pass. Clean on all three towns once two things it had no way to know were excluded: a WATERCOURSE is a bed with a translucent column on it, so the cell holds two tiles and the water sits below grade on purpose (first run flagged 941 cells and 125 steps, every one the river); and the BORDER TAPER steps down deliberately, which reported the same 2 pairs on every build -- a check that always says 2 is a check people stop reading.",
+   "tags": [
+    "surfaces",
+    "verify"
+   ]
+  },
+  {
+   "id": "surf-onetile",
+   "what": "Check no cell holds two ground tiles",
+   "state": "done",
+   "doc": "docs/district-surfaces.md 6",
+   "evidence": "test:test_no_cell_holds_two_ground_tiles",
+   "note": "BUILT as verify._ground_sheet, and it found a real defect the moment it ran: **every yard on every board built so far was z-fighting.** _lay_yards surfaced its cells after _lay_terrain had already sheeted them in grass -- 365 cells on Pelvesthollow holding `Grass 1x1` + `Swamp floor 1x1`, coplanar. TaleSpire does not drop a co-located tile the way it drops a colliding prop; it keeps both and they dither as the camera moves. **Clearing the cell first is NOT the fix** and was tried: open country is sheeted in 2x2 grass blocks, so taking one up because a single corner of it is a yard strips the ground from three cells that are not -- which is what left ferns standing over nothing. The terrain pass owns the ground sheet now: `surface_role` decides the yard's material with everything else, the 2x2 pass requires four cells to agree on the ROLE and not just the class, and _lay_yards only fences. Knock-on: Pelvesthollow tile seams 5,398 -> 662 and Graybank 21,202 -> 2,302, because the doubled tiles were counted there too; assets down 770 and 2,921.",
+   "tags": [
+    "surfaces",
+    "verify"
+   ]
+  },
+  {
+   "id": "storeys",
+   "what": "Key storeys on settlement size, kind and position",
+   "state": "done",
+   "doc": "docs/building-massing.md 2",
+   "evidence": "citysmith.layout.storeys_for",
+   "note": "",
+   "tags": [
+    "buildings"
+   ]
+  },
+  {
+   "id": "roof-mix",
+   "what": "Deal roof material per building so a quarter is not monochrome",
+   "state": "done",
+   "doc": "docs/building-massing.md 10",
+   "evidence": "citysmith.build.ROOF_MIX",
+   "note": "",
+   "tags": [
+    "buildings"
+   ]
+  },
+  {
+   "id": "yards",
+   "what": "Surface and fence the yard around a building",
+   "state": "done",
+   "doc": "docs/building-massing.md 12",
+   "evidence": "citysmith.build._lay_yards",
+   "note": "",
+   "tags": [
+    "buildings",
+    "yards"
+   ]
+  },
+  {
+   "id": "yard-clutter",
+   "what": "Cluster yard clutter by the building's trade",
+   "state": "done",
+   "doc": "docs/building-massing.md 4",
+   "evidence": "citysmith.build.YARD_CLUTTER",
+   "note": "TRADE_CLUTTER already does this for street frontage; point it at the yard.",
+   "tags": [
+    "buildings",
+    "yards"
+   ]
+  },
+  {
+   "id": "big-ranges",
+   "what": "Break a large footprint into ranges at different heights",
+   "state": "done",
+   "doc": "docs/building-massing.md 11",
+   "evidence": "citysmith.build.building_ranges",
+   "note": "Needs per-cell storeys; shell, upper floors and roof read one number today. 7% of buildings.",
+   "tags": [
+    "buildings"
+   ]
+  },
+  {
+   "id": "storeys-frontage",
+   "what": "Let frontage vary storeys, so a lane has a low workshop",
+   "state": "open",
+   "doc": "docs/building-massing.md 11",
+   "evidence": "citysmith.build.storeys_by_frontage",
+   "note": "storeys_for runs in the importer and frontage needs the raster.",
+   "tags": [
+    "buildings"
+   ]
+  },
+  {
+   "id": "rampart-solid",
+   "what": "Stop entombed() hollowing the rampart the masonry check samples",
+   "state": "done",
+   "doc": "CLAUDE.md",
+   "evidence": "test:test_the_rampart_is_built_solid_all_the_way_through",
+   "note": "ALREADY FIXED, and the entry was stale bookkeeping. `entombed()` was removed in e83671a, 'Let the plugin do the aiming, and put the rampart back solid' -- the word appears nowhere in build.py now except one unrelated comment. Verified on the artifact rather than the history: a full report on East Tradebourne's 2,290 wall cells raises no masonry finding at all. The task was seeded from CLAUDE.md's own 'OPEN:' section, which is itself stale and should be cut; and it slipped past `tasks --check` because its evidence pointed at a test that does not exist, so 'open, evidence missing' read as legitimately open.",
+   "tags": [
+    "walls"
+   ]
+  },
+  {
+   "id": "edge-taper",
+   "what": "Taper the map edge so it stops reading as a cropped rectangle",
+   "state": "open",
+   "doc": "CLAUDE.md",
+   "evidence": "citysmith.build.taper_map_edge",
+   "note": "",
+   "tags": [
+    "terrain"
+   ]
+  },
+  {
+   "id": "gate-doors",
+   "what": "Hang a portcullis and an arch in the gate opening",
+   "state": "open",
+   "doc": "CLAUDE.md",
+   "evidence": "citysmith.build._lay_gate_doors",
+   "note": "Passage is cut square now, so the grille finally has jambs.",
+   "tags": [
+    "walls"
+   ]
+  },
+  {
+   "id": "furnish",
+   "what": "Furnish interiors the way hand-builders do",
+   "state": "done",
+   "doc": "docs/interior-slabs.md",
+   "evidence": "citysmith.build._door_keepout",
+   "note": "Doors and stairs kept clear; props set back off cell centres (0% vs the old 100%) and 84% on quarter turns, matching the community measurements in docs/interior-slabs.md.",
+   "tags": [
+    "interiors"
+   ]
+  },
+  {
+   "id": "tower-range",
+   "what": "Handle a tower that spans a range boundary",
+   "state": "open",
+   "doc": "docs/building-massing.md 13",
+   "evidence": "citysmith.build.TOWER_RANGE_AWARE",
+   "note": "base_floors takes the max across tower cells; a tower spanning two ranges leaves a step under one side. Not seen on the five samples.",
+   "tags": [
+    "buildings"
+   ]
+  },
+  {
+   "id": "tower-relief",
+   "what": "Give the civic tower a set-back or string course",
+   "state": "open",
+   "doc": "docs/building-massing.md 13",
+   "evidence": "citysmith.build.TOWER_SETBACK",
+   "note": "Four flat faces with window bands. It reads as a bell tower now, but has no relief.",
+   "tags": [
+    "buildings"
+   ]
+  },
+  {
+   "id": "furnish-stacking",
+   "what": "Stack tabletop props on tables and shelves",
+   "state": "open",
+   "doc": "docs/interior-slabs.md",
+   "evidence": "citysmith.build.PROP_STACKING",
+   "note": "Two thirds of hand-placed props sit on furniture, not the floor; Food & Drink is 44/45 smaller than a cell.",
+   "tags": [
+    "interiors"
+   ]
+  },
+  {
+   "id": "furnish-density",
+   "what": "Raise interior prop density toward the measured 0.41-0.66 per cell",
+   "state": "done",
+   "doc": "docs/interior-slabs.md",
+   "evidence": "citysmith.build.INTERIOR_DENSITY",
+   "note": "0.12 delivered 0.07 props/cell; 0.35 delivers 0.19. Two thirds of hand-built props sit ON furniture, so the floor-only share of the published 0.41-0.66 is about 0.14-0.22 -- 0.19 is inside it. Reaching the full figure needs furnish-stacking.",
+   "tags": [
+    "interiors"
+   ]
+  },
+  {
+   "id": "scene-handover",
+   "what": "Document how a GM gets the party onto a scene board",
+   "state": "done",
+   "doc": "docs/board-strategy.md 5",
+   "evidence": "test:test_the_scenes_doc_says_how_a_party_gets_onto_the_board",
+   "note": "Written into docs/scenes.md as 'Getting the party onto the board'. Two routes and the choice matters: Summon takes EVERYONE loaded in the campaign, so it cannot move half a party; naming the board and letting players navigate can, and that is what makes the sixteen-character clip load-bearing for players rather than only for our bookkeeping. Plus the two consequences from docs/board-strategy.md -- a player arriving with no GM is locked to a fixed view, and minis are campaign-level and can be unique, so hand-placing is once per campaign rather than once per scene.",
+   "tags": [
+    "interiors"
+   ]
+  },
+  {
+   "id": "prop-vocab",
+   "what": "Tighten the interior prop queries: seasonal and joke assets are leaking in",
+   "state": "done",
+   "doc": "docs/interior-slabs.md",
+   "evidence": "citysmith.palette._PROP_EXCLUDE",
+   "note": "DONE. The root cause is the one CLAUDE.md states as a hard constraint and nothing enforced on props: every prop query is a free-text term search, and `_prop` set no exclusions at all -- so `_WRONG_SETTING`, which tiles have had for months, never applied. _PROP_EXCLUDE adds it plus seasonal (festive, pumpkin, turkey, snow flake) and grim (evil, torture, aberration, corpse). 330 props reachable across all categories, none of the named offenders. **Two findings underneath.** (1) There is NO benign altar in this pack: the catalog holds exactly one asset matching 'altar', `Altar (Evil)` in the Grim folder, so a temple could only ever have been given an evil altar and was, on every map. Same shape as 'there is no Village corner to find' -- the answer is not a looser query but building the thing from what exists, so the slot is a dressed table under candles and a statue. (2) **Palette.validate never checked prop categories**, so an empty query was silent -- `prop()` picks one at random and returns None, which thins the category at a rate nobody would notice. It does now, which is the only reason the emptied altar query was caught.",
+   "tags": [
+    "interiors"
+   ]
+  },
+  {
+   "id": "detail-small",
+   "what": "Scale dressing density to board size, so a small town gets more detail per tile",
+   "state": "done",
+   "doc": "docs/building-massing.md",
+   "evidence": "citysmith.build.detail_scale",
+   "note": "MEASURED on both towns. detail_scale interpolates on board AREA -- Pelvesthollow 32k tiles x2.00, Graybank 133k x1.42, East Tradebourne 442k x1.00 -- and multiplies the HUMAN dressing only, never the woodland, whose density already comes from the canopy field. **Raising the existing rates alone was nearly worthless: +1.8% assets.** The eligible surfaces are tiny next to the board -- on Pelvesthollow, field 1,451 cells, lane 235, plaza 49 against 26,067 ground -- so doubling a rate doubles very little. What actually mattered was finding a surface with NO rule at all: the verge, GROUND adjacent to a street, plaza or building, 2,086 cells and 8% of the board, which fell through every branch of the ladder and is the empty green in every screenshot of the place. Totals: Pelvesthollow 20,514 -> 21,146 assets (+3.1%), largest slab 14,112 -> 14,874 of 30,720 (48%); Graybank 94,139 -> 95,400, largest 24,192 -> 24,798 (81%). Read on a board still pending -- see npc-review, which covers both.",
+   "tags": [
+    "detail",
+    "scope"
+   ]
+  },
+  {
+   "id": "gates-from-roads",
+   "what": "Derive gates where a major road crosses the wall",
+   "state": "done",
+   "doc": "docs/ftg-geojson-import.md",
+   "evidence": "citysmith.ftg.gates_from_roads",
+   "note": "BUILT and measured. ftg.gates_from_roads takes the real segment crossing between a road polyline and a wall polyline -- deliberately NOT mcfg._find_gates' vertex-proximity match, because MFCG puts a gatehouse on a wall vertex on purpose and FTG's vertices are just bends: on East Tradebourne the median wall vertex has a road within 7.0 tiles, so a 5.9-tile tolerance would have dealt gates at bends. Result: 5 gates, every one lying exactly (0.0000) on both a wall segment and a road segment. **The two small towns have NO WALLS AT ALL -- zero rings -- so their 'no gates found' was correct and stays correct.** Only East Tradebourne is walled, and its two 'rings' are open 26- and 23-point polylines rather than closed circuits. Downstream, measured on the rebuild: the warning is replaced by '77 gate tiles reach 269,011 of 269,011 walkable tiles (100%)'; at_gate now fires in road_classes, moving main street 7,479 -> 7,607 tiles and cart 15,308 -> 15,085; narrow street tiles fell 173 -> 105 (0.7% -> 0.4%); bridges 3 -> 1 with connectivity still 100%. The three layouts in out/v3 were backfilled by hand because the source GeoJSON is not on this machine; a fresh import derives them.",
+   "tags": [
+    "gates",
+    "ftg"
+   ]
+  },
+  {
+   "id": "npc-posts",
+   "what": "Decide where guards, working NPCs and off-duty NPCs stand",
+   "state": "done",
+   "doc": "docs/npcs.md",
+   "evidence": "citysmith.npcs.posts",
+   "note": "BUILT: citysmith/npcs.py, three populations. Two numbers had to be found by looking at what came out, and both were badly wrong first. (1) **interior.occupants deals the whole household**, which is right for a scene and confetti out here -- marking all of them gave 115 posts on a 35-building hamlet and 3,927 on East Tradebourne, every family in town standing in its own front garden. OUTDOOR_TRADES gates it: a smith works at the forge, a householder is indoors and the scene pipeline is what opens that door. (2) **one guard per 60 tiles of main street made a hamlet a garrison** -- 12 watchmen against 10 people at work. MAIN_STREET_PER_GUARD is keyed on settlement band now: a hamlet has no watch, a village has a constable, a walled town has a patrol. Result: Pelvesthollow 0/12/0, Graybank 6/42/18, East Tradebourne 167/405/118 -- 0.34, 0.44 and 0.70 posts per building. Off-duty is drawn from every household rather than from the ones already outdoors, or the only people on the green are the ones who were at work anyway.",
+   "tags": [
+    "npc"
+   ]
+  },
+  {
+   "id": "npc-marks",
+   "what": "Emit NPC positions as floor marks, since a v2 slab carries no creatures",
+   "state": "done",
+   "doc": "docs/npcs.md",
+   "evidence": "citysmith.build._lay_npc_marks",
+   "note": "BUILT: build._lay_npc_marks plus <stem>-npcs.json, three palette roles, and --no-npcs / --npc-budget / --hour. Marks are laid LAST and replace the cell rather than covering it -- two coplanar surfaces is the seam that shifts with the camera, and a person does not arrive inside a barrel. interior._DOING could not be reused: it deals 'asleep in a chair' and 'writing, and covering it when anyone passes', which read as nonsense for somebody standing in a lane, so npcs has its own outdoor lists per duty.",
+   "tags": [
+    "npc"
+   ]
+  },
+  {
+   "id": "npc-review",
+   "what": "Review the NPC marks on a fresh board, at both town sizes",
+   "state": "done",
+   "doc": "docs/npcs.md",
+   "evidence": "test:test_nobody_stands_in_a_doorway",
+   "note": "Reviewed on a fresh board (Unknown Realm 22, 8 chunks of Pelvesthollow, 2026-08-25). What it settled: a mark IS legible on grass -- a pale plank square inside a fenced yard, the most artificial thing in the frame -- and the density reads as a working hamlet rather than a crowd, which is the thing a count could not have told us. What it did NOT settle is paving, because a hamlet posts nobody on its streets; that is npc-mark-contrast. The verge dressing from detail-small was visible in the same frame and is the bigger visual change of the two.",
+   "tags": [
+    "npc",
+    "review"
+   ]
+  },
+  {
+   "id": "chunk-budget",
+   "what": "Re-size the chunk budget for the denser build, and fix the default",
+   "state": "done",
+   "doc": "README.md",
+   "evidence": "test:test_a_dressed_town_keeps_byte_cap_headroom",
+   "note": "DONE as build.asset_budget, and it is a size-derived budget rather than the flat lower default the task first asked for -- because a flat number is wrong in both directions, measured. **Reducing --chunk-tiles is the wrong lever and makes it worse**: at 96 tiles East Tradebourne FAILS at 31,739 bytes, because a smaller cell leaves more trimmed open-country chunks for _absorb_open_country to fuse back into the kept ones. The budget is what the quadtree splits on. Measured on the rebuilt towns (112- and 80-tile cells): at 9000, Tradebourne 102 chunks / 99.4% of cap; 6500 -> 114 / 79%; 6000 -> 135 / 70%; 5500 -> 159 / 67%. A paste is ~40 s of driving, so 159 against 114 is half an hour. And 6000 pushed *Graybank* from 22 chunks to 37 for headroom a village does not need. So: 9000 on a small board, 6000 on a large one, interpolated on the same two thresholds detail_scale uses. Result: Pelvesthollow 9,000 -> 8 chunks at 48%; Graybank 7,260 -> 22 chunks (unchanged) at 81%; East Tradebourne 6,000 -> 135 chunks at 70%. Note Graybank is bound by CELL SIZE rather than by budget -- 7,260 does not bind there at all -- which is the two-regime problem README already describes.",
+   "tags": [
+    "chunking"
+   ]
+  },
+  {
+   "id": "board-cleanup",
+   "what": "Prune the probe and rebuild boards, and record which are worth keeping",
+   "state": "done",
+   "doc": "docs/scenes.md",
+   "evidence": "citysmith.boards.prunable",
+   "note": "DONE as boards.prunable / boards.unclaimed / boards.keepers and `citysmith boards prune`. Read off the real campaign list (tools/ts.ps1 boards, scrolled both ways): **28 boards, 22 of them 'Unknown Realm N'** -- every one a probe or a town rebuild nobody came back to -- plus two superseded scene names, against 2 tracked scene boards and 4 named by hand. **The first version offered to delete the finished towns.** The registry only ever tracked SCENE boards, so East Tradebourne, Graybank and Pelvesthollow are claimed by nothing, and a rule of 'prune what the registry does not own' listed all three. It now flags only what is provably disposable -- superseded names, and boards nobody ever named -- and reports hand-named strays through `unclaimed` with no recommendation. Deletion stays manual and is NOT driven: Delete board sits behind the per-board triangle immediately beside the play arrow, the rows re-sort on every rename, and there is no undo.",
+   "tags": [
+    "boards",
+    "cleanup"
+   ]
+  },
+  {
+   "id": "npc-mark-contrast",
+   "what": "Probe the NPC mark tiles against every ground they land on",
+   "state": "open",
+   "doc": "docs/npcs.md",
+   "evidence": "test:test_a_mark_never_matches_the_ground_it_lands_on",
+   "note": "Read on a board 2026-08-25: a pale plank mark is clearly legible on GRASS -- the most artificial thing in frame, and a GM would find it. Paving is unverified and is the real risk: the first guard tile was grey castle stone and a guard is posted on cobble, which is grey on grey. The tiles were swapped on that reasoning (guard timber, worker stone, idler carpet) but reasoning is not a measurement, and this project's own rule is that an asset is probed and read from four sides rather than picked by name. Lay each candidate on grass, cobble, gravel, flagstone and tilled earth side by side and look.",
+   "tags": [
+    "npc",
+    "review"
+   ]
+  },
+  {
+   "id": "floating-fringe",
+   "what": "Four placements on East Tradebourne stand over nothing",
+   "state": "open",
+   "doc": "CLAUDE.md",
+   "evidence": "test:test_nothing_is_left_standing_over_the_map_edge",
+   "note": "Surfaced by the 2026-08-25 rebuild once the scatter stopped rejecting the wrong things: 4 of 408,244 placements -- one Village Roof Side at (284.0, 3.0, 281.0) and three Fern 01 at grade -- are flagged by the existing floating-geometry check. 0.001%% of the board and invisible, but it is a FAIL and the check is doing its job. Both shapes look like edge-fringe cases where the taper took the ground away under something already sited.",
+   "tags": [
+    "verify"
+   ]
+  },
+  {
+   "id": "ui-core",
+   "what": "Lift the build orchestration out of cmd_build so a UI and the CLI share one path",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "citysmith.pipeline.build_town",
+   "note": "**README and CLAUDE.md both claim `cli.py` is a thin shell over the core so a UI can be added without touching generation code. It is not.** `cmd_build` is 142 lines and none of it is argument parsing: it derives the chunk budget, builds the NPC population, calls the builder, plans chunks, writes them and the npc manifest, runs verify, formats the report and prints the chunk table. A UI has two options against that -- shell out and scrape stdout, or reimplement and drift. So this lands first: one `build_town(...)` in the core returning a result object (chunks written, findings, paste order, raster svg path), with `cmd_build` reduced to parsing and printing. No behaviour change; the CLI's output must be byte-identical, which is what the test should pin.",
+   "tags": [
+    "ui",
+    "refactor"
+   ]
+  },
+  {
+   "id": "ui-server",
+   "what": "A stdlib HTTP server on 127.0.0.1 serving the sidecar, with a typed JSON API",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "citysmith.uiserver.serve",
+   "note": "`http.server` plus hand-written HTML/CSS/JS, no dependencies and no build step, because the core is stdlib-only and that rules out Electron, React and FastAPI. Tkinter would also qualify; a web UI wins because it can be DRIVEN AND SCREENSHOTTED by the Browser pane tools we already have, and this project's history is mostly screenshots read wrong. It also doubles as a Symbiote later (see docs/sidecar-ui.md 2). Safety is part of this task, not a follow-up: bind 127.0.0.1 only; the API exposes NAMED operations with typed parameters and never a command string, so nothing in a request reaches a shell; browser paths resolve against out/ and are rejected outside it; the Anthropic key stays server-side and the browser never talks to the API directly.",
+   "tags": [
+    "ui"
+   ]
+  },
+  {
+   "id": "ui-build-screen",
+   "what": "Drive import and build from the UI, and show the verify report and raster",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "test:test_the_build_endpoint_returns_the_same_findings_as_the_cli",
+   "note": "Pick a layout or a GeoJSON, set style, seed, chunk size and the flags that matter (--by-region, --fence-style, --no-quarters, --hour), run it, and watch. The report is the same `verify` findings the CLI prints -- pass/warn/fail with the detail line, not a summary -- because those sentences are the product of a dozen sessions and a UI that reduces them to a green tick throws that away. Show `city-raster.svg` beside it and the chunk table in PASTE ORDER, which is not filename order. Long builds need progress: East Tradebourne is minutes, so the endpoint streams or polls rather than blocking a request.",
+   "tags": [
+    "ui"
+   ]
+  },
+  {
+   "id": "ui-paste-screen",
+   "what": "Drive the paste from the UI, and say plainly when it cannot",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "test:test_the_paste_endpoint_refuses_when_talespire_is_not_running",
+   "note": "Wraps `review.ps1 tiled` / `ts.ps1`, showing the chunk list in paste order, which chunk is down, and the grab after each so a bad paste is visible without alt-tabbing. Preconditions are the point: check `ts.ps1 client` for a window, `planestate` for an explicit 'off' (NOT 'not ON' -- UNKNOWN must fail), and refuse rather than start a 102-chunk run that will land wrong. **Windows only.** The generate/build half is cross-platform and this half is not, so the UI reports that rather than offering a dead button.",
+   "tags": [
+    "ui",
+    "talespire"
+   ]
+  },
+  {
+   "id": "ui-chat-spec",
+   "what": "Chat: a sentence becomes a SPEC, and Python builds the slab from it",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "citysmith.slabchat.SlabSpec",
+   "note": "**This is where the translation-layer rule would get broken, so the shape is the task.** CLAUDE.md: Claude maps natural language to generator parameters and must never produce coordinates, asset UUIDs or slab bytes. So: sentence -> [Claude, strict tool schema] -> a SlabSpec -> [Python] -> a slab. The chat holds the spec -- size, purpose, storeys, fixtures, style, seed -- and Claude's only output is edits to it, through a schema exactly like `ai._CITY_TOOL`, which already does this for cities. Python rebuilds deterministically every turn, so the same spec always gives the same slab and a bad model response gives a boring room rather than a broken one. Builds on floorplan.generate + build_interior, which already turn a room spec into geometry.",
+   "tags": [
+    "ui",
+    "ai"
+   ]
+  },
+  {
+   "id": "ui-chat-modify",
+   "what": "Chat: edit the spec and rebuild, and be honest that it is not reading the board",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "test:test_a_modification_edits_the_spec_rather_than_the_board",
+   "note": "'Make it two storeys', 'put the bar on the north wall' -- edits the held spec and rebuilds. That works and is most of what anyone wants. **'Add a fireplace to the room I already pasted' does not, and the UI must not pretend otherwise**: that needs the board read back, and CLAUDE.md records copy-out as HALF SOLVED -- returns structure and never terrain, behaves as a thin slice at the elevation plane, and only one marquee can be driven per board. So 'modify an existing board' means modify the thing THIS SESSION built; the UI keeps that history visibly and says what it cannot see.",
+   "tags": [
+    "ui",
+    "ai"
+   ]
+  },
+  {
+   "id": "ui-chat-clipboard",
+   "what": "Send a small slab to the clipboard rather than driving the game",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "test:test_a_chat_slab_goes_to_the_clipboard_not_through_the_game",
+   "note": "A town is 8 to 135 chunks and has to be driven -- camera straight down, one cursor cell, paste order. A single small slab does not: `ts.ps1 setclip` already exists, so the UI puts the base64 on the clipboard and the user presses Ctrl+V themselves. No synthetic input, no camera discipline, no anchor rules, and nothing can go wrong that the user did not do. This should be the chat's default and driving the game should stay with the town-scale flow.",
+   "tags": [
+    "ui",
+    "talespire"
+   ]
+  },
+  {
+   "id": "ui-onscreen",
+   "what": "Verify the sidecar on screen at second-monitor proportions",
+   "state": "open",
+   "doc": "docs/sidecar-ui.md",
+   "evidence": "test:test_the_sidecar_serves_its_own_page",
+   "note": "Driven and screenshotted through the Browser pane, which is the reason the UI is a web page rather than Tkinter. What only a screen can settle: whether the verify report is readable at a glance or a wall of text; whether the chat and the build view can share one column without either being useless; whether it works at a portrait second monitor as well as a landscape one (`resize_window`); and whether it is legible in both light and dark. Same standard as every other review here -- look at it, do not assert about it.",
+   "tags": [
+    "ui",
+    "review"
+   ]
+  }
+ ]
 }

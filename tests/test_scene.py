@@ -399,3 +399,17 @@ def test_comments_in_the_config_are_not_settings(tmp_path):
     path.write_text(json.dumps({"_comment": "hello", "party": {"_comment": "hi"}}),
                     encoding="utf-8")
     assert Config.load(path).unknown == []
+
+
+def test_the_scenes_doc_says_how_a_party_gets_onto_the_board():
+    """The step *after* everything citysmith does, and it was unwritten: the
+    tool built a board and stopped. Both routes have to be there, because they
+    are not interchangeable -- Summon takes everyone in the campaign and so
+    cannot move half a party."""
+    import pathlib
+
+    doc = (pathlib.Path(__file__).resolve().parents[1] / "docs" / "scenes.md")
+    text = doc.read_text(encoding="utf-8").lower()
+    assert "summon players to this board" in text
+    assert "split party" in text
+    assert "campaign-level" in text, "minis persisting across boards is the cost saver"

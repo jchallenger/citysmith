@@ -16,6 +16,7 @@ hand-edited, or regenerated on its own.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import sys
 
@@ -499,13 +500,27 @@ def cmd_build(args) -> int:
     out_dir = pathlib.Path(args.out_dir)
     catalog = _catalog(args)
     palette = _palette(args, catalog, args.style, args.seed)
+    population = None
+    if not args.no_npcs:
+        from citysmith import npcs as N
+        population = N.posts(tm, layout, seed=args.seed, hour=args.hour,
+                             budget=args.npc_budget)
+        print(f"  npcs: {population.summary()}")
+
     builder = build_from_tilemap(
         tm, palette, storeys=args.storeys, roofs=not args.no_roofs, seed=args.seed,
         fence_style=args.fence_style, layout=layout,
-        quarters=not args.no_quarters,
+        quarters=not args.no_quarters, npc_population=population,
     )
+    # Unset means "let the board decide" -- a small board splits into so few
+    # chunks that a tight budget only costs pastes, while a large one needs the
+    # headroom. See `build.asset_budget` for the measurements.
+    budget = args.max_assets if args.max_assets is not None else build.asset_budget(tm)
+    if args.max_assets is None:
+        print(f"  chunk budget: {budget:,} assets (from board size)")
+
     plan = builder.chunk_plan(
-        max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
+        max_assets=budget, chunk_tiles=args.chunk_tiles,
         skip_open_country=not args.keep_open_country,
         per_building=args.per_building,
         by_layer=not args.by_region,
@@ -523,6 +538,16 @@ def cmd_build(args) -> int:
         # that a reviewer can see.
         register=not args.multi_slab,
     )
+    # The manifest, not the marks, is the durable half of "a position": a slab
+    # carries no creatures, so the board says *where* and this says *who*.
+    if population is not None and population.posts:
+        from citysmith import npcs as N
+        out_dir.mkdir(parents=True, exist_ok=True)
+        npc_path = out_dir / f"{args.stem}-npcs.json"
+        npc_path.write_text(
+            json.dumps(N.manifest(population), indent=1) + "\n", encoding="utf-8")
+        print(f"  wrote {npc_path}  ({len(population.posts)} post(s))")
+
     multislab_path = None
     try:
         written = _write_chunks(plan.chunks, out_dir, args.stem)
@@ -690,6 +715,38 @@ def cmd_boards(args) -> int:
             print(f"    {r.scene_id}  {visits}, last {r.last_entered or 'never'}")
             for old in r.superseded:
                 print(f"    superseded: {old}")
+        return 0
+
+    if args.action == "prune":
+        seen = [n.strip() for n in (args.seen or "").splitlines() if n.strip()]
+        if args.seen_file:
+            seen += [n.strip() for n
+                     in pathlib.Path(args.seen_file).read_text(encoding="utf-8").splitlines()
+                     if n.strip()]
+        gone = boards.prunable(registry, seen)
+        keep = boards.keepers(registry)
+        other = boards.unclaimed(registry, seen)
+        print(f"KEEP -- {len(keep)} board(s) a scene points at:")
+        for record in keep:
+            print(f"  {record.board}")
+        if other:
+            print(f"\nNOT TRACKED -- {len(other)} board(s) somebody named by "
+                  "hand. The registry only ever held scenes, so this is where "
+                  "the town boards are. Listed, not recommended:")
+            for name in other:
+                print(f"  {name}")
+        print(f"\nPRUNE -- {len(gone)} board(s) nothing points at:")
+        for item in gone:
+            print(f"  {item.describe()}")
+        if not seen:
+            print("\n(No campaign list given, so only superseded names are "
+                  "listed. Run `tools\\ts.ps1 boards`, read the rows off the "
+                  "screenshot and pass them with --seen-file to catch the "
+                  "probe and rebuild boards too.)")
+        print("\nNothing here deletes anything. Delete board sits behind the "
+              "per-board triangle in the campaign list, right beside the play "
+              "arrow, and the rows move on every rename -- so a click that "
+              "misses by one deletes the wrong board, and there is no undo.")
         return 0
 
     if not args.scene:
@@ -1028,7 +1085,15 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--no-roofs", action="store_true")
     c.add_argument("--no-bridges", action="store_true",
                    help="do not auto-connect districts split by water")
-    c.add_argument("--max-assets", type=int, default=9000)
+    c.add_argument("--max-assets", type=int, default=None,
+                   help="assets per chunk; the quadtree splits a cell that "
+                        "exceeds it. Default follows board size (see "
+                        "build.asset_budget): a small board splits into so "
+                        "few chunks that a tight budget only costs pastes, "
+                        "while a large one needs the headroom -- East "
+                        "Tradebourne reached 99.4%% of the 30,720-byte slab "
+                        "cap at 9000. Lowering --chunk-tiles is NOT the "
+                        "same lever and makes it worse.")
     c.add_argument("--chunk-tiles", type=int, default=DEFAULT_CHUNK_TILES,
                    help="chunk edge in tiles; smaller chunks skip more empty "
                         f"country and cost more pastes (default {DEFAULT_CHUNK_TILES})")
@@ -1062,6 +1127,18 @@ def build_parser() -> argparse.ArgumentParser:
                         f"(default {build.DEFAULT_FENCE_STYLE})")
     c.add_argument("--crop", default=None, metavar="X,Z,W,D",
                    help="build only this tile region, for a staged in-game test")
+    c.add_argument("--no-npcs", action="store_true",
+                   help="do not mark where the townsfolk and the watch are "
+                        "standing. A v2 slab carries no creatures, so each is "
+                        "a contrasting floor tile plus a row in "
+                        "<stem>-npcs.json for the GM to read while placing "
+                        "minis -- the same device a scene uses for the party.")
+    c.add_argument("--npc-budget", type=int, default=None, metavar="N",
+                   help="cap the number of NPC marks; guards are kept first, "
+                        "then people at work, then the off-duty")
+    c.add_argument("--hour", default="day", choices=["day", "night"],
+                   help="who is about: at night a household is half its "
+                        "daytime size (default day)")
     c.add_argument("--stem", default="city", help="output filename stem")
     c.set_defaults(func=cmd_build)
 
@@ -1091,13 +1168,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("boards", help="which board holds which scene")
     c.add_argument("action",
-                   choices=["status", "record", "rename", "visit", "forget", "list"],
+                   choices=["status", "record", "rename", "visit", "forget",
+                            "list", "prune"],
                    help="status: what to do about this scene (exit 0 READY, "
                         "3 STALE, 4 NEW, 5 MOVED). record: note that it has "
                         "been pasted. visit: count a return trip. forget: drop "
                         "the record for a board deleted by hand. rename: "
                         "point the record at a new board name without "
-                        "claiming a fresh paste.")
+                        "claiming a fresh paste. prune: list the boards "
+                        "nothing points at, so a person can delete them.")
+    c.add_argument("--seen", default="",
+                   help="board names from the campaign list, one per line; "
+                        "anything no scene claims is reported as prunable")
+    c.add_argument("--seen-file", default=None, metavar="PATH",
+                   help="the same list, read from a file")
     c.add_argument("scene", nargs="?", default="",
                    help="scene id, its directory, or a path to scene.json")
     c.add_argument("--board", default=None,

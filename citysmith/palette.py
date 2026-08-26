@@ -66,6 +66,9 @@ def _tile(*terms: str, **kw) -> Query:
 
 def _prop(*terms: str, **kw) -> Query:
     kw.setdefault("kind", "prop")
+    # Appended rather than replacing, so a category that needs one of these on
+    # purpose can still pass its own `exclude` and have both applied.
+    kw["exclude"] = tuple(kw.get("exclude", ())) + _PROP_EXCLUDE
     return q(*terms, **kw)
 
 
@@ -99,6 +102,32 @@ _WRONG_SETTING = (
     "desert", "shogun", "jungle", "snow", "palace", "marble", "moorgoth",
     "dungeon", "harbor", "ship", "sand", "swamp", "pirate", "temple of",
 )
+
+
+#: Name fragments that disqualify a prop whatever category asked for it.
+#:
+#: **Every prop query in this file is a free-text term search**, which is the
+#: one thing `CLAUDE.md`'s hard constraints tell you not to do -- "asset names
+#: are inconsistent, matching them loosely lets 'Tavern no floor' satisfy a
+#: request for a floor". Nothing enforced it on props, so ``_prop("bed")``
+#: matched `Bed Double Moorgoth`, ``_prop("tree")`` matched `Tree, Festive`
+#: and ``_prop("altar")`` matched `Altar (Evil)`. That was found by reading a
+#: yard's clutter list and seeing four kinds of bed standing outdoors.
+#:
+#: Three groups, and each is a different mistake:
+#:
+#: * **seasonal and joke** -- a Christmas tree in a hamlet's woodland
+#: * **grim and monstrous** -- an evil altar in the village chapel, a torture
+#:   table in somebody's kitchen. A campaign may want those; it should ask.
+#: * **wrong setting** -- the same `_WRONG_SETTING` already applied to tiles,
+#:   which props never got.
+_PROP_EXCLUDE = _WRONG_SETTING + (
+    "festive", "christmas", "halloween", "pumpkin", "turkey", "snow flake",
+    "easter", "birthday", "party",
+    "evil", "torture", "aberration", "demon", "hell", "gore", "blood",
+    "skull", "corpse", "sacrific", "cursed", "haunted", "grim",
+)
+
 
 
 #: Scope the medieval style to its own pack, so a shared tag on a sci-fi asset
@@ -232,6 +261,35 @@ MEDIEVAL = Style(
         "party_mark": [
             _tile(name="Moorgoth Floor - Carpet Centre", **_MED, **_UNIT),
             _tile(name="CobbleStone Floor Small", **_MED, **_UNIT),
+        ],
+        #: Where an NPC stands, one role per duty so the three read apart at a
+        #: glance. Same device as ``party_mark`` and for the same reason -- a
+        #: v2 slab carries no creatures, so a position is a tile you drop a
+        #: mini onto -- and pinned by name for the same reason too: the
+        #: undeclared-role fallback is a bare name search across the whole
+        #: catalog, and "npc_guard_mark" would resolve to nothing useful.
+        #: Deliberately *not* the party's own carpet: a player has to be able
+        #: to tell where their character starts from where the town watch is.
+        #: **A mark has to contrast with what it is standing on, and the three
+        #: duties stand on different things.** A guard is posted on paving --
+        #: a gate passage, a main street -- so a grey stone mark would be grey
+        #: on grey and invisible, which is what the first pick was; it gets
+        #: timber. The other two stand on grass, earth or a gravel yard, so
+        #: they get stone and a dark carpet. Verified on grass only so far:
+        #: `npc-mark-contrast` in tasks.json is the probe that settles paving,
+        #: and until it runs this is a reasoned pick rather than a measured
+        #: one.
+        "npc_guard_mark": [
+            _tile(name="Rural Floor 02", **_MED, **_UNIT),
+            _tile(name="Tavern Floor 01", **_MED, **_UNIT),
+        ],
+        "npc_work_mark": [
+            _tile(name="castle floor 1x1", **_MED, **_UNIT),
+            _tile(name="Castle Ruins floor stone 1x1", **_MED, **_UNIT),
+        ],
+        "npc_idle_mark": [
+            _tile(name="Moorgoth Floor - Carpet Centre", **_MED, **_UNIT),
+            _tile(name="Tavern Floor 01", **_MED, **_UNIT),
         ],
         #: 2x2 twin of ``ground``. Open country is tiled with these first and
         #: only edged in 1x1, which cuts the tile count for a field of grass by
@@ -698,8 +756,17 @@ MEDIEVAL = Style(
                  _prop("shelf", **_MED)],
         "smithy": [_prop("anvil", **_MED), _prop("forge", **_MED), _prop("weapon", **_MED),
                    _prop("barrel", **_MED)],
-        "temple": [_prop("candle", **_MED), _prop("altar", **_MED), _prop("statue", **_MED),
-                   _prop("brazier", **_MED)],
+        #: **There is no benign altar in this pack, and that is a fact about
+        #: the library rather than a gap in the query.** The catalog holds
+        #: exactly one asset matching "altar" -- `Altar (Evil)`, in the *Grim*
+        #: folder -- so the temple's altar slot could only ever have resolved
+        #: to an evil altar, and did, in every chapel on every map. Same shape
+        #: as "there is no Village corner to find": the answer is not a looser
+        #: query, it is to build the thing out of what does exist. A dressed
+        #: table under candles and a statue reads as a shrine; an evil altar
+        #: reads as a plot the GM did not ask for.
+        "temple": [_prop("candle", **_MED), _prop("table", **_MED),
+                   _prop("statue", **_MED), _prop("brazier", **_MED)],
         "house": [_prop("bed", **_MED), _prop("table", **_MED), _prop("chair", **_MED),
                   _prop("chest", **_MED)],
         "warehouse": [_prop("crate", **_MED), _prop("barrel", **_MED), _prop("sack", **_MED),
@@ -787,6 +854,20 @@ CYBERPUNK = Style(
         #: A lit grate reads as a spot to stand on under a sci-fi floor.
         "party_mark": [
             _tile(group="floor", any_tags=("metal", "grate"), **_SCIFI, **_UNIT),
+            _tile(group="floor", **_SCIFI, **_UNIT),
+        ],
+        #: Same three duties as the medieval set; declared here for the same
+        #: reason -- so the undeclared-role fallback never gets a chance to
+        #: search the whole catalog by name.
+        "npc_guard_mark": [
+            _tile(group="floor", any_tags=("metal",), **_SCIFI, **_UNIT),
+            _tile(group="floor", **_SCIFI, **_UNIT),
+        ],
+        "npc_work_mark": [
+            _tile(group="floor", any_tags=("concrete",), **_SCIFI, **_UNIT),
+            _tile(group="floor", **_SCIFI, **_UNIT),
+        ],
+        "npc_idle_mark": [
             _tile(group="floor", **_SCIFI, **_UNIT),
         ],
         # -- landscape ----------------------------------------------------
@@ -976,6 +1057,22 @@ class Palette:
                     f"{asset.size_x}x{asset.size_z}, but it fills a 2x2 block "
                     "-- it must be 2.0x2.0"
                 )
+
+        # **Prop categories were never validated, so an empty one was silent.**
+        # `Palette.prop` picks one query at random from the category's list and
+        # returns None when it matches nothing -- so a dead query does not
+        # fail, it just makes that category thinner every time it comes up, at
+        # a rate nobody would notice. It went unnoticed here: tightening the
+        # prop queries emptied `temple/altar` outright, and the only reason it
+        # was caught is that somebody counted the matches by hand.
+        for category, queries in sorted(self.style.props.items()):
+            for terms, kwargs in queries:
+                if not self.catalog.find(*terms, **kwargs):
+                    problems.append(
+                        f"prop category {category!r} has a query "
+                        f"{'+'.join(terms) or '<no terms>'!r} that matches "
+                        "nothing -- it will silently thin the category"
+                    )
 
         # Roles placed into a wall segment must match the wall's footprint.
         # Otherwise the asset overhangs the cell, overlapping its neighbours

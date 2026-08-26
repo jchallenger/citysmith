@@ -289,3 +289,110 @@ def test_furniture_stands_inside_the_room_not_in_the_wall():
             buried.append((asset.name, "z", round(cz, 2), (r.z, r.z2)))
     assert not buried, (
         f"{len(buried)} prop(s) reaching into a wall band: {buried[:6]}")
+
+
+# -- chunk budget -------------------------------------------------------------
+
+
+class _Board:
+    """Just enough of a TileMap for the size-derived budgets."""
+
+    def __init__(self, width: int, depth: int):
+        self.width, self.depth = width, depth
+
+
+def test_a_dressed_town_keeps_byte_cap_headroom():
+    """The budget follows the board, and it has to, in both directions.
+
+    Measured 2026-08-25 after the yard, fence and surface work: East
+    Tradebourne's largest slab hit 30,546 of 30,720 bytes at the flat default
+    of 9000 -- 99.4%, valid with nothing to spare. The intuitive fix, a smaller
+    ``--chunk-tiles``, makes it *worse*: at 96 tiles the build fails outright
+    at 31,739 bytes, because a smaller cell leaves more trimmed open-country
+    chunks for ``_absorb_open_country`` to fuse back into the kept ones.
+
+    But a single tight number is wrong the other way: at 6000 Graybank went
+    from 22 chunks to 37 -- fifteen extra pastes, about ten minutes of driving
+    -- to buy headroom a village does not need.
+    """
+    from citysmith.build import (BUDGET_LARGE_BOARD, BUDGET_SMALL_BOARD,
+                                 asset_budget)
+
+    hamlet = asset_budget(_Board(176, 184))       # Pelvesthollow, 32k tiles
+    village = asset_budget(_Board(434, 306))      # Graybank, 133k
+    town = asset_budget(_Board(739, 598))         # East Tradebourne, 442k
+
+    assert hamlet == BUDGET_SMALL_BOARD
+    assert town == BUDGET_LARGE_BOARD
+    assert town < village < hamlet, (
+        f"the budget must tighten as the board grows: {hamlet}, {village}, {town}"
+    )
+
+
+def test_more_detail_goes_on_a_small_board_and_not_a_large_one():
+    """`detail_scale` and `asset_budget` are two halves of one question and
+    share their thresholds: how much can this board afford to carry, and how
+    finely does it have to be cut to stay under the slab cap while carrying
+    it. They must therefore move in opposite directions."""
+    from citysmith.build import asset_budget, detail_scale
+
+    small, large = _Board(176, 184), _Board(739, 598)
+    assert detail_scale(small) > detail_scale(large)
+    assert asset_budget(small) > asset_budget(large)
+    assert detail_scale(large) == 1.0, "a large board gets no extra dressing"
+
+
+# -- the ground sheet ---------------------------------------------------------
+
+
+def test_no_cell_holds_two_ground_tiles():
+    """**Every yard on every board built so far was z-fighting.**
+
+    `_lay_yards` surfaced its cells after `_lay_terrain` had already sheeted
+    them in grass, leaving two coplanar 1x1 tiles per cell -- 365 of them on
+    Pelvesthollow. TaleSpire does not drop a co-located *tile* the way it drops
+    a colliding prop: it keeps both, and the dithering moves with the camera.
+    Designed in `docs/district-surfaces.md` 6 and unbuilt for three passes,
+    which is why it went unseen.
+    """
+    from citysmith.verify import _ground_sheet
+
+    layout = _town(spacing=12)
+    tm = R.rasterize(layout)
+    builder = build_from_tilemap(tm, _palette(), storeys=1)
+    assert yard_cells(tm), "the fixture needs yards, which is where this bit"
+
+    doubled = [p for p in _ground_sheet(builder, tm) if "more than one ground tile" in p]
+    assert not doubled, doubled
+
+
+def test_adjacent_ground_tiles_are_flush():
+    """Surface tiles align at the *top*: cobble is 0.25 thick and grass 0.5, so
+    laid from a common bottom every street sat a quarter tile under the grass
+    beside it -- a 15 inch kerb along both sides of every road, on 1,234 tiles.
+    That rule has never been checked and now carries nine materials."""
+    from citysmith.verify import _ground_sheet
+
+    layout = _town(spacing=12)
+    tm = R.rasterize(layout)
+    builder = build_from_tilemap(tm, _palette(), storeys=1)
+    steps = [p for p in _ground_sheet(builder, tm) if "top height" in p]
+    assert not steps, steps
+
+
+def test_a_second_ground_tile_in_one_cell_is_caught():
+    """The check has to actually fire, or it is decoration."""
+    from citysmith.verify import _ground_sheet
+
+    layout = _town(spacing=12)
+    tm = R.rasterize(layout)
+    builder = build_from_tilemap(tm, _palette(), storeys=1)
+    assert not [p for p in _ground_sheet(builder, tm) if "more than one" in p]
+
+    # Lay a second ground tile squarely on top of an existing one.
+    ground = builder.palette.require("ground")
+    first = next(p for p in builder.placements if p.asset_id == ground.id)
+    builder.add(type(first)(asset_id=ground.id, x=first.x, y=first.y,
+                            z=first.z, rot=first.rot))
+    caught = [p for p in _ground_sheet(builder, tm) if "more than one" in p]
+    assert caught, "a duplicated ground tile must be reported"

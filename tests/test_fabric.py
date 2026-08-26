@@ -182,3 +182,47 @@ def test_a_corner_cell_gets_one_piece_not_two_panels(town, catalog_palette):
         if cell_of(p, asset) in corners and p.y < 3.0:
             walls += 1
     assert walls == 4, f"{walls} pieces on four ground-floor corners"
+
+
+# -- prop vocabulary ----------------------------------------------------------
+
+
+def _medieval_palette():
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import Palette
+    return Palette.named(load_or_build(), "medieval", 0)
+
+
+def test_no_seasonal_or_grim_prop_is_reachable():
+    """Every prop query in the palette is a free-text term search, which is the
+    one thing CLAUDE.md's hard constraints say not to do -- and nothing enforced
+    it on props, so a temple dealt `Altar (Evil)`, a hamlet's woodland dealt
+    `Tree, Festive`, and a house dealt `Table Torture 01`. Found by reading a
+    yard's clutter list and seeing four kinds of bed standing outdoors.
+    """
+    from citysmith.palette import MEDIEVAL
+
+    palette = _medieval_palette()
+    reachable = set()
+    for queries in MEDIEVAL.props.values():
+        for terms, kwargs in queries:
+            reachable.update(a.name for a in palette.catalog.find(*terms, **kwargs))
+    assert reachable, "the fixture needs a catalog with props in it"
+
+    offenders = [
+        n for n in reachable
+        if any(bad in n.lower() for bad in
+               ("festive", "pumpkin", "turkey", "snow flake", "(evil)",
+                "torture", "aberration", "moorgoth"))
+    ]
+    assert not offenders, f"seasonal or grim props still reachable: {offenders[:6]}"
+
+
+def test_every_prop_query_matches_something():
+    """`Palette.prop` picks one query at random and returns None when it matches
+    nothing, so a dead query does not fail -- it silently thins the category at
+    a rate nobody would notice. Tightening the exclusions emptied
+    `temple/altar` outright and only a hand count caught it."""
+    palette = _medieval_palette()
+    dead = [p for p in palette.validate() if "matches\nnothing" in p or "matches " in p]
+    assert not dead, dead

@@ -354,6 +354,58 @@ def rotated_footprint(asset: Asset, rot: int) -> tuple[float, float]:
     return (asset.size_x, asset.size_z)
 
 
+def oriented_box(asset: Asset, cx: float, cz: float, rot: int) -> tuple[float, ...]:
+    """A prop's collider as an *oriented* box: centre, half extents, its axis.
+
+    **The half extents are the asset's own and are never swapped.** Swapping
+    them on a quarter turn is what an axis-aligned view does, and
+    :func:`rotated_footprint` only does it on quarter turns -- so for a prop at
+    15 degrees it hands back the *unrotated* extent, which is smaller than the
+    truth. Scenery is scattered at all 24 steps, so that under-measured every
+    prop not on a quarter turn and let the scatter place things that really do
+    interpenetrate.
+
+    One implementation, used by both :class:`Scatter` when deciding whether a
+    prop fits and by `verify._prop_collisions` when reporting what did not.
+    Two copies of this drifting apart is the shape of half the bugs in
+    `CLAUDE.md`.
+    """
+    ang = math.radians(rot * 15.0)
+    return (cx, cz, asset.size_x / 2.0, asset.size_z / 2.0,
+            math.cos(ang), math.sin(ang))
+
+
+def oriented_aabb(box: tuple[float, ...]) -> tuple[float, float, float, float]:
+    """A conservative axis-aligned bound on an oriented box, for bucketing.
+
+    Conservative or the broad phase drops pairs the narrow phase would catch.
+    """
+    cx, cz, hx, hz, c, s = box
+    ex = hx * abs(c) + hz * abs(s)
+    ez = hx * abs(s) + hz * abs(c)
+    return (cx - ex, cz - ez, cx + ex, cz + ez)
+
+
+def oriented_depth(a: tuple[float, ...], b: tuple[float, ...]) -> float:
+    """How deep two oriented boxes interpenetrate, in tiles.
+
+    Separating-axis test. At or below zero means disjoint; the value is the
+    smallest overlap over the four axes, so it is how far one box would have to
+    move to come clear -- which is what tells a corner *join* from a burial.
+    """
+    dx, dz = b[0] - a[0], b[1] - a[1]
+    best = float("inf")
+    for box in (a, b):
+        c, s = box[4], box[5]
+        for nx, nz in ((c, s), (-s, c)):
+            ra = a[2] * abs(a[4] * nx + a[5] * nz) + a[3] * abs(-a[5] * nx + a[4] * nz)
+            rb = b[2] * abs(b[4] * nx + b[5] * nz) + b[3] * abs(-b[5] * nx + b[4] * nz)
+            best = min(best, ra + rb - abs(dx * nx + dz * nz))
+            if best <= 0.0:
+                return best
+    return best
+
+
 def collider_offset(asset: Asset, rot: int) -> tuple[float, float]:
     """Where the collider centre sits relative to the stored coordinate."""
     ox, oz = asset.off_x, asset.off_z
@@ -2383,6 +2435,12 @@ def _lay_terrain(b: Builder, tm, surface_role, grade: float,
                 continue
             if any(surface_at(qx, qz) != s for qx, qz in quad):
                 continue
+            # Same surface is not the same *material*: a yard is GROUND and so
+            # is the lawn beside it, and a 2x2 block laid across both puts
+            # grass over worked ground. Four cells have to agree on the role,
+            # not just the class.
+            if len({surface_role(s, qx, qz) for qx, qz in quad}) != 1:
+                continue
             if any(tm.building[qz][qx] for qx, qz in quad):
                 continue
             if any(q in bank for q in quad):
@@ -2732,9 +2790,11 @@ def _lay_yards(b: Builder, tm, grade: float,
     laid = 0
 
     for bid, cells in sorted(yards.items()):
-        role = YARD_SURFACE.get(bid.split("-")[0], DEFAULT_YARD_SURFACE)
-        if b.palette.resolve(role) is None:
-            role = "ground"
+        # **The surface is laid by `_lay_terrain`, not here.** It used to be
+        # laid here, over ground that pass had already sheeted -- two coplanar
+        # tiles in every yard cell, which TaleSpire keeps and lets z-fight.
+        # `surface_role` decides the yard's material with everything else now,
+        # so the cell gets exactly one tile. This pass fences and nothing more.
         # **Not tagged with the building id.** `Builder.group` exists so a
         # building's *shell* is never split across chunks; a yard is terrain,
         # and tagging it made the landscape chunk claim the building and count
@@ -2745,8 +2805,6 @@ def _lay_yards(b: Builder, tm, grade: float,
             if drop is None:
                 continue
             here = grade - drop
-            b.surface(role, x, z, here)
-            b.ground_baseline[(x, z)] = here - b.palette.require(role).size_y
             laid += 1
 
             if fence is None:
@@ -2787,6 +2845,96 @@ DEFAULT_YARD_CLUTTER = ("house",)
 #: 0.41-0.66 props per cell, and outdoors wants far less than that.
 YARD_CLUTTER_RATE = 0.16
 
+#: A board this size or smaller gets the full detail multiplier.
+DETAIL_SMALL_TILES = 40_000
+#: A board this size or larger gets none of it.
+DETAIL_LARGE_TILES = 200_000
+#: What a small board's human dressing is multiplied by.
+DETAIL_MAX_SCALE = 2.0
+
+
+#: Assets per chunk on a small board and on a large one. Interpolated between
+#: `DETAIL_SMALL_TILES` and `DETAIL_LARGE_TILES`, the same two thresholds
+#: `detail_scale` uses -- deliberately, because they are two halves of one
+#: question: how much can this board afford, and how finely does it have to be
+#: cut to stay under the slab cap while carrying it.
+BUDGET_SMALL_BOARD = 9000
+BUDGET_LARGE_BOARD = 6000
+
+
+def asset_budget(tm) -> int:
+    """Assets per chunk, from board size.
+
+    **MEASURED 2026-08-25, and it corrects the obvious move.** After the yard,
+    fence and surface work, East Tradebourne's largest slab reached 30,546 of
+    30,720 bytes -- 99.4%, valid with nothing to spare. The intuitive fix is a
+    smaller `--chunk-tiles`, and it makes things *worse*: at 96 tiles the build
+    fails outright with a chunk at 31,739 bytes, because a smaller cell leaves
+    more trimmed open-country chunks for `_absorb_open_country` to fuse back
+    into the kept ones. The lever that works is the per-chunk asset budget,
+    which is what the quadtree splits on.
+
+    One number for every board is wrong in both directions, measured on the
+    three towns at 112- and 80-tile cells:
+
+    ======  ==============  ==============  =========================
+    budget  East Tradeb.    Graybank        note
+    ======  ==============  ==============  =========================
+    9000    102 ch, 99.4%   22 ch, 81%      the town is a rounding error from failing
+    6500    114 ch, 79%     --              the town is safe
+    6000    135 ch, 70%     37 ch, 68%      the *village* pays 15 extra pastes for headroom it does not need
+    5500    159 ch, 67%     --              two thirds, at 45 more pastes than 6500
+    ======  ==============  ==============  =========================
+
+    A paste is about forty seconds of driving, so 159 against 114 is half an
+    hour of somebody's evening. A small board splits into so few chunks that
+    the budget never binds on it at all, and giving it a tight one only costs
+    pastes. So the budget follows the board, and the failure it guards against
+    is loud rather than silent -- an over-cap slab aborts the build with the
+    flag to change named in the message.
+    """
+    area = float(tm.width * tm.depth)
+    if area <= DETAIL_SMALL_TILES:
+        return BUDGET_SMALL_BOARD
+    if area >= DETAIL_LARGE_TILES:
+        return BUDGET_LARGE_BOARD
+    span = DETAIL_LARGE_TILES - DETAIL_SMALL_TILES
+    t = (DETAIL_LARGE_TILES - area) / span
+    return int(round(BUDGET_LARGE_BOARD + t * (BUDGET_SMALL_BOARD - BUDGET_LARGE_BOARD)))
+
+
+def detail_scale(tm) -> float:
+    """How much human dressing a board of this size can afford.
+
+    **The budgets that bind are per board, so the room to spend is a function
+    of board area and nothing else.** Measured on the three towns:
+    Pelvesthollow is 32k tiles and spends 2.1% of the per-board asset limit,
+    with its largest slab at 14,112 of 30,720 bytes; Graybank 133k tiles and
+    9.4%; East Tradebourne 442k tiles, 41.1%, and a largest slab at *99.4%* of
+    the cap. A single dressing rate for all three therefore leaves the small
+    boards nearly empty while the large one has no headroom at all -- which is
+    the wrong way round, because the small board is the one a party actually
+    stands on and looks at.
+
+    Interpolated rather than stepped, so a town near the boundary does not
+    change character on one extra field.
+
+    **It scales the HUMAN dressing only** -- market goods, lane and yard
+    clutter, the barrels against a street wall, the wheat and straw in a
+    worked field. Not the trees, stumps and ferns: woodland density already
+    comes from the canopy field, which closes into stands and opens into
+    glades, and doubling it would turn a hamlet's pasture into thicket. The
+    thing a small board is short of is evidence of *people*.
+    """
+    area = float(tm.width * tm.depth)
+    if area <= DETAIL_SMALL_TILES:
+        return DETAIL_MAX_SCALE
+    if area >= DETAIL_LARGE_TILES:
+        return 1.0
+    span = DETAIL_LARGE_TILES - DETAIL_SMALL_TILES
+    t = (DETAIL_LARGE_TILES - area) / span
+    return 1.0 + t * (DETAIL_MAX_SCALE - 1.0)
+
 #: Kept clear of the building's own wall, so nothing stands in a doorway.
 YARD_CLUTTER_CLEARANCE = 1
 
@@ -2801,6 +2949,10 @@ def _dress_yards(b: Builder, tm, scatter: "Scatter", rng, grade: float,
     if not yards:
         return 0
 
+    # A yard is the clearest evidence of somebody's working life, so it is
+    # exactly what a small board has budget to say more of. Capped short of
+    # certainty: a yard packed edge to edge is a junkyard.
+    rate = min(0.5, YARD_CLUTTER_RATE * detail_scale(tm))
     placed = 0
     for bid, cells in sorted(yards.items()):
         kinds = YARD_CLUTTER.get(bid.split("-")[0], DEFAULT_YARD_CLUTTER)
@@ -2810,15 +2962,24 @@ def _dress_yards(b: Builder, tm, scatter: "Scatter", rng, grade: float,
                    for dx in range(-YARD_CLUTTER_CLEARANCE, YARD_CLUTTER_CLEARANCE + 1)
                    for dz in range(-YARD_CLUTTER_CLEARANCE, YARD_CLUTTER_CLEARANCE + 1)):
                 continue
-            if rng.random() > YARD_CLUTTER_RATE:
+            if rng.random() > rate:
                 continue
             drop = taper.get((x, z), 0.0)
             if drop is None:
                 continue
             category = kinds[rng.randrange(len(kinds))]
-            if b.prop(category, x + 0.5 + rng.uniform(-0.25, 0.25),
-                      z + 0.5 + rng.uniform(-0.25, 0.25),
-                      grade - drop, rng.randrange(24)):
+            # **Through the scatter, not `b.prop`.** This pass was handed a
+            # `scatter` and then placed with `b.prop` anyway, which does no
+            # collision test at all -- so yard clutter was dropped straight
+            # through the yard's own fence. Beds, crates and straw against
+            # `Wooden Fence` were the largest group of real overlaps left on
+            # Pelvesthollow after the collision test itself was corrected.
+            asset = b.palette.prop(category, b.rng)
+            if asset is None:
+                continue
+            if scatter.one(asset, x + 0.5 + rng.uniform(-0.25, 0.25),
+                           z + 0.5 + rng.uniform(-0.25, 0.25),
+                           grade - drop, rng.randrange(24)):
                 placed += 1
     return placed
 
@@ -4173,6 +4334,7 @@ def build_from_tilemap(
     layout=None,
     quarters: bool = True,
     fence_style: str = DEFAULT_FENCE_STYLE,
+    npc_population=None,
 ) -> Builder:
     """Build a TaleSpire city board from a rasterised :class:`~citysmith.raster.TileMap`.
 
@@ -4228,6 +4390,24 @@ def build_from_tilemap(
         from .quarters import quarter_map
         quarter_at = quarter_map(tm)
 
+    # **The terrain pass owns the ground sheet, so the yard's material has to
+    # be decided here rather than laid over the top afterwards.**
+    # `_lay_yards` used to surface its cells after `_lay_terrain` had already
+    # sheeted them in grass, leaving two coplanar 1x1 tiles per cell -- 365 on
+    # Pelvesthollow. TaleSpire keeps both and they z-fight, dithering as the
+    # camera moves, so every yard on every board built so far did it.
+    # Clearing the cell first is *not* the fix: open country is sheeted in 2x2
+    # grass blocks, and taking one up because a single corner of it is a yard
+    # strips the ground from three cells that are not, which is what left ferns
+    # standing over nothing. One pass, one tile, decided once.
+    yard_role_at: dict[tuple[int, int], str] = {}
+    for bid, cells in yard_cells(tm).items():
+        role = YARD_SURFACE.get(bid.split("-")[0], DEFAULT_YARD_SURFACE)
+        if palette.resolve(role) is None:
+            role = "ground"
+        for cell in cells:
+            yard_role_at[cell] = role
+
     def surface_role(surface: str, x: int, z: int) -> str:
         """Which role paves this cell."""
         role = base_roles.get(surface, "ground")
@@ -4243,6 +4423,11 @@ def build_from_tilemap(
             override = QUARTER_SURFACE.get(quarter_at.get((x, z)))
             if override and palette.resolve(override) is not None:
                 role = override
+
+        # Worked ground beats lawn, and only lawn: a yard never repaints a
+        # street or a watercourse that happens to clip it.
+        if surface == R.GROUND and (x, z) in yard_role_at:
+            role = yard_role_at[(x, z)]
         return role
 
     taper = edge_taper(tm)
@@ -4502,7 +4687,54 @@ def build_from_tilemap(
     _dress_districts(b, tm, grade=floor.size_y, taper=taper, storeys=storeys,
                      fence_style=fence_style)
 
+    # Last of all, because a mark takes a cell back off whatever the dressing
+    # put there. A guard standing inside a barrel is worse than no guard.
+    if npc_population is not None:
+        _lay_npc_marks(b, tm, npc_population, grade=floor.size_y, taper=taper)
+
     return b
+
+
+#: duty -> palette role. Three roles rather than one so the populations read
+#: apart on the board without opening the manifest.
+NPC_MARK_ROLE = {
+    "guard": "npc_guard_mark",
+    "working": "npc_work_mark",
+    "off_duty": "npc_idle_mark",
+}
+
+
+def _lay_npc_marks(b: Builder, tm, population, *, grade: float,
+                   taper: dict[tuple[int, int], float | None]) -> int:
+    """One contrasting tile per NPC post; returns how many landed.
+
+    **A v2 slab carries no creatures**, so this is the same device a scene uses
+    for the party: the tile says "a mini goes here" and `npcs.manifest` says
+    who. Laid last and *replacing* the cell rather than covering it -- two
+    coplanar surfaces in one square is the seam that shifts with the camera,
+    and the cell's props come up too, because a person does not arrive inside
+    a barrel.
+    """
+    cells: dict[tuple[int, int], str] = {}
+    for post in population.posts:
+        role = NPC_MARK_ROLE.get(post.duty)
+        if role is None or b.palette.resolve(role) is None:
+            continue
+        # Where the border taper has dropped the ground away to nothing there
+        # is no ground to stand on, so there is no post either.
+        if taper.get((post.x, post.z), 0.0) is None:
+            continue
+        cells[(post.x, post.z)] = role
+
+    if not cells:
+        return 0
+
+    with b.layer(LANDSCAPE):
+        b.clear_cells(set(cells), below=grade + 0.01)
+        for (x, z), role in sorted(cells.items()):
+            drop = taper.get((x, z), 0.0) or 0.0
+            b.surface(role, x, z, grade - drop)
+    return len(cells)
 
 
 class Scatter:
@@ -4521,34 +4753,70 @@ class Scatter:
     line up with a trunk" this class exists to prevent.
     """
 
-    def __init__(self, builder: Builder):
+    def __init__(self, builder: Builder, *, seed_from_builder: bool = True):
+        """Knows what is already on the board, not only what it puts there.
+
+        **A fresh `Scatter` used to start blind, and that was most of the
+        remaining overlaps.** Yard fences are laid by `_lay_yards`, which runs
+        before `_dress_districts` and has no scatter of its own;
+        `_dress_districts` then made a new one, so every fern, crate, stump and
+        tree it planted was free to grow straight through a fence that was
+        already standing. Measured on Pelvesthollow, that was the single
+        largest group left after the collision test was corrected -- ferns,
+        crates and stumps against `Wooden Fence`.
+
+        Seeding costs one pass over the placements at construction, which is
+        nothing beside laying them.
+        """
         self.b = builder
-        self._at: dict[tuple[int, int], list[tuple[float, ...]]] = {}
+        self._at: dict[tuple[int, int], list[tuple[tuple[float, ...], float, float]]] = {}
         self.rejected = 0
+        if seed_from_builder:
+            # `builder.byid` rather than the catalog: the Builder already keeps
+            # every asset it has placed, so this needs nothing of the catalog
+            # and works against the stub ones the tests use.
+            for p in builder.placements:
+                asset = builder.byid.get(p.asset_id)
+                if asset is None or getattr(asset, "kind", "") != "prop":
+                    continue
+                ox, oz = collider_offset(asset, p.rot)
+                self._record((oriented_box(asset, p.x + ox, p.z + oz, p.rot),
+                              p.y, p.y + asset.size_y))
 
     @staticmethod
     def box(asset: Asset, cx: float, cz: float, y: float, rot: int
-            ) -> tuple[float, ...]:
-        # (cx, cz) is where the collider centre will end up, so the box is
-        # simply centred there -- see place_centered.
-        sx, sz = rotated_footprint(asset, rot)
-        return (cx - sx / 2, cz - sz / 2, y,
-                cx + sx / 2, cz + sz / 2, y + asset.size_y)
+            ) -> tuple[tuple[float, ...], float, float]:
+        """``(oriented box, y0, y1)``.
 
-    def _clear(self, box: tuple[float, ...]) -> bool:
+        **Oriented, not axis-aligned, and that is a correction.** It used to
+        take `rotated_footprint`, which swaps the axes on quarter turns and
+        does nothing on the other eighteen -- so a fern at 15 degrees was
+        measured at its unrotated extent and the scatter let it through where
+        it did not fit. Scenery is dealt at all 24 steps, so that was most of
+        it: 1,179 props on Pelvesthollow were interpenetrating something after
+        the scatter had passed them.
+
+        (cx, cz) is where the collider centre ends up -- see `place_centered`.
+        """
+        return (oriented_box(asset, cx, cz, rot), y, y + asset.size_y)
+
+    def _clear(self, box: tuple[tuple[float, ...], float, float]) -> bool:
+        obb, y0, y1 = box
         e = 1e-6
-        for cx in range(int(math.floor(box[0])), int(math.ceil(box[3])) + 1):
-            for cz in range(int(math.floor(box[1])), int(math.ceil(box[4])) + 1):
-                for o in self._at.get((cx, cz), ()):
-                    if (box[0] < o[3] - e and o[0] < box[3] - e
-                            and box[1] < o[4] - e and o[1] < box[4] - e
-                            and box[2] < o[5] - e and o[2] < box[5] - e):
+        x0, z0, x1, z1 = oriented_aabb(obb)
+        for cx in range(int(math.floor(x0)), int(math.ceil(x1)) + 1):
+            for cz in range(int(math.floor(z0)), int(math.ceil(z1)) + 1):
+                for o_obb, o_y0, o_y1 in self._at.get((cx, cz), ()):
+                    if not (y0 < o_y1 - e and o_y0 < y1 - e):
+                        continue          # one is above the other
+                    if oriented_depth(obb, o_obb) > e:
                         return False
         return True
 
-    def _record(self, box: tuple[float, ...]) -> None:
-        for cx in range(int(math.floor(box[0])), int(math.ceil(box[3])) + 1):
-            for cz in range(int(math.floor(box[1])), int(math.ceil(box[4])) + 1):
+    def _record(self, box: tuple[tuple[float, ...], float, float]) -> None:
+        x0, z0, x1, z1 = oriented_aabb(box[0])
+        for cx in range(int(math.floor(x0)), int(math.ceil(x1)) + 1):
+            for cz in range(int(math.floor(z0)), int(math.ceil(z1)) + 1):
                 self._at.setdefault((cx, cz), []).append(box)
 
     def place(self, pieces: list[tuple[Asset, float, float, float, int]]) -> bool:
@@ -4997,6 +5265,9 @@ def _dress_districts(b: Builder, tm, grade: float,
 
     rng = random.Random("dress:stable")  # deterministic across rebuilds
     scatter = Scatter(b)
+    # A small board has budget a large one does not; see `detail_scale`. This
+    # multiplies the *human* dressing below and never the woodland.
+    detail = detail_scale(tm)
 
     # Fences first, and the order is the point: a field wall is surveyed
     # geometry and a pine is dressing, so the wall is laid and its boxes
@@ -5055,10 +5326,11 @@ def _dress_districts(b: Builder, tm, grade: float,
             here = grade - drop
 
             if surf == R.FIELD:
+                # A worked field is human dressing: somebody cut this.
                 roll = rng.random()
-                if roll < 0.10 and wheat is not None:
+                if roll < 0.10 * detail and wheat is not None:
                     scatter.one(wheat, x + 0.5, z + 0.5, here, rng.randrange(24))
-                elif roll < 0.12 and straw is not None:
+                elif roll < 0.12 * detail and straw is not None:
                     scatter.one(straw, x + 0.5, z + 0.5, here, rng.randrange(24))
 
             elif surf == R.GROUND and not near(x, z, frozenset({R.STREET, R.PLAZA})):
@@ -5129,11 +5401,41 @@ def _dress_districts(b: Builder, tm, grade: float,
                                 z + 0.5 + rng.uniform(-0.3, 0.3),
                                 here, rng.randrange(24))
 
+            elif surf == R.GROUND and detail > 1.0:
+                # THE VERGE, and until now it was the one surface with no rule
+                # of its own. Everything above is either woodland (GROUND *away*
+                # from the town) or a paved class; the grass strip between a
+                # road and a building fell through every branch and got
+                # nothing. Measured on Pelvesthollow: 2,086 cells, 8% of the
+                # board, and it is the empty green in every screenshot of the
+                # place.
+                #
+                # It is dressed only where there is budget for it (`detail`),
+                # because on East Tradebourne the same rule would be 20,000
+                # more props on a board already at 99.4% of the slab cap.
+                #
+                # Undergrowth dominates and the rest is what gets left at the
+                # edge of a road. Deliberately built from pieces already
+                # standing elsewhere on this map -- widening the vocabulary
+                # here needs a probe first, per the standing rule that an
+                # asset's shape is read and not assumed.
+                roll = rng.random()
+                if fern_small is not None and roll < 0.06 * detail:
+                    fern = fern_big if rng.random() < 0.25 and fern_big else fern_small
+                    scatter.one(fern, x + 0.5 + rng.uniform(-0.3, 0.3),
+                                z + 0.5 + rng.uniform(-0.3, 0.3),
+                                here, rng.randrange(24))
+                elif yard and roll < 0.075 * detail:
+                    scatter.one(yard[rng.randrange(len(yard))],
+                                x + 0.5 + rng.uniform(-0.2, 0.2),
+                                z + 0.5 + rng.uniform(-0.2, 0.2),
+                                here, rng.randrange(24))
+
             elif surf == R.PLAZA:
                 # A square with nothing on it is worse than no square. Goods
                 # cluster loosely, leaving room in the middle for the crowd --
                 # and for whatever the party is about to do in it.
-                if market and rng.random() < 0.16:
+                if market and rng.random() < 0.16 * detail:
                     scatter.one(market[rng.randrange(len(market))],
                                 x + 0.5 + rng.uniform(-0.2, 0.2),
                                 z + 0.5 + rng.uniform(-0.2, 0.2),
@@ -5144,7 +5446,7 @@ def _dress_districts(b: Builder, tm, grade: float,
 
             elif surf == R.LANE:
                 # Lanes are where things get left, sparsely and against a wall.
-                if yard and rng.random() < 0.07:
+                if yard and rng.random() < 0.07 * detail:
                     scatter.one(yard[rng.randrange(len(yard))],
                                 x + 0.5, z + 0.5, here, rng.randrange(24))
 
@@ -5164,7 +5466,10 @@ def _dress_districts(b: Builder, tm, grade: float,
                 if not plaza_dressed and well is not None and surf == R.STREET:
                     if scatter.one(well, x + 0.5, z + 0.5, here, rng.randrange(24)):
                         plaza_dressed = True
-                elif roll < 0.30 and barrels is not None:
+                elif roll < min(0.85, 0.30 * detail) and barrels is not None:
+                    # Capped: this rate is already a share of a *narrow* set
+                    # (only street cells touching a building), so scaling it
+                    # freely would line every wall in town with barrels.
                     pick = cart if rng.random() < 0.4 and cart else barrels
                     scatter.one(pick, x + 0.5, z + 0.5, here, rng.randrange(24))
 

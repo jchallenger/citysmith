@@ -203,3 +203,65 @@ def test_renaming_a_record_does_not_claim_a_fresh_paste(tmp_path):
 def test_renaming_something_unrecorded_says_so(tmp_path):
     registry = boards.Registry.load(tmp_path / "boards.json")
     assert registry.rename("nothing-here", "X") is None
+
+
+# -- pruning ------------------------------------------------------------------
+#
+# TaleSpire tells you nothing about a board -- no size, no date, no contents,
+# no API, and a list that clips at sixteen capitals -- so they accumulate and
+# nothing can say which of twenty-two `Unknown Realm N` rows is last week's
+# probe. Deleting is manual and has no undo, so the bar for listing something
+# here is that it is *provably* disposable.
+
+
+def _registry(tmp_path, records):
+    from citysmith import boards
+    reg = boards.Registry(tmp_path / "boards.json", {})
+    for r in records:
+        reg.records[r.scene_id] = r
+    return reg
+
+
+def test_a_superseded_board_is_prunable(tmp_path):
+    """A rebuild does not erase anything -- there is no erase -- so it makes a
+    second board and leaves the first under the old name."""
+    from citysmith import boards
+
+    reg = _registry(tmp_path, [boards.BoardRecord(
+        scene_id="gb-tavern-0014", board="GRB/T14 The Fox Interior",
+        superseded=["The Fox - Graybank interior"])])
+    names = [p.board for p in boards.prunable(reg)]
+    assert names == ["The Fox - Graybank interior"]
+
+
+def test_an_unnamed_board_is_prunable_and_a_named_one_never_is(tmp_path):
+    """**The bug this guards against offered to delete the finished towns.**
+
+    The registry only ever tracked *scene* boards. The town boards -- East
+    Tradebourne, Graybank, Pelvesthollow -- are named by hand and recorded
+    nowhere, so a rule of "prune whatever the registry does not claim" listed
+    all three for deletion. A name somebody typed is evidence the board
+    mattered; `Unknown Realm N` is what `newboard` hands out to a paste nobody
+    came back to.
+    """
+    from citysmith import boards
+
+    reg = _registry(tmp_path, [])
+    seen = ["East Tradebourne", "Pelvesthollow", "Probe - old paste",
+            "Unknown Realm 7", "Unknown Realm 22"]
+
+    gone = {p.board for p in boards.prunable(reg, seen)}
+    assert gone == {"Unknown Realm 7", "Unknown Realm 22"}
+
+    # The named ones are reported, but as untracked rather than as rubbish.
+    assert boards.unclaimed(reg, seen) == [
+        "East Tradebourne", "Pelvesthollow", "Probe - old paste"]
+
+
+def test_a_board_a_scene_still_points_at_is_never_prunable(tmp_path):
+    from citysmith import boards
+
+    reg = _registry(tmp_path, [boards.BoardRecord(
+        scene_id="gb-tavern-0014", board="Unknown Realm 9")])
+    assert boards.prunable(reg, ["Unknown Realm 9"]) == []
+    assert [r.board for r in boards.keepers(reg)] == ["Unknown Realm 9"]
