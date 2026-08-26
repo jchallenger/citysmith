@@ -490,6 +490,32 @@
         "chat",
         "geometry"
       ]
+    },
+    {
+      "id": "board-filter-switch",
+      "what": "Measure the Campaign Boards filter box, and switch by name if it holds up",
+      "state": "open",
+      "doc": ".claude/skills/talespire-boards/SKILL.md",
+      "evidence": "test:test_a_board_is_found_by_name_rather_than_by_row",
+      "note": "**Seen on screen 2026-08-26 and not yet measured.** The Campaign Boards panel carries a `Filter...` box at roughly client (228, 163) on a 1920x1080 window, with a clear `x` at (384, 163). Nothing in this repo mentions it, and it is very likely the answer to the oldest entry in CLAUDE.md's 'Not built yet': *switching to an existing board, unattended*, which is blocked because the list re-sorts on every rename and nothing can read text off the screen -- 'needs either OCR or a keybind we have not found'. A filter needs neither: paste the name, the list narrows, click the first row.\n\nFour things must be measured before anything is built on it, and they are the four that decide whether a row position can be trusted: prefix or substring matching; case sensitivity; whether filtered rows start at the same y=200 as unfiltered ones; and whether the current board's row still expands in place (~134 px) when filtered, since that expansion is what breaks row arithmetic today. Method is a paste, a screenshot, and a diff against the unfiltered shot.\n\nBlocked in the session that found it: driving synthetic clicks into the game was refused by the permission layer, so the box was observed in a screenshot and never operated. Existence is evidence; behaviour is not. Do NOT write `scene.ps1 switch -ByName` on the strength of a screenshot -- this project's own rule is that a probe read from one angle is a probe that lies.",
+      "tags": [
+        "boards",
+        "talespire",
+        "research"
+      ]
+    },
+    {
+      "id": "board-switcher-hud-state",
+      "what": "Make ts.ps1 boards read HUD state instead of pressing Space blind",
+      "state": "open",
+      "doc": ".claude/skills/talespire-boards/SKILL.md",
+      "evidence": "citysmith.boards.hud_is_up",
+      "note": "`boards` sends `Space` blind, and `Space` is a TOGGLE -- so with the panel already up it closes the HUD and the follow-up click lands on whatever is behind it. The command's own return string admits this ('CHECK THE SHOT'), which is a documented unreliability standing in for a fix. It has failed twice and worked once.\n\nObserved 2026-08-26: run against an already-open panel, the current board changed from Pelvesthollow to Unknown Realm 22 across the call. Whether the call did it or a human at the keyboard did is NOT established -- the game was live and unattended-driving was stopped at that point per the skill's own first rule -- so this is a reason to fix the blind toggle, not a measurement of what it does.\n\nThe fix is a HUD-state probe shaped like `planestate`, and it inherits planestate's whole warning: aim at a widget that exists ONLY when the HUD is up (the panel's 'Campaign Boards' title bar, or the Filter box), derive its position from the client rect rather than hardcoding, and return UNKNOWN rather than guessing. Reading the board and calling it a state has happened three times in this project -- planestate on Graybank's grass, the toolbar centring, the elevation track scanned from the wrong window edge -- and twice the wrong toggle was pressed as a result. Then: press Space only when the HUD is down, and never click a row without a fresh screenshot taken after the panel is confirmed open.",
+      "tags": [
+        "boards",
+        "talespire",
+        "driving"
+      ]
     }
   ]
 }

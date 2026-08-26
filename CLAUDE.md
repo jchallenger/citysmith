@@ -1598,8 +1598,12 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
   by the door, and the minis go on them by hand.
 - Switching to an existing board, unattended. `scene.ps1 enter` drives
   everything else and stops at exactly one place, because the campaign list
-  re-sorts on every rename and nothing here can read text off the screen. Needs
-  either OCR or a keybind we have not found.
+  re-sorts on every rename and nothing here can read text off the screen.
+  **It probably needs neither OCR nor a keybind: the Campaign Boards panel has
+  a `Filter...` box** (seen 2026-08-26, behaviour not yet measured), and a
+  filter turns "find the row" into "paste the name and take the first one".
+  `board-filter-switch` in `tasks.json` lists the four measurements that decide
+  whether a filtered row position can be trusted.
 - A tapered map edge. The border ring still ends on a hard straight cut, so
   the map reads as a cropped rectangle from outside (finding 8).
 - A portcullis winch, murder holes and an arch ring. The gate has doors now

@@ -489,9 +489,25 @@ switch ($Cmd) {
     # The board switcher is NOT the chevron beside the board name -- that is a
     # saved-state indicator. It is `Space` (which raises the HUD) and then the
     # top icon of the left-hand column: "Campaign Boards", a list with a play
-    # arrow per board. The list puts the current board first and sorts the
-    # rest alphabetically, so row positions move as boards are renamed --
-    # screenshot it and read the rows rather than assuming an order.
+    # arrow per board. **The list is PLAIN alphabetical** -- an earlier note
+    # here claimed the current board is floated to the top, and that was wrong;
+    # it is highlighted in place, and `Pelvesthollow` merely happened to sort
+    # first on the campaign it was read off. It is also STRING alphabetical, so
+    # `Unknown Realm 14` sorts before `Unknown Realm 2`. Row positions move as
+    # boards are renamed, so screenshot it and read the rows rather than
+    # assuming an order.
+    #
+    # **The current board's row is HIGHLIGHTED, not expanded** (measured off
+    # out/flyby/finalcheck.jpg, 2026-08-26): orange fill, a person icon in
+    # place of the play arrow, and the SAME height as every other row -- the
+    # 42 px pitch is uniform through it. An earlier note claimed it expands in
+    # place and pushes rows below it down ~134 px; that is what a row looks
+    # like after you click its expander at x=79, not what the current board
+    # does on its own. Row arithmetic is therefore usable -- but the list still
+    # re-sorts on every rename, so read the shot anyway.
+    #
+    # The panel also carries a **Filter box** at the top, which is the thing
+    # that would make this unattended; see the skill before building on it.
     Focus-TS
     $cl = Get-Client
     Send-Chord "space" 150
@@ -505,8 +521,10 @@ switch ($Cmd) {
     # Look at the shot before trusting any row position.
     "screenshotted after Space + board icon. CHECK THE SHOT: if the Campaign " +
     "Boards panel is not open, Space toggled it shut -- run again. Rows start " +
-    "at client y=200, 42 apart, play arrow at x=360; the list re-sorts on every " +
-    "rename, so read them off the shot rather than reusing a position."
+    "at client y=200, 42 apart, play arrow at x=360, row expander at x=79. The " +
+    "list is plain alphabetical and re-sorts on every rename, and the CURRENT " +
+    "board's row is expanded in place (~134px), so any arithmetic from a row " +
+    "index is wrong below it. Read the rows off the shot."
   }
   'shot'    { & (Join-Path $PSScriptRoot "grab.ps1") -Name $Name }
   'chord'   { Focus-TS; Send-Chord $Keys; "sent $Keys" }

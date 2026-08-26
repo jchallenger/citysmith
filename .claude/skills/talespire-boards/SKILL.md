@@ -1,6 +1,6 @@
 ---
 name: talespire-boards
-description: Manage the boards inside a TaleSpire campaign — create a board, name or rename one, switch between them, and lay out a campaign with a board per location. Use when the user wants a board per town/dungeon/region, asks to name or rename a board, asks which board something was pasted onto, wants to organise or tidy a campaign's boards, or is about to paste a generated map and needs somewhere to put it.
+description: Manage the boards inside a TaleSpire campaign — create, name or rename, switch between, and delete or prune boards, and lay out a campaign with a board per location. Use when the user wants a board per town/dungeon/region, asks to name or rename a board, asks to delete, prune, clean up or tidy boards, asks which boards are safe to remove or which one something was pasted onto, or is about to paste a generated map and needs somewhere to put it.
 ---
 
 # TaleSpire campaign and board management
@@ -81,6 +81,31 @@ pwsh tools/ts.ps1 boards -Name list
 `Space` raises the HUD, then the **top icon of the left-hand column** opens
 *Campaign Boards*: every board, with a play arrow to jump to it.
 
+**The panel has a `Filter...` box at the top, and it is probably the answer to
+the one thing here that is not automated** (SEEN 2026-08-26, BEHAVIOUR NOT YET
+VERIFIED). `CLAUDE.md` lists unattended board switching under "Not built yet",
+because the list re-sorts on every rename and nothing can read text off the
+screen -- "needs either OCR or a keybind we have not found". A filter box needs
+neither: paste a board name into it, the list narrows to what matches, and the
+first row is the one you want, at a known y, whatever the campaign is sorted
+like.
+
+What is established: the box exists, at roughly client (228, 163) on a
+1920x1080 window, with an `x` to clear it at (384, 163). Text goes in by
+clipboard like every other field here -- typing does not arrive.
+
+What is NOT established, and must be measured before anything is built on it:
+whether it matches on prefix or substring, whether it is case-sensitive,
+whether the filtered rows start at the same y=200 as the unfiltered ones, and
+whether the current board's row still expands in place when filtered. **Do not
+write `scene.ps1 switch --by-name` until those four are answered.** The
+procedure is: paste a name, screenshot, compare against the unfiltered shot.
+
+Also on the panel, unrecorded elsewhere: **`Create new board`** is a button at
+the top of it (so `newboard`'s `+` in the top bar is not the only route), and
+**`Add Board Copy`** with an `Enter Copy ID` field sits at the bottom -- a
+board-import path nothing here has tried.
+
 Three things about that list:
 
 - **`Space` is a toggle, and `ts.ps1 boards` does not handle that.** It has
@@ -91,11 +116,17 @@ Three things about that list:
   ```bash
   pwsh tools/ts.ps1 click -X <clientX+17> -Y <clientY+57> -Hold 0.3
   ```
-- **The row you are standing on is EXPANDED**, and it pushes everything below
-  it down. The current board's row opens to show `Delete board`, `Set Folder`
-  and `Reload Board` -- about 134 px of it -- so `200 + (N-1)*42` gives the
-  wrong y for any row that sorts after the current board. Measure the y off the
-  screenshot; `scene.ps1 switch` takes `-RowY <pixels>` for exactly this.
+- **The row you are standing on is HIGHLIGHTED, not expanded** — corrected
+  2026-08-26 against `out/flyby/finalcheck.jpg`, where `Unknown Realm 22` is
+  the current board: orange fill, a **person icon in place of the play arrow**,
+  and the same height as every other row, with the 42 px pitch uniform through
+  it. The previous note here said it expands in place and pushes everything
+  below it down by ~134 px, and that is wrong: that is what a row looks like
+  once you click its expander at x=79, which is a thing you do, not a thing the
+  current board does. Row arithmetic from `200 + (N-1)*42` is therefore sound
+  in a resting list. It is still not sound across a *rename*, so read the rows
+  off the shot; `scene.ps1 switch` takes `-RowY <pixels>` when you would rather
+  give the measured y than a row index.
 - **The title bar is not the list.** The bar at the top right shows far more of
   a name than a list row does (`GRB/T123 Chapel of Hermes Int...` against
   `GRB/T123 Chapel of He...`), so never judge whether a name fits by reading
@@ -111,6 +142,30 @@ Three things about that list:
   the title bar changed before doing anything else.
 
 ### Delete
+
+**Decide what to delete before you learn how.** This is the one irreversible
+operation here, the list tells you a name and nothing else, and a board with
+someone's work on it looks exactly like an empty one from the list. So the
+first step is never a click:
+
+```bash
+python -m citysmith boards prune --seen-file campaign-boards.txt
+```
+
+Write the campaign list into a text file first, one board name per line, read
+off a `ts.ps1 boards` screenshot. `prune` then sorts them into three:
+
+| bucket | what it means | what to do |
+|---|---|---|
+| **prunable** | provably disposable -- a superseded scene name, or a board nobody ever named (`Unknown Realm N`) | safe to delete |
+| **unclaimed** | named by hand, claimed by no scene | **reported with no recommendation** -- ask |
+| **keepers** | a scene in `campaign/boards.json` points at it | leave alone |
+
+**`unclaimed` is deliberately not a delete list**, and the reason is a bug that
+was caught before it ran: the registry only ever tracked *scene* boards, so
+East Tradebourne, Graybank and Pelvesthollow are claimed by nothing, and a
+first version that offered to delete "whatever the registry does not own"
+listed all three finished towns. Anything a human named, a human decides on.
 
 There is a delete, and it is deliberately awkward. Expand a row with the `▶` at
 its **left** (x=79) — not the play arrow at x=360, which switches to the board —
@@ -237,7 +292,15 @@ confirm the *content*:
 
 - **`ts.ps1 boards` is unreliable** — it has failed twice and worked once, all
   down to the `Space` toggle. Until it checks HUD state first, drive the two
-  steps separately and screenshot between them.
+  steps separately and screenshot between them. The fix is a HUD-state probe of
+  the same shape as `planestate`, and it carries `planestate`'s warning with
+  it: aim the probe at a widget that only exists when the HUD is up, derive its
+  position from the client rect, and return `UNKNOWN` rather than guessing —
+  reading the board and calling it a state has now happened three times in this
+  project, and twice the wrong toggle was pressed as a result.
+- **The `Filter...` box is unmeasured.** Four questions above; answering them
+  probably closes "switching to an existing board, unattended", which is the
+  oldest open item in `CLAUDE.md`'s "Not built yet".
 - **Delete is not scripted**, only documented above. The coordinates are
   verified over eight consecutive deletions, but nothing guards against a
   mis-click landing on the play arrow and switching boards mid-loop, so
