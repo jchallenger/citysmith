@@ -2583,15 +2583,19 @@ def test_unregistered_chunks_keep_their_place_on_the_map():
 
 
 def test_multi_slab_build_writes_a_document_the_plugins_can_read():
-    """End to end through the CLI's own writer."""
+    """End to end through the writer the CLI uses.
+
+    It moved to `pipeline` with the rest of the side effects, so that a UI can
+    write a plugin document without importing the command line.
+    """
     import json
     import tempfile
     import pathlib
 
     from citysmith.build import build_from_tilemap
     from citysmith.catalog import load_or_build
-    from citysmith.cli import _write_multislab
     from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.pipeline import write_multislab
     from citysmith.slab import decode
 
     palette = Palette(load_or_build(), MEDIEVAL)
@@ -2599,7 +2603,7 @@ def test_multi_slab_build_writes_a_document_the_plugins_can_read():
     plan = b.chunk_plan(4000, register=False, chunk_tiles=16,
                         skip_open_country=False, pack=False, by_layer=False)
     with tempfile.TemporaryDirectory() as tmp:
-        path = _write_multislab(plan.chunks, pathlib.Path(tmp), "town")
+        path = write_multislab(plan.chunks, pathlib.Path(tmp), "town")
         assert path.name == "town.multislab.slab"
         doc = json.loads(path.read_text(encoding="utf-8"))
     assert doc["autoDrop"] is True

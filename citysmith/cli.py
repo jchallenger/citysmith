@@ -16,7 +16,6 @@ hand-edited, or regenerated on its own.
 from __future__ import annotations
 
 import argparse
-import json
 import pathlib
 import sys
 
@@ -28,7 +27,8 @@ from .catalog import Catalog, CatalogError, load_or_build
 from .city import CityParams, City, SIZES
 from .city import generate as generate_city
 from .palette import STYLES, Palette
-from .slab import SlabError, encode, multislab
+from .pipeline import build_town, write_chunks
+from .slab import SlabError, encode
 
 DEFAULT_OUT = pathlib.Path("out")
 
@@ -48,68 +48,16 @@ def _palette(args, catalog: Catalog, style: str, seed: int) -> Palette:
     return palette
 
 
-def _write_chunks(chunks, out_dir: pathlib.Path, stem: str) -> list[pathlib.Path]:
-    """Write one file per chunk, named for the region the chunk covers.
-
-    ``forest-r02c03.slab.txt`` says which piece of the map is in the file;
-    the old ``forest-07.slab.txt`` only said which piece came seventh.
-    """
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Chunk names encode grid position, and packing boundaries move between
-    # builds -- so a rebuild can leave last run's files sitting beside this
-    # run's. They paste without complaint and silently mix two revisions of
-    # the map, so clear the stem's previous output first.
-    for stale in out_dir.glob(f"{stem}-r*.slab.txt"):
-        stale.unlink()
-    for stale in out_dir.glob(f"{stem}-landscape-*.slab.txt"):
-        stale.unlink()
-    for stale in out_dir.glob(f"{stem}-structure-*.slab.txt"):
-        stale.unlink()
-    for stale in out_dir.glob(f"{stem}.slab.txt"):
-        stale.unlink()
-    written: list[pathlib.Path] = []
-    for chunk in chunks:
-        name = (f"{stem}.slab.txt" if len(chunks) == 1
-                else f"{stem}-{chunk.label}.slab.txt")
-        path = out_dir / name
-        path.write_text(encode(chunk.slab), encoding="utf-8")
-        written.append(path)
-
-    # The paste order is not the filename order, and getting it wrong is the
-    # difference between a flat map and a stepped one: the chunk covering the
-    # anchor cell is written *last* so that the anchor is still bare board for
-    # every paste before it. A glob sorts that chunk into the middle. So the
-    # order is written down beside the slabs, for anything driving the paste.
-    (out_dir / f"{stem}-paste-order.txt").write_text(
-        "\n".join(p.name for p in written) + "\n", encoding="utf-8"
-    )
-    return written
-
-
-def _write_multislab(chunks, out_dir: pathlib.Path, stem: str) -> pathlib.Path:
-    """Write the whole map as one multi-slab document.
-
-    Chunks cut with ``register=False`` keep their true in-map coordinates, so
-    every offset is zero and ``drop`` alone moves the town. That is the whole
-    integration: the plugin does the aiming that the registration markers, the
-    even-extent rule and the paste order were invented to do by hand.
-
-    The file takes a ``.slab`` extension because that is what the plugins look
-    for -- it is JSON inside, unlike our ``.slab.txt`` chunks, which are the
-    base64 the game's own ``Ctrl+V`` reads.
-    """
-    path = out_dir / f"{stem}.multislab.slab"
-    path.write_text(multislab([c.slab for c in chunks]), encoding="utf-8")
-    return path
-
-
 def _chunk_table(plan, stem: str) -> str:
     """A map and a table of which chunk covers which tiles.
 
     Printed so the reader can paste a quarter of a town instead of all of it:
     match a region on ``city-raster.svg`` to a row/column here, then paste only
     those files.
+
+    ``plan`` is a :class:`build.ChunkPlan` from a command that has just planned
+    one, or a finished :class:`pipeline.BuildResult`. The two agree on the
+    field names this reads, which is why there is one table and not two.
     """
     from .layout import TILE_FEET
 
@@ -335,7 +283,7 @@ def cmd_design(args) -> int:
     )
     plan = builder.chunk_plan(max_assets=args.max_assets)
     try:
-        written = _write_chunks(plan.chunks, pathlib.Path(args.out_dir), f"{fp.building_id}")
+        written = write_chunks(plan.chunks, pathlib.Path(args.out_dir), f"{fp.building_id}")
     except SlabError as exc:
         raise SystemExit(f"Could not encode slab: {exc}") from exc
 
@@ -363,7 +311,7 @@ def cmd_board(args) -> int:
         skip_open_country=not args.keep_open_country,
     )
     try:
-        written = _write_chunks(plan.chunks, pathlib.Path(args.out_dir), "city-board")
+        written = write_chunks(plan.chunks, pathlib.Path(args.out_dir), "city-board")
     except SlabError as exc:
         raise SystemExit(
             f"Could not encode slab: {exc}\nTry a smaller --max-assets."
@@ -477,143 +425,76 @@ def cmd_import(args) -> int:
 
 
 def cmd_build(args) -> int:
-    """Rasterise an imported layout, verify it, and emit pasteable slabs."""
-    from .layout import Layout
-    from .raster import rasterize
-    from .build import build_from_tilemap
-    from .verify import (anchor_on_a_whole_tile, check_placements, feature_report,
-                     chunk_anchors, chunk_datum,
-                     enclosed_voids, floating_placements,
-                     shells_rest_on_their_floors, tile_interpenetration,
-                     tilemap_svg, verify)
+    """Rasterise an imported layout, verify it, and emit pasteable slabs.
 
-    layout = Layout.load(args.layout)
-    tm = rasterize(layout, bridges=not args.no_bridges)
+    The build itself is :func:`pipeline.build_town`. What is left here is
+    turning flags into values and turning the result into lines -- which is
+    the claim this module has always made about itself and did not keep.
+    """
+    # Parsing "90,90,50,50" into four numbers is the command line's job: a UI
+    # has four fields, and `build_town` takes the numbers.
+    crop = None
     if args.crop:
         try:
             cx, cz, cw, cd = (int(v) for v in args.crop.split(","))
         except ValueError:
             raise SystemExit("--crop expects x,z,width,depth (e.g. 90,90,50,50)")
-        tm = tm.crop(cx, cz, cw, cd)
-    print(tm.summary())
+        crop = (cx, cz, cw, cd)
 
-    out_dir = pathlib.Path(args.out_dir)
+    # Resolved before the build rather than in the middle of it. A style the
+    # installed packs cannot supply now stops the command before it rasterises
+    # a town instead of after -- the one place this command's output moved.
     catalog = _catalog(args)
     palette = _palette(args, catalog, args.style, args.seed)
-    population = None
-    if not args.no_npcs:
-        from citysmith import npcs as N
-        population = N.posts(tm, layout, seed=args.seed, hour=args.hour,
-                             budget=args.npc_budget)
-        print(f"  npcs: {population.summary()}")
 
-    builder = build_from_tilemap(
-        tm, palette, storeys=args.storeys, roofs=not args.no_roofs, seed=args.seed,
-        fence_style=args.fence_style, layout=layout,
-        quarters=not args.no_quarters, npc_population=population,
-    )
-    # Unset means "let the board decide" -- a small board splits into so few
-    # chunks that a tight budget only costs pastes, while a large one needs the
-    # headroom. See `build.asset_budget` for the measurements.
-    budget = args.max_assets if args.max_assets is not None else build.asset_budget(tm)
-    if args.max_assets is None:
-        print(f"  chunk budget: {budget:,} assets (from board size)")
+    def show(stage: str, **f) -> None:
+        """The lines the pipeline used to print itself.
 
-    plan = builder.chunk_plan(
-        max_assets=budget, chunk_tiles=args.chunk_tiles,
-        skip_open_country=not args.keep_open_country,
-        per_building=args.per_building,
-        by_layer=not args.by_region,
-        # Tiling does not pack. Packing fuses a run of neighbours into one
-        # chunk, which is right when every chunk is pasted at one shared
-        # anchor and wrong when they are laid out side by side: the fused
-        # piece is an L or a bar rather than a square, so the cursor step
-        # from one paste to the next stops being one region. Uniform squares
-        # are what make the step a constant.
-        pack=not args.by_region,
-        # **Registration markers exist only to serve a cursor-anchored paste.**
-        # The plugin path states each slab's position, so the markers -- and
-        # the even-extent box, and the written paste order they enforce -- are
-        # dead weight there. Two stray tiles per chunk, at the map's corners,
-        # that a reviewer can see.
-        register=not args.multi_slab,
-    )
-    # The manifest, not the marks, is the durable half of "a position": a slab
-    # carries no creatures, so the board says *where* and this says *who*.
-    if population is not None and population.posts:
-        from citysmith import npcs as N
-        out_dir.mkdir(parents=True, exist_ok=True)
-        npc_path = out_dir / f"{args.stem}-npcs.json"
-        npc_path.write_text(
-            json.dumps(N.manifest(population), indent=1) + "\n", encoding="utf-8")
-        print(f"  wrote {npc_path}  ({len(population.posts)} post(s))")
+        Streamed rather than collected and printed at the end, because the
+        alternative on a big town is minutes of silence: East Tradebourne is
+        411,106 assets. Every one of these facts is on the result as well, so
+        a caller that wants the report in one piece can have it either way.
+        """
+        if stage == "rasterized":
+            print(f["tilemap"].summary())
+        elif stage == "npcs":
+            print(f"  npcs: {f['population'].summary()}")
+        elif stage == "budget":
+            print(f"  chunk budget: {f['assets']:,} assets (from board size)")
+        elif stage == "npc_manifest":
+            print(f"  wrote {f['path']}  ({f['posts']} post(s))")
 
-    multislab_path = None
     try:
-        written = _write_chunks(plan.chunks, out_dir, args.stem)
-        if args.multi_slab:
-            # Deliberately NOT in `written`. That list is the pasteable slabs,
-            # and it is what the byte cap and the slab count are measured
-            # against -- the multi-slab document is a JSON wrapper around
-            # those same slabs, so counting it double-counts the map and
-            # measures a 129 KB file against the 30 KB *slab* cap.
-            multislab_path = _write_multislab(plan.chunks, out_dir, args.stem)
+        result = build_town(
+            args.layout, palette=palette,
+            out_dir=args.out_dir, stem=args.stem, seed=args.seed,
+            storeys=args.storeys, roofs=not args.no_roofs,
+            bridges=not args.no_bridges, crop=crop,
+            quarters=not args.no_quarters, fence_style=args.fence_style,
+            npcs=not args.no_npcs, npc_budget=args.npc_budget, hour=args.hour,
+            max_assets=args.max_assets, chunk_tiles=args.chunk_tiles,
+            keep_open_country=args.keep_open_country,
+            per_building=args.per_building, by_region=args.by_region,
+            multi_slab=args.multi_slab, raster_scale=args.scale,
+            progress=show,
+        )
     except SlabError as exc:
         raise SystemExit(
             f"Could not encode slab: {exc}\nTry a smaller --max-assets "
             "or --chunk-tiles."
         ) from exc
 
-    biggest = max((len(p.read_text(encoding="utf-8")) * 3 // 4 for p in written), default=0)
-    report = verify(tm, asset_count=plan.assets_emitted,
-                    slab_count=len(written), max_slab_bytes=biggest)
+    print(f"\n{result.assets_emitted:,} assets in {len(result.chunks)} chunk(s)"
+          + (f"; {len(result.skipped)} open-country chunk(s) skipped "
+             f"({result.assets_skipped:,} assets)" if result.skipped else ""))
+    print("\n" + result.report.text())
 
-    # The report above reads the tile grid -- the plan. These read the geometry
-    # we actually emitted, which is where doorways-turned-wall and off-grid
-    # tiles hide.
-    for problem in check_placements(builder, tm):
-        report.add("fail", "placements", problem)
-    for problem in enclosed_voids(plan):
-        report.add("fail", "chunk coverage", problem)
-    # What each designed feature had available here, and what it built from it.
-    # A feature can be perfectly correct and simply absent from the region you
-    # cropped -- which is not a defect, but it must not be silent either.
-    for level, name, detail in feature_report(builder, tm, layout):
-        report.add(level, name, detail)
-    # Registration, datum and anchor all exist to make a *cursor-anchored*
-    # paste land right: they check that every chunk presents the same bounding
-    # box, reaches the ground, and centres on a whole tile. The multi-slab path
-    # states each slab's position instead, so there is no shared box to agree
-    # on and nothing to aim -- running these there reports four failures for a
-    # map that is correct.
-    if not args.multi_slab:
-        for problem in chunk_anchors(plan, builder.byid):
-            report.add("fail", "chunk registration", problem)
-        for problem in chunk_datum(plan, builder.byid):
-            report.add("fail", "chunk datum", problem)
-        for problem in anchor_on_a_whole_tile(plan, builder.byid):
-            report.add("fail", "paste anchor", problem)
-    # Buried geometry is a finish problem, not a broken map: it shows as a
-    # seam rather than stopping anything working, so it warns rather than
-    # failing the build.
-    for problem in tile_interpenetration(builder):
-        report.add("warn", "tile seams", problem)
-    for problem in floating_placements(builder, tm):
-        report.add("fail", "floating geometry", problem)
-    for problem in shells_rest_on_their_floors(builder, tm):
-        report.add("fail", "shell footing", problem)
-
-    print(f"\n{plan.assets_emitted:,} assets in {len(written)} chunk(s)"
-          + (f"; {len(plan.skipped)} open-country chunk(s) skipped "
-             f"({plan.assets_skipped:,} assets)" if plan.skipped else ""))
-    print("\n" + report.text())
-
-    svg = render.write(tilemap_svg(tm, scale=args.scale), out_dir / "city-raster.svg")
-    print(f"\n  wrote {svg}  (tile numbers here match the chunk table below)")
-    print(f"  wrote {len(written)} slab file(s) in {out_dir}")
-    print("\n" + _chunk_table(plan, args.stem))
+    print(f"\n  wrote {result.raster_svg}  "
+          "(tile numbers here match the chunk table below)")
+    print(f"  wrote {len(result.chunks)} slab file(s) in {result.out_dir}")
+    print("\n" + _chunk_table(result, args.stem))
     print("\n" + (TILE_HELP if args.by_region else PASTE_HELP))
-    return 2 if report.failed else 0
+    return 2 if result.failed else 0
 
 
 def cmd_scene(args) -> int:
@@ -906,7 +787,7 @@ def cmd_brief(args) -> int:
     catalog = _catalog(args)
     palette = _palette(args, catalog, brief.params.style, brief.seed)
     builder = build_interior(fp, palette, seed=brief.seed)
-    written = _write_chunks(builder.chunk_plan().chunks, out_dir, chosen.id)
+    written = write_chunks(builder.chunk_plan().chunks, out_dir, chosen.id)
     print(f"\nDesigned: {fp.summary()}")
     for p in written:
         print(f"  wrote {p}")
@@ -950,7 +831,7 @@ def cmd_pipeline(args) -> int:
     catalog = _catalog(args)
     palette = _palette(args, catalog, args.style, args.seed)
     builder = build_interior(fp, palette, seed=args.seed)
-    written = _write_chunks(builder.chunk_plan().chunks, out_dir, chosen.id)
+    written = write_chunks(builder.chunk_plan().chunks, out_dir, chosen.id)
     print(f"  {builder.stats.tiles} tiles + {builder.stats.props} props")
     for p in written:
         print(f"  wrote {p}")

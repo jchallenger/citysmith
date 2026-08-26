@@ -46,7 +46,9 @@ This file is the internal engineering notes. User-facing docs:
 | `build.py` | Geometry -> `Placement`s -> slabs. All offsets derived from bounds. |
 | `render.py` | Hand-written SVG for city and floorplan reference maps. |
 | `ai.py` | Claude translation layer. Optional; never emits geometry. |
-| `cli.py` | Command line. Core logic stays out of here so a UI can be added. |
+| `slabchat.py` | One small slab from a sentence: spec in, geometry in Python. |
+| `pipeline.py` | One `build_town()` the CLI and the UI both call. Side effects live here. |
+| `cli.py` | Argument parsing and printing. Every decision is in `pipeline`. |
 
 ## Hard constraints
 
@@ -180,7 +182,7 @@ two thirds of the cap, and re-check after any change that adds dressing.
 **The paste order is not the filename order.** `--by-region` writes the chunk
 covering the anchor cell *last*, so the anchor is still bare board for every
 paste before it; an alphabetical glob sorts that chunk into the middle and the
-four after it inherit its height. `_write_chunks` writes
+four after it inherit its height. `pipeline.write_chunks` writes
 `<stem>-paste-order.txt` beside the slabs for anything driving the paste, and
 `review.ps1 tiled` reads it rather than globbing.
 

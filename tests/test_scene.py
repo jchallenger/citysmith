@@ -331,7 +331,7 @@ def test_an_interior_is_one_paste(tmp_path, town, cfg, catalog_palette):
 def test_rebuilding_a_scene_does_not_leave_last_run_beside_this_one(
         tmp_path, town, cfg, catalog_palette):
     """Stale chunk files paste without complaint and silently mix two
-    revisions of the map -- the failure `_write_chunks` clears for towns."""
+    revisions of the map -- the failure `pipeline.write_chunks` clears for towns."""
     sc, b, fp = _built(town, cfg, catalog_palette)
     scene_mod.write(sc, b, fp, tmp_path, cfg)
     (tmp_path / f"{sc.scene_id}-r09c09.slab.txt").write_text("stale", encoding="utf-8")
