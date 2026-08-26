@@ -59,6 +59,7 @@ from .layout import (
     close_ring,
     centroid,
     oriented_extent,
+    distance,
     point_in_polygon,
     settlement_band,
     storeys_for,
@@ -450,8 +451,113 @@ def import_layout(
     layout.areas += [LayoutArea("plaza", T(r)) for r in kept_plazas]
     _read_buildings(layout, kept_buildings, T, seed, unmapped)
 
+    layout.gates = gates_from_roads(layout)
     layout.unmapped = {k: sorted(v) for k, v in sorted(unmapped.items())}
     return layout
+
+
+#: Two gates closer than this are one gate. A carriageway is 4 tiles and the
+#: wall band ~3, so anything inside 8 tiles is the same opening found twice --
+#: once per road branch, or once per wall polyline the road clips.
+GATE_MERGE_TILES = 8.0
+
+#: A road has to be at least this share of the longest road on the board to
+#: earn a gate. Every export carries short stubs and yard tracks that touch the
+#: circuit; a gate is a thing you drive a cart through.
+GATE_MIN_ROAD_SHARE = 0.12
+
+#: What is not a thoroughfare and so cannot justify a gate. Same set
+#: `raster.NOT_THOROUGHFARES` excludes from widening and road class, for the
+#: same reason: a river crossing the wall is a watergate, not a road gate, and
+#: a trail is walked rather than driven.
+NOT_GATE_ROADS = frozenset({"river", "plank", "trail"})
+
+
+def _segments_cross(a1: Point, a2: Point, b1: Point, b2: Point) -> Point | None:
+    """Where two line segments actually cross, or ``None``.
+
+    Proper intersection, not proximity. That distinction is the whole reason
+    this function exists rather than reusing MFCG's finder -- see
+    :func:`gates_from_roads`.
+    """
+    (x1, y1), (x2, y2) = a1, a2
+    (x3, y3), (x4, y4) = b1, b2
+    rx, ry = x2 - x1, y2 - y1
+    sx, sy = x4 - x3, y4 - y3
+    denom = rx * sy - ry * sx
+    if abs(denom) < 1e-12:                       # parallel or collinear
+        return None
+    t = ((x3 - x1) * sy - (y3 - y1) * sx) / denom
+    u = ((x3 - x1) * ry - (y3 - y1) * rx) / denom
+    if 0.0 <= t <= 1.0 and 0.0 <= u <= 1.0:
+        return (x1 + t * rx, y1 + t * ry)
+    return None
+
+
+def gates_from_roads(layout: Layout) -> list[Point]:
+    """Derive gates where a major road actually crosses the wall.
+
+    **FTG exports no gates, and the word did not appear in this file before.**
+    So ``layout.gates`` was empty on every FTG town and every build printed
+    "no gates found; routing from the map edge instead". That is not cosmetic:
+    :func:`raster.road_classes` decides ``main`` partly on ``at_gate``, which
+    could never fire, so road class fell back to length share alone; and the
+    raster walks reachability from ``sorted(tm.gates) or _fallback_starts(tm)``,
+    so yard siting and surface priority entered the town from the map border
+    instead of through a gate.
+
+    **This is not MFCG's algorithm and must not be.** ``mfcg._find_gates``
+    matches road vertices to *wall vertices* within a tolerance, because MFCG
+    encodes a gatehouse as a wall vertex -- the generator puts one there on
+    purpose. FTG's wall vertices are just where the polyline bends, so the same
+    trick would drop a gate at every bend that happened to lie near a road:
+    measured on East Tradebourne, the median wall vertex has a road within 7.0
+    tiles, so a 5.9-tile tolerance would fire on a large share of the 49
+    vertices. The pathway has to be the evidence, so this takes the real
+    segment crossing.
+
+    Two facts about the source shape it:
+
+    * **The rings are open.** East Tradebourne's two "rings" are 26- and
+      23-point *polylines*, not closed circuits, so a road can also pass round
+      an end without ever crossing. Nothing here invents a gate for that.
+    * **Pelvesthollow and Graybank have no walls at all** -- zero rings -- so
+      they get no gates, and their "no gates found" warning is *correct*
+      rather than a defect. An unwalled village is entered from anywhere, which
+      is what ``_fallback_starts`` already models.
+    """
+    if not layout.walls or not layout.roads:
+        return []
+
+    lengths: dict[int, float] = {}
+    for i, road in enumerate(layout.roads):
+        if road.kind in NOT_GATE_ROADS or len(road.points) < 2:
+            continue
+        lengths[i] = sum(distance(a, b)
+                         for a, b in zip(road.points, road.points[1:]))
+    if not lengths:
+        return []
+    longest = max(lengths.values()) or 1.0
+
+    hits: list[tuple[float, Point]] = []
+    for i, length in lengths.items():
+        if length / longest < GATE_MIN_ROAD_SHARE:
+            continue
+        points = layout.roads[i].points
+        for r1, r2 in zip(points, points[1:]):
+            for ring in layout.walls:
+                for w1, w2 in zip(ring, ring[1:]):
+                    where = _segments_cross(r1, r2, w1, w2)
+                    if where is not None:
+                        hits.append((length, where))
+
+    # Strongest road first, so when two crossings merge the gate keeps the
+    # position of the more important road rather than whichever was found first.
+    gates: list[Point] = []
+    for _, point in sorted(hits, key=lambda h: -h[0]):
+        if all(distance(point, g) > GATE_MERGE_TILES for g in gates):
+            gates.append(point)
+    return gates
 
 
 def _read_edges(layout, edges, T, inside_window, fences, unmapped) -> None:

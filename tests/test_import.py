@@ -471,3 +471,85 @@ def _playable_buildings():
             id=f"house-{i:04d}",
             ring=[(x, 0.0), (x + 8.0, 0.0), (x + 8.0, 8.0), (x, 8.0), (x, 0.0)],
         )
+
+
+# -- gates derived from where a road crosses the wall --------------------------
+#
+# FTG exports no gates at all, so `layout.gates` was empty on every FTG town and
+# every build printed "no gates found; routing from the map edge instead".
+# `raster.road_classes` decides `main` partly on `at_gate`, and the raster walks
+# reachability from `sorted(tm.gates) or _fallback_starts(tm)` -- so an empty
+# gate list silently changed both.
+
+
+def _road(points, kind="road"):
+    from citysmith.layout import LayoutRoad
+    return LayoutRoad(points=list(points), kind=kind)
+
+
+def _walled_town(roads, walls):
+    from citysmith.layout import Layout as L
+    layout = L(name="gates", source="ftg", width=100.0, depth=100.0)
+    layout.walls = [list(w) for w in walls]
+    layout.roads = [_road(*r) if isinstance(r, tuple) else _road(r) for r in roads]
+    return layout
+
+
+def test_a_gate_lands_where_a_road_actually_crosses_the_wall():
+    """Not near the wall -- *on* it, and on the road too."""
+    layout = _walled_town(
+        roads=[[(0.0, 50.0), (100.0, 50.0)]],       # runs east, straight through
+        walls=[[(40.0, 0.0), (40.0, 100.0)]],       # runs north, straight across
+    )
+    gates = ftg.gates_from_roads(layout)
+    assert len(gates) == 1, gates
+    x, z = gates[0]
+    assert abs(x - 40.0) < 1e-6 and abs(z - 50.0) < 1e-6
+
+
+def test_a_road_that_only_comes_near_the_wall_earns_no_gate():
+    """The distinction this function exists for.
+
+    `mfcg._find_gates` matches road vertices to *wall vertices* within a
+    tolerance, because MFCG puts a gatehouse on a vertex deliberately. FTG's
+    vertices are just bends, and on East Tradebourne the median wall vertex has
+    a road within 7 tiles -- so a proximity rule would deal gates at bends.
+    """
+    layout = _walled_town(
+        roads=[[(0.0, 50.0), (36.0, 50.0)]],        # stops 4 tiles short
+        walls=[[(40.0, 0.0), (40.0, 100.0)]],
+    )
+    assert ftg.gates_from_roads(layout) == []
+
+
+def test_a_trail_does_not_earn_a_gate():
+    """Same exclusion `raster.NOT_THOROUGHFARES` applies to widening: a trail is
+    walked, not driven, and a river through a wall is a watergate."""
+    layout = _walled_town(
+        roads=[([(0.0, 50.0), (100.0, 50.0)], "trail")],
+        walls=[[(40.0, 0.0), (40.0, 100.0)]],
+    )
+    assert ftg.gates_from_roads(layout) == []
+
+
+def test_an_unwalled_settlement_has_no_gates():
+    """Pelvesthollow and Graybank export zero wall rings, so their "no gates"
+    is a fact about the town rather than a defect -- an unwalled village is
+    entered from anywhere, which `_fallback_starts` already models."""
+    layout = _walled_town(roads=[[(0.0, 50.0), (100.0, 50.0)]], walls=[])
+    assert ftg.gates_from_roads(layout) == []
+
+
+def test_two_roads_through_one_opening_give_one_gate():
+    """A fork at the gate is still one gate, and it keeps the major road's
+    crossing rather than whichever segment was tested first."""
+    layout = _walled_town(
+        roads=[
+            [(0.0, 50.0), (100.0, 50.0)],           # the long one
+            [(30.0, 47.0), (60.0, 47.0)],           # a short branch alongside
+        ],
+        walls=[[(40.0, 0.0), (40.0, 100.0)]],
+    )
+    gates = ftg.gates_from_roads(layout)
+    assert len(gates) == 1, gates
+    assert abs(gates[0][1] - 50.0) < 1e-6, "the major road should own the gate"
