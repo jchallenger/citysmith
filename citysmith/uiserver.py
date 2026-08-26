@@ -26,7 +26,11 @@ Safety is part of the design and not a follow-up:
   as text. :func:`read_build_request` coerces every field to an int, a bool, or
   a member of a closed set, **rejects unknown keys**, and :func:`run_build`
   passes them to ``build_town`` as explicit keywords. Nothing in this module
-  imports ``subprocess`` or ``os.system``, and a test asserts that.
+  imports ``subprocess`` or ``os.system``, and a test asserts that. The paste
+  screen needs to run PowerShell, so that work is in
+  :mod:`citysmith.pastedrive` and this module keeps the guard -- the same split
+  :mod:`citysmith.chatsession` made, so "a request handler cannot run anything"
+  stays a property of a file rather than of a careful reading.
 - **The browser never names a file.** Input files are chosen from a scan the
   server does (:func:`scan_sources`); the request carries an opaque id, not a
   path. Output files are served only from ``out_dir``, through
@@ -43,6 +47,14 @@ worker and returns an id immediately; the page polls
 open. Polling rather than server-sent events is deliberate: a poll has no
 half-open connection to leak when the page is closed, and at a 400 ms interval
 the cost is a few hundred bytes against a build measured in minutes.
+
+There are two screens. **Build** is cross-platform, because generating and
+verifying a town is pure Python. **Paste** is not: it drives TaleSpire's own
+window through PowerShell, so off Windows the page says so and offers no
+control rather than a button that could only fail. The precondition rule for a
+paste is in :mod:`citysmith.pastedrive`, and it is the point of that screen --
+a tiled run is up to 102 chunks of driven input, and every one of them lands a
+course high if a build plane is up.
 
 Run it::
 
@@ -66,6 +78,7 @@ import traceback
 import urllib.parse
 from dataclasses import dataclass, field
 
+from . import pastedrive
 from .build import DEFAULT_CHUNK_TILES, DEFAULT_FENCE_STYLE, FENCE_STYLES
 from .palette import STYLES
 from .pipeline import STAGES, build_town
@@ -84,6 +97,12 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 #: and every one of them is something this program wrote: the raster SVG, the
 #: slabs, the paste order, the NPC manifest, a brief.
 SERVABLE_SUFFIXES = frozenset({".svg", ".json", ".txt", ".md", ".slab"})
+
+#: What the screen-grab endpoint will hand back, and it is a *different*
+#: allowlist over a *different* root. `grab.ps1` writes to ``out/flyby`` beside
+#: the repo whatever ``--out-dir`` says, so the grabs are not reachable through
+#: the file endpoint and get their own route rather than a widened one.
+SHOT_SUFFIXES = frozenset({".jpg", ".jpeg", ".png"})
 
 #: How much JSON a request may carry. The build form is a few hundred bytes.
 MAX_BODY = 64 * 1024
@@ -221,8 +240,14 @@ def scan_sources(roots) -> list[Source]:
 
 # -- path safety --------------------------------------------------------------
 
-def resolve_in(root, relative: str) -> pathlib.Path:
+def resolve_in(root, relative: str, *, suffixes=SERVABLE_SUFFIXES) -> pathlib.Path:
     """Resolve ``relative`` inside ``root``, or raise :class:`BadRequest`.
+
+    ``suffixes`` is the allowlist of kinds this call will serve. It is a
+    parameter rather than a module constant because the screen grabs live under
+    a different root with a different set, and one widened allowlist over the
+    output directory would let a request ask for kinds of file that directory
+    has no business handing out.
 
     Three separate escapes are refused, and the order matters because each one
     catches something the next cannot:
@@ -249,10 +274,10 @@ def resolve_in(root, relative: str) -> pathlib.Path:
         raise BadRequest(f"{rel!r} cannot be resolved: {exc}") from exc
     if not resolved.is_relative_to(root):
         raise BadRequest(f"{rel!r} is outside {root}")
-    if resolved.suffix.lower() not in SERVABLE_SUFFIXES:
+    if resolved.suffix.lower() not in suffixes:
         raise BadRequest(
             f"{rel!r} is not a kind of file this serves "
-            f"({', '.join(sorted(SERVABLE_SUFFIXES))})")
+            f"({', '.join(sorted(suffixes))})")
     return resolved
 
 
@@ -365,6 +390,60 @@ def read_build_request(body, sources) -> dict:
     }
 
 
+# -- the paste request, as types ----------------------------------------------
+#
+# Same rule as the build form, and it matters more here because the values end
+# up as arguments to a PowerShell script: a stem chosen from the server's own
+# scan, a name matched against `_STEM`, an int in a range. Nothing else, and an
+# unknown key is an error. `pastedrive` then passes each of them as its own
+# argv entry -- there is no command line for them to be inside of.
+
+_PASTE_FIELDS = frozenset({"stem", "name", "shot_every"})
+
+
+def read_paste_request(body, plans) -> dict:
+    """Turn a JSON body into typed keywords for :func:`run_paste`.
+
+    ``plans`` is :func:`pastedrive.scan_plans`' output, so ``body['stem']`` can
+    only name a paste order the server itself found -- the same shape as the
+    build form's ``source``, and for the same reason.
+    """
+    if not isinstance(body, dict):
+        raise BadRequest("expected a JSON object")
+    unknown = sorted(set(body) - _PASTE_FIELDS)
+    if unknown:
+        raise BadRequest(
+            f"unknown field(s): {', '.join(unknown)}. This endpoint takes "
+            f"named parameters only; there is no place to pass a flag, a "
+            f"recipe or a command through.")
+
+    stems = {p["stem"] for p in plans}
+    stem = body.get("stem")
+    if not isinstance(stem, str) or stem not in stems:
+        raise BadRequest(
+            "stem: pick a build from the list. (The list is the server's scan "
+            "for <stem>-paste-order.txt in the output directory; a request can "
+            "only name one that is in it.)")
+
+    # The shot name becomes `-Name` and, through `grab.ps1`, a filename. It is
+    # matched rather than sanitised: a name that has to be cleaned up is a name
+    # that should have been refused.
+    name = body.get("name", stem)
+    if not isinstance(name, str) or not _STEM.match(name):
+        raise BadRequest(
+            "name: letters, digits, dot, dash and underscore only, up to 40. "
+            "It names the screen grabs.")
+
+    return {
+        "stem": stem,
+        "name": name,
+        # One grab in hand and one after it lands, per chunk. On a hundred-chunk
+        # town that is two hundred captures, so this thins them; `review.ps1`
+        # always keeps the first and the last whatever it is set to.
+        "shot_every": _int(body, "shot_every", 1, 1, 1000),
+    }
+
+
 # -- progress, as lines -------------------------------------------------------
 
 def _pipeline_line(stage: str, fields: dict) -> str:
@@ -402,6 +481,9 @@ class Job:
     """
 
     id: str
+    #: "build" or "paste". One job runs at a time across both, so the refusal
+    #: has to be able to say which one is in the way.
+    kind: str = "build"
     state: str = "running"          # running | done | error
     events: list[dict] = field(default_factory=list)
     result: dict | None = None
@@ -417,6 +499,7 @@ class Job:
         with self.lock:
             return {
                 "job": self.id,
+                "kind": self.kind,
                 "state": self.state,
                 "events": [e for e in self.events if e["seq"] > after],
                 "next": len(self.events),
@@ -504,6 +587,42 @@ def run_build(job: Job, params: dict, *, out_dir, palette_factory) -> None:
     with job.lock:
         job.state = "done"
         job.result = payload
+
+
+def run_paste(job: Job, params: dict, *, driver, out_dir) -> None:
+    """Drive one tiled paste. Called on a worker thread.
+
+    Everything that touches PowerShell is `driver`'s, including the
+    preconditions -- which run *inside* the job rather than only behind the
+    button, so a run started from a page that has been open since before
+    somebody pressed ``G`` is still refused. `PasteRefused` is the refusal, and
+    it lands as a job error with the sentence that explains it, because a paste
+    that will not start is not a crash.
+    """
+    try:
+        job.say("started", f"pasting {params['stem']} onto the current board")
+        for event in driver.paste(
+                stem=params["stem"], name=params["name"], out_dir=out_dir,
+                shot_every=params["shot_every"]):
+            stage = event.pop("stage", "said")
+            text = event.pop("text", "")
+            job.say(stage, text, **event)
+    except Exception as exc:  # noqa: BLE001 -- reported, not swallowed
+        if isinstance(exc, (pastedrive.PasteRefused, BadRequest, ValueError)):
+            detail = str(exc)          # already a sentence written for a person
+        else:
+            detail = f"{type(exc).__name__}: {exc}"
+        # Before the state changes, for the reason `run_build` gives: a poller
+        # stops the moment the state is not "running".
+        job.say("failed", detail, traceback=traceback.format_exc())
+        with job.lock:
+            job.state = "error"
+            job.error = detail
+        return
+
+    with job.lock:
+        job.state = "done"
+        job.result = {"stem": params["stem"], "name": params["name"]}
 
 
 # -- the result, as JSON ------------------------------------------------------
@@ -651,6 +770,14 @@ _ROUTES = (
     ("POST", re.compile(r"^/api/build$"), "api_build_start"),
     ("GET", re.compile(r"^/api/build/([0-9a-f]{16})$"), "api_build_poll"),
     ("GET", re.compile(r"^/api/files/(.+)$"), "api_file"),
+    # The paste screen. Note that no two rows share a pattern: `_dispatch`
+    # answers 405 on the first pattern that matches with the wrong verb, so a
+    # second row for the same path with a different verb would be unreachable.
+    ("GET", re.compile(r"^/api/paste/plans$"), "api_paste_plans"),
+    ("POST", re.compile(r"^/api/paste/preflight$"), "api_paste_preflight"),
+    ("POST", re.compile(r"^/api/paste$"), "api_paste_start"),
+    ("GET", re.compile(r"^/api/paste/([0-9a-f]{16})$"), "api_paste_poll"),
+    ("GET", re.compile(r"^/api/paste/shots/(.+)$"), "api_paste_shot"),
 )
 
 #: No external origin is reachable from the page, so an Anthropic key could not
@@ -814,46 +941,143 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # A boolean and nothing else. The key itself never leaves this
             # process, and the browser has no route to api.anthropic.com.
             "ai_available": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            # Whether this machine can drive a paste at all, and the sentence
+            # to show when it cannot. The page renders the sentence rather than
+            # a control, because a button that can only fail is worse than no
+            # button: it makes a platform limit look like a broken feature.
+            "paste": self.server.paste_driver.as_json(),
         })
 
     def api_sources(self):
         self._json(200, {"sources": [s.as_json()
                                      for s in scan_sources(self.server.roots)]})
 
-    def api_build_start(self):
-        body = self._body()
-        params = read_build_request(body, scan_sources(self.server.roots))
+    #: Why a second job is refused, keyed on what is already running. Two
+    #: builds sharing an output directory delete each other's slabs; a build
+    #: during a paste rewrites the very files being pasted, one chunk at a
+    #: time, which is the same damage arriving more slowly.
+    _BUSY = {
+        "build": ("A build is already running. Two builds sharing an output "
+                  "directory delete each other's slab files, so this waits "
+                  "rather than racing."),
+        "paste": ("A paste is running. It is driving TaleSpire's window with "
+                  "synthetic input and reading the slabs off disk as it goes, "
+                  "so nothing else starts until it is done."),
+    }
 
+    def _start(self, kind: str, target, params: dict, **kwargs) -> None:
+        """Claim the one job slot and run ``target`` on a worker.
+
+        The look and the claim are one lock hold. Split into two they are a
+        race that only shows up when somebody double-clicks, which is exactly
+        when it matters.
+        """
         with self.server.jobs_lock:
-            running = [j for j in self.server.jobs.values()
-                       if j.state == "running"]
-            if running:
-                self._error(409, (
-                    "A build is already running. Two builds sharing an output "
-                    "directory delete each other's slab files, so this waits "
-                    "rather than racing."))
-                return
-            job = Job(id=secrets.token_hex(8))
-            self.server.jobs[job.id] = job
-
+            busy = next((j for j in self.server.jobs.values()
+                         if j.state == "running"), None)
+            if busy is None:
+                job = Job(id=secrets.token_hex(8), kind=kind)
+                self.server.jobs[job.id] = job
+        if busy is not None:
+            self._error(409, self._BUSY[busy.kind])
+            return
         thread = threading.Thread(
-            target=run_build, args=(job, params),
-            kwargs={"out_dir": self.server.out_dir,
-                    "palette_factory": self.server.palette_factory},
-            daemon=True, name=f"citysmith-build-{job.id}")
+            target=target, args=(job, params), kwargs=kwargs,
+            daemon=True, name=f"citysmith-{kind}-{job.id}")
         thread.start()
         self._json(202, {"job": job.id})
 
+    def api_build_start(self):
+        params = read_build_request(self._body(), scan_sources(self.server.roots))
+        self._start("build", run_build, params,
+                    out_dir=self.server.out_dir,
+                    palette_factory=self.server.palette_factory)
+
     def api_build_poll(self, job_id: str):
+        self._poll("build", job_id)
+
+    def _poll(self, kind: str, job_id: str) -> None:
         job = self.server.jobs.get(job_id)
-        if job is None:
-            raise FileNotFoundError(f"no job {job_id}")
+        if job is None or job.kind != kind:
+            raise FileNotFoundError(f"no {kind} job {job_id}")
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         try:
             after = int(query.get("after", ["-1"])[0])
         except ValueError:
             raise BadRequest("after: expected a whole number") from None
         self._json(200, job.snapshot(after))
+
+    # -- the paste screen -----------------------------------------------------
+    #
+    # Windows only, and it is the server that says so: the page asks
+    # `/api/options` and renders a sentence instead of a control off Windows.
+    # These endpoints refuse there anyway, because a hidden button is a UI
+    # decision and this is the rule.
+
+    def _require_paste(self) -> None:
+        driver = self.server.paste_driver
+        if not driver.available:
+            raise BadRequest(driver.note)
+
+    def api_paste_plans(self):
+        """Every build in the output directory that has a paste order.
+
+        The browser picks a stem from this and sends the stem back, so a
+        request can only name a plan the server itself found -- the same shape
+        as the build form's source list.
+        """
+        self._json(200, {
+            "paste": self.server.paste_driver.as_json(),
+            "plans": pastedrive.scan_plans(self.server.out_dir),
+        })
+
+    def api_paste_preflight(self):
+        """Look at the preconditions now, and say what each probe returned.
+
+        This one *does* block its request, which nothing else here does. It is
+        bounded -- two probes, seconds, each with a timeout -- and it is the
+        thing the user pressed the button for; the server is threaded, so a
+        slow probe does not hold up the page. The build endpoint's rule is
+        about work measured in minutes.
+        """
+        self._body()                        # enforce the JSON content type
+        self._require_paste()
+        self._json(200, self.server.paste_driver.preflight().as_json())
+
+    def api_paste_start(self):
+        """Start a tiled paste run. 202 and a job id, like a build.
+
+        The preconditions are checked again on the worker before anything is
+        spawned: the button's check can be minutes old, and ``G`` is one
+        keystroke.
+        """
+        # The body is read before the platform check so the connection is left
+        # in a state the next request can use, whichever way this goes.
+        body = self._body()
+        self._require_paste()
+        params = read_paste_request(
+            body, pastedrive.scan_plans(self.server.out_dir))
+        self._start("paste", run_paste, params,
+                    driver=self.server.paste_driver,
+                    out_dir=self.server.out_dir)
+
+    def api_paste_poll(self, job_id: str):
+        self._poll("paste", job_id)
+
+    def api_paste_shot(self, relative: str):
+        """One screen grab from the run, so a bad paste shows on this page.
+
+        Its own root and its own allowlist: `grab.ps1` writes to ``out/flyby``
+        beside the repository whatever ``--out-dir`` is, so these are not under
+        the directory :meth:`api_file` serves and must not be reached by
+        widening that one.
+        """
+        path = resolve_in(self.server.shots_dir, relative,
+                          suffixes=SHOT_SUFFIXES)
+        if not path.is_file():
+            raise FileNotFoundError(f"{relative} has not been captured")
+        ctype = {".png": "image/png"}.get(path.suffix.lower(), "image/jpeg")
+        self._send(200, ctype, path.read_bytes())
 
     def api_file(self, relative: str):
         path = resolve_in(self.server.out_dir, relative)
@@ -879,18 +1103,22 @@ class _Server(http.server.ThreadingHTTPServer):
     allow_reuse_address = False
 
     def __init__(self, address, handler, *, out_dir, roots, palette_factory,
-                 log):
+                 log, paste_driver):
         super().__init__(address, handler)
         self.out_dir = pathlib.Path(out_dir)
         self.roots = tuple(roots)
         self.palette_factory = palette_factory
+        self.paste_driver = paste_driver
+        #: Where the screen grabs are, which is `grab.ps1`'s directory and NOT
+        #: ``out_dir``. Held here so a test can point it somewhere harmless.
+        self.shots_dir = pathlib.Path(paste_driver.shots)
         self.log = log
         self.jobs: dict[str, Job] = {}
         self.jobs_lock = threading.Lock()
 
 
 def make_server(*, host: str = "127.0.0.1", port: int = 8765, out_dir="out",
-                roots=None, palette_factory=None, log=None):
+                roots=None, palette_factory=None, log=None, paste_driver=None):
     """Bind a server without serving it. ``port=0`` takes an ephemeral one.
 
     Raises :class:`ValueError` for any host that is not loopback. That is the
@@ -908,22 +1136,30 @@ def make_server(*, host: str = "127.0.0.1", port: int = 8765, out_dir="out",
         roots = (out_dir, *DEFAULT_ROOTS)
     if palette_factory is None:
         palette_factory = catalog_palette_factory()
+    if paste_driver is None:
+        paste_driver = pastedrive.Driver()
     if log is None:
         def log(line: str) -> None:
             print(f"  {line}", flush=True)
 
     return _Server((LOOPBACK[host], port), _Handler, out_dir=out_dir,
-                   roots=roots, palette_factory=palette_factory, log=log)
+                   roots=roots, palette_factory=palette_factory, log=log,
+                   paste_driver=paste_driver)
 
 
 def serve(*, host: str = "127.0.0.1", port: int = 8765, out_dir="out",
-          roots=None, palette_factory=None, log=None) -> int:
+          roots=None, palette_factory=None, log=None, paste_driver=None) -> int:
     """Serve the build UI until interrupted. Loopback only, always."""
     server = make_server(host=host, port=port, out_dir=out_dir, roots=roots,
-                         palette_factory=palette_factory, log=log)
+                         palette_factory=palette_factory, log=log,
+                         paste_driver=paste_driver)
     bound = server.server_address
     print(f"citysmith UI on http://{bound[0]}:{bound[1]}/")
     print(f"  output directory: {server.out_dir}")
+    if server.paste_driver.available:
+        print(f"  screen grabs:     {server.shots_dir}")
+    else:
+        print("  paste screen:     not on this platform (Windows only)")
     print("  loopback only; Ctrl+C to stop")
     try:
         server.serve_forever()

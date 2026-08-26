@@ -51,6 +51,7 @@ This file is the internal engineering notes. User-facing docs:
 | `pipeline.py` | One `build_town()` the CLI and the UI both call. Side effects live here. |
 | `cli.py` | Argument parsing and printing. Every decision is in `pipeline`. |
 | `uiserver.py` | Local web UI over `build_town`. Loopback, typed API, no deps. |
+| `pastedrive.py` | The UI's paste half: preconditions, then `review.ps1 tiled`. Windows. |
 | `ui/` | The page itself: hand-written HTML/CSS/JS, no bundler, no CDN. |
 
 ## Hard constraints
@@ -1561,12 +1562,37 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
 
 ## Not built yet
 
-- Paste and chat screens in the UI. The **build** screen is built --
-  `citysmith.uiserver.serve`, `python -m citysmith.uiserver` -- and it renders
-  the same `verify` findings the CLI prints, in full and worst first, beside
-  `city-raster.svg` and the chunk table **in paste order**. What it does not
-  do yet is drive a paste or hold a conversation; `_ROUTES` and the tab strip
-  in `ui/index.html` are where those go.
+- The chat screen in the UI. **Build** and **paste** are built --
+  `citysmith.uiserver.serve`, `python -m citysmith.uiserver`. Build renders the
+  same `verify` findings the CLI prints, in full and worst first, beside
+  `city-raster.svg` and the chunk table **in paste order**; paste wraps
+  `review.ps1 tiled` and shows each chunk with the grab taken for it.
+  `chatsession.py` is finished and nothing renders it yet; `_ROUTES` and the
+  tab strip in `ui/index.html` are where that goes.
+
+  Two things the paste screen settled, and they are rules rather than details:
+
+  * **An unreadable probe is not a pass.** `ts.ps1 planestate` answers with one
+    of three prefixes and `pastedrive.read_plane_state` recognises **off**
+    explicitly, refusing `ON`, `UNKNOWN` and anything it does not recognise at
+    all. That is the same rule `review.ps1` learned -- `-match 'ON'` does not
+    match `UNKNOWN` -- stated as a classifier with a test per outcome, so
+    "not ON" cannot creep back in. `Preflight.ok` is False on an empty check
+    list for the same reason: `all([])` is a probe that answers without
+    looking.
+  * **Building and verifying are two verdicts.** The page said BUILD FAILED
+    over four written, pasteable slabs, because Forest Church's FAIL findings
+    were being read as a failure to produce a map. It now says what was
+    written, then what verify found, and never merges them. The findings are
+    not softened: `fail` and `warn` stay expanded and first, and only `ok`
+    starts collapsed -- with its count on the chip, one click from being back.
+
+  **The UI's paste half runs PowerShell, so it is its own module.**
+  `uiserver.py` carries a test asserting the word `subprocess` does not appear
+  in it, and that guard is worth more than the convenience of one import:
+  `pastedrive.py` is the same split `chatsession.py` made. Nothing that came
+  from a request ever reaches a `-Command` string -- `-Name`, `-Stem` and
+  `-OutDir` are separate argv entries through `-File`.
 - Creature/mini placement (`creatureCount` is always 0 in a v2 slab). This is
   why a scene pastes *marks* rather than a party: four contrasting floor tiles
   by the door, and the minis go on them by hand.

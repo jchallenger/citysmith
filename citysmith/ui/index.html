@@ -12,7 +12,8 @@
   <h1>citysmith</h1>
   <nav class="tabs" id="tabs">
     <button type="button" class="tab is-on" data-screen="build">Build</button>
-    <!-- SEAM. A second screen is one button here, one <section class="screen">
+    <button type="button" class="tab" data-screen="paste">Paste</button>
+    <!-- SEAM. A screen is one button here, one <section class="screen">
          below, and one row in uiserver._ROUTES. Nothing in app.js knows what a
          screen is beyond swapping which section is shown. -->
   </nav>
@@ -137,12 +138,22 @@
 
   <div class="results">
 
+    <!-- TWO verdicts, because they are two different questions and running
+         them together said BUILD FAILED over four slabs that were written and
+         are perfectly pasteable. The build either produced files or it did
+         not; verify either found faults in the map or it did not. A map with
+         known faults is still a map. -->
     <section class="panel" id="verdict-panel" hidden>
       <div class="verdict" id="verdict">
         <span class="verdict-word" id="verdict-word"></span>
         <span class="verdict-counts" id="verdict-counts"></span>
       </div>
       <p class="verdict-line" id="verdict-summary"></p>
+      <div class="verdict verify" id="verify-row">
+        <span class="verdict-word" id="verify-word"></span>
+        <span class="verdict-counts" id="verify-counts"></span>
+      </div>
+      <p class="verdict-line" id="verify-line"></p>
     </section>
 
     <section class="panel" id="log-panel">
@@ -154,7 +165,9 @@
 
     <section class="panel" id="report-panel" hidden>
       <h2>Report
-        <span class="hint">every <code>verify</code> finding, in full, worst first</span>
+        <span class="hint">every <code>verify</code> finding, in full, worst
+          first &mdash; <code>ok</code> starts collapsed, the chip has the
+          count</span>
       </h2>
       <div class="filters" id="filters" role="group" aria-label="filter findings by level"></div>
       <ul class="findings" id="findings"></ul>
@@ -185,6 +198,109 @@
         <span class="hint" id="zoom-note">100%</span>
       </div>
       <p class="meta" id="files"></p>
+    </section>
+
+  </div>
+</section>
+
+<section class="screen" id="screen-paste">
+
+  <form class="panel form" id="paste-form" autocomplete="off">
+    <h2>Paste onto a board</h2>
+
+    <!-- Off Windows this is the whole screen: the sentence, and no control.
+         A disabled button reads as a broken feature; a platform limit is not
+         one. -->
+    <p class="platform" id="paste-platform" hidden></p>
+
+    <div id="paste-controls">
+      <fieldset>
+        <legend>What to paste</legend>
+        <div class="row">
+          <label for="paste-stem">Build</label>
+          <select id="paste-stem" required></select>
+        </div>
+        <p class="hint" id="paste-plan-detail">&nbsp;</p>
+        <div class="row inline">
+          <button type="button" class="ghost" id="paste-rescan">Rescan</button>
+          <span class="hint" id="paste-scan-note"></span>
+        </div>
+        <p class="hint">
+          The list is every <code>&lt;stem&gt;-paste-order.txt</code> in the
+          output directory. That manifest is the order, and it is
+          <em>not</em> filename order: the chunk covering the anchor cell is
+          written last so the anchor is still bare board for every paste
+          before it.
+        </p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Run</legend>
+        <div class="grid2">
+          <div class="row">
+            <label for="paste-name">Grab name</label>
+            <input type="text" id="paste-name" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,39}">
+          </div>
+          <div class="row">
+            <label for="paste-shot-every">Grab every N chunks</label>
+            <input type="number" id="paste-shot-every" min="1" max="1000" step="1" value="1">
+          </div>
+        </div>
+        <p class="hint">
+          Two captures a chunk &mdash; one with the slab in hand, one after it
+          lands. On a hundred-chunk town that is two hundred grabs, so thin
+          them here; the first and the last are always kept.
+        </p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Before it starts</legend>
+        <div class="row inline">
+          <button type="button" class="ghost" id="preflight">Check preconditions</button>
+          <span class="hint" id="preflight-note"></span>
+        </div>
+        <ul class="checks-list" id="preflight-list"></ul>
+        <p class="hint">
+          <strong>An unreadable probe is not a pass.</strong>
+          <code>planestate</code> answers <code>off</code>, <code>ON</code> or
+          <code>UNKNOWN</code>, and only an explicit <code>off</code> starts a
+          run. A build plane makes every chunk land a course high with nothing
+          wrong in any file.
+        </p>
+      </fieldset>
+
+      <div class="actions">
+        <button type="submit" class="primary" id="paste-run">Paste</button>
+        <span class="hint" id="paste-error" role="alert"></span>
+      </div>
+      <p class="hint">
+        This drives TaleSpire's window: it makes a new board, pitches the
+        camera straight down and commits every chunk at one cursor cell.
+        Do not touch the mouse or the keyboard while it runs.
+      </p>
+    </div>
+  </form>
+
+  <div class="results" id="paste-results">
+
+    <section class="panel" id="paste-verdict-panel" hidden>
+      <div class="verdict" id="paste-verdict">
+        <span class="verdict-word" id="paste-verdict-word"></span>
+        <span class="verdict-counts" id="paste-verdict-counts"></span>
+      </div>
+      <p class="verdict-line" id="paste-verdict-line"></p>
+    </section>
+
+    <section class="panel" id="paste-log-panel">
+      <h2>Progress</h2>
+      <p class="hint" id="paste-idle-note">Nothing has been pasted yet.</p>
+      <pre class="log" id="paste-log" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel" id="paste-chunk-panel" hidden>
+      <h2>Chunks <span class="hint">in PASTE ORDER, with the grab taken after each</span></h2>
+      <p class="meta" id="paste-chunk-meta"></p>
+      <ol class="chunks paste-chunks" id="paste-chunks"></ol>
     </section>
 
   </div>

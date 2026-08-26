@@ -14,6 +14,19 @@ clause is removed.
   ``test_the_file_endpoint_refuses_an_escape`` (over HTTP).
 * **The Anthropic key stays server-side.**
   ``test_the_anthropic_key_never_reaches_the_browser``.
+* **The paste half runs PowerShell, and does it with argument lists.**
+  ``test_the_paste_driver_never_composes_a_shell_command`` -- and
+  ``test_nothing_in_the_server_can_reach_a_shell`` still holds over
+  ``uiserver.py`` itself, which is why that work is in `pastedrive`.
+
+The paste screen's own claim is the precondition rule, and it is one line long:
+an **explicit** ``build plane off`` starts a run and nothing else does.
+``test_an_unreadable_build_plane_refuses_exactly_like_a_raised_one`` covers
+``UNKNOWN``, the reading `CLAUDE.md` records this project acting on once
+already; ``test_the_paste_endpoint_refuses_when_talespire_is_not_running``
+covers the game being down. Neither ever runs `review.ps1`: every probe and
+every spawn in these tests is a stub, so the suite drives nothing and pastes
+nothing.
 
 And the build half is anchored on one claim:
 ``test_the_build_endpoint_returns_the_same_findings_as_the_cli`` runs the real
@@ -37,11 +50,12 @@ import pathlib
 import re
 import threading
 import time
+import types
 
 import pytest
 
 import test_pipeline
-from citysmith import uiserver
+from citysmith import pastedrive, uiserver
 from citysmith.pipeline import STAGES
 
 FINDING = re.compile(r"^\[(?:FAIL|WARN|ok {2})\] ")
@@ -674,3 +688,676 @@ def test_the_page_is_served_and_names_the_endpoints_it_uses(tmp_path):
 
         status, data = call_json(port, "/api/nope")
         assert status == 404 and "no such endpoint" in data["error"]
+
+
+# -- the paste screen ---------------------------------------------------------
+#
+# Nothing below runs PowerShell, launches TaleSpire or takes a screenshot. The
+# probes are `run=` stubs and the run itself is a `popen=` stub whose stdout is
+# a list of the lines `review.ps1 tiled` really prints. That is not only
+# hygiene: it means the refusal rules can be exercised for readings -- a raised
+# build plane, an unreadable one -- that are awkward to arrange on a real
+# machine and are exactly the ones that must not slip through.
+
+#: What `ts.ps1 client` prints when the game is up, as this asks for it.
+CLIENT_JSON = '{"X":0,"Y":31,"W":1920,"H":1017,"CX":960,"CY":539}'
+
+#: `Get-TS`'s own sentence, on stderr, with a non-zero exit.
+NOT_RUNNING = "TaleSpire is not running."
+
+PLANE_OFF = "build plane off (rgb(71,71,71))"
+PLANE_ON = ("build plane ON  (rgb(173,117,73)) -- a paste will snap to it, "
+            "not to the ground")
+PLANE_UNKNOWN = ("build plane UNKNOWN -- the build toolbar is not on screen "
+                 "(strip rgb(177,176,69), glyph px 0). Press B for build mode, "
+                 "then read it again. Do NOT paste on this reading.")
+
+
+def probes(*, client=(0, CLIENT_JSON, ""), plane=(0, PLANE_OFF, "")):
+    """A `subprocess.run` stand-in for the two `ts.ps1` probes.
+
+    Keyed on which probe it is rather than on argv order, so a change to the
+    flags does not silently make every test answer the same probe twice.
+    """
+    calls = []
+
+    def run(command, **kwargs):
+        command = list(command)
+        calls.append(command)
+        code, out, err = plane if command[-1] == "planestate" else client
+        return types.SimpleNamespace(returncode=code, stdout=out, stderr=err)
+
+    run.calls = calls
+    return run
+
+
+def spawns(lines=(), code=0):
+    """A `subprocess.Popen` stand-in. Records the argv it was handed."""
+    calls = []
+
+    def popen(command, **kwargs):
+        calls.append((list(command), kwargs))
+        return types.SimpleNamespace(stdout=iter(list(lines)),
+                                     wait=lambda: code)
+
+    popen.calls = calls
+    return popen
+
+
+def driver(tmp_path, *, windows=True, run=None, popen=None):
+    """A `pastedrive.Driver` with every seam plugged.
+
+    ``tools`` stays the real directory, because the scripts existing is one of
+    the preconditions and pointing it at a fake would test the fake.
+    """
+    if run is None:
+        run = probes()
+    if popen is None:
+        popen = spawns()
+    shots = pathlib.Path(tmp_path) / "flyby"
+    shots.mkdir(exist_ok=True)
+    return pastedrive.Driver(windows=windows, host="pwsh-stub", run=run,
+                             popen=popen, shots=shots)
+
+
+def plant_plan(out_dir, stem="pin", names=("a.slab.txt", "b.slab.txt",
+                                           "anchor.slab.txt")):
+    """A build's output: the slabs, and the manifest that orders them.
+
+    The names are deliberately NOT in alphabetical order -- `anchor` sorts
+    first and is written last, which is the whole point of the manifest.
+    """
+    out_dir = pathlib.Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (out_dir / name).write_text("slab", encoding="utf-8")
+    (out_dir / f"{stem}-paste-order.txt").write_text(
+        "\n".join(names) + "\n", encoding="utf-8")
+    return list(names)
+
+
+def start_paste(port, **fields) -> dict:
+    """Start a paste and poll it, the way the page does."""
+    status, started = call_json(port, "/api/paste", method="POST", body=fields)
+    assert status == 202, started
+    deadline = time.monotonic() + TIMEOUT
+    after, seen = -1, []
+    while time.monotonic() < deadline:
+        status, snapshot = call_json(
+            port, f"/api/paste/{started['job']}?after={after}")
+        assert status == 200, snapshot
+        seen += snapshot["events"]
+        after = snapshot["next"] - 1
+        if snapshot["state"] != "running":
+            snapshot["events"] = seen
+            return snapshot
+        time.sleep(0.02)
+    raise AssertionError("the paste job did not finish")
+
+
+# -- refusing ------------------------------------------------------------------
+
+def test_the_paste_endpoint_refuses_when_talespire_is_not_running(tmp_path):
+    """The first precondition, and the cheapest one to get wrong.
+
+    `ts.ps1 client` throws "TaleSpire is not running." through `Get-TS`, so a
+    non-zero exit is the answer rather than an error. What matters is what
+    happens next: the job stops with that sentence and **nothing is ever
+    spawned**, because the alternative is `review.ps1` opening with `newboard`
+    against a window that is not there.
+
+    The build plane comes back `skipped` rather than `fail`. It was not looked
+    at, and a check reported as failed when it was never run is the same class
+    of lie as a probe that answers without seeing anything.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns()
+    run = probes(client=(1, "", NOT_RUNNING))
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, run=run, popen=popen)) as (_, port):
+        _, pre = call_json(port, "/api/paste/preflight", method="POST", body={})
+        snapshot = start_paste(port, stem="pin")
+
+    assert pre["ok"] is False
+    states = {c["name"]: c["state"] for c in pre["checks"]}
+    assert states["TaleSpire"] == "fail"
+    assert states["build plane"] == "skipped"
+    assert NOT_RUNNING in [c for c in pre["checks"]
+                           if c["name"] == "TaleSpire"][0]["raw"]
+    assert "not running" in pre["refusal"]
+
+    assert snapshot["state"] == "error"
+    assert "not running" in snapshot["error"]
+    assert popen.calls == [], "a run was started against a window that is gone"
+    # A sentence for a person, not a class name and a stack.
+    assert not snapshot["error"].startswith("PasteRefused")
+    # And the plane was never probed, because probing it would have reported
+    # "cannot see the toolbar" for a reason that has nothing to do with it.
+    assert [c[-1] for c in run.calls].count("planestate") == 0
+
+
+@pytest.mark.parametrize("said,why", [
+    (PLANE_ON, "raised"),
+    (PLANE_UNKNOWN, "unreadable"),
+    ("build plane sideways", "unrecognised"),
+    ("", "silent"),
+])
+def test_an_unreadable_build_plane_refuses_exactly_like_a_raised_one(
+        said, why, tmp_path):
+    """The crux, and the mistake this project has already made once.
+
+    `CLAUDE.md`: ``-match 'ON'`` does not match ``UNKNOWN``, so a "not ON means
+    it must be off" test reads a probe that saw nothing as a probe that saw an
+    empty toolbar -- and the UNKNOWN branch's own message ends "Do NOT paste on
+    this reading." Only an explicit ``off`` may start a run. Anything else,
+    including output this does not recognise at all, refuses.
+
+    Refusing costs a keystroke. Not refusing costs a 102-chunk run in which
+    every chunk lands a course high with nothing wrong in any file.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns()
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, popen=popen,
+                                     run=probes(plane=(0, said, "")))
+                 ) as (_, port):
+        _, pre = call_json(port, "/api/paste/preflight", method="POST", body={})
+        snapshot = start_paste(port, stem="pin")
+
+    assert pre["ok"] is False, why
+    plane = [c for c in pre["checks"] if c["name"] == "build plane"][0]
+    assert plane["state"] == "fail", why
+    assert snapshot["state"] == "error", why
+    assert popen.calls == [], f"a {why} reading started a run"
+
+
+def test_an_explicit_off_is_the_only_reading_that_proceeds(tmp_path):
+    """The other half of the rule: with a real ``off``, it goes."""
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns(["1/3 : a.slab.txt", "2/3 : b.slab.txt",
+                    "3/3 : anchor.slab.txt"])
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, popen=popen)) as (_, port):
+        _, pre = call_json(port, "/api/paste/preflight", method="POST", body={})
+        snapshot = start_paste(port, stem="pin")
+
+    assert pre["ok"] is True
+    assert [c["state"] for c in pre["checks"]] == ["ok"] * len(pre["checks"])
+    assert pre["client"] == {"X": 0, "Y": 31, "W": 1920, "H": 1017,
+                             "CX": 960, "CY": 539}
+    assert snapshot["state"] == "done", snapshot["error"]
+    assert len(popen.calls) == 1
+
+
+def test_the_preconditions_are_checked_again_on_the_worker(tmp_path):
+    """The button's answer can be minutes old, and ``G`` is one keystroke.
+
+    So the run re-checks before it spawns anything, rather than trusting the
+    reading the page is showing. Here the plane comes up between the two.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns()
+    readings = [PLANE_OFF, PLANE_ON]
+
+    def run(command, **kwargs):
+        command = list(command)
+        if command[-1] == "planestate":
+            said = readings.pop(0) if len(readings) > 1 else readings[0]
+            return types.SimpleNamespace(returncode=0, stdout=said, stderr="")
+        return types.SimpleNamespace(returncode=0, stdout=CLIENT_JSON, stderr="")
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, run=run, popen=popen)) as (_, port):
+        _, pre = call_json(port, "/api/paste/preflight", method="POST", body={})
+        assert pre["ok"] is True
+        snapshot = start_paste(port, stem="pin")
+
+    assert snapshot["state"] == "error"
+    assert "build plane is UP" in snapshot["error"]
+    assert popen.calls == []
+
+
+def test_a_run_is_refused_when_a_slab_in_the_manifest_is_not_on_disk(tmp_path):
+    """An unpasted chunk is not a gap in the map, it is bare board.
+
+    So a manifest naming a file that is gone stops the run rather than pasting
+    the rest of the town around a hole.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    (out_dir / "b.slab.txt").unlink()
+    popen = spawns()
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, popen=popen)) as (_, port):
+        snapshot = start_paste(port, stem="pin")
+
+    assert snapshot["state"] == "error"
+    assert "b.slab.txt" in snapshot["error"]
+    assert popen.calls == []
+
+
+# -- the run -------------------------------------------------------------------
+
+def test_a_paste_run_reports_each_chunk_with_the_grabs_taken_for_it(tmp_path):
+    """"Which chunk is down, and the grab after each."
+
+    `review.ps1` prints its grabs BEFORE the progress line of the chunk they
+    belong to, so they are held and flushed with it -- otherwise every row on
+    the page carries the previous chunk's picture, which is worse than none.
+    And a grab is reported only if it is **on disk**: `grab.ps1` says what it
+    wrote, this looks, because a picture the page then cannot fetch is this
+    project's own recurring failure in miniature.
+    """
+    out_dir = tmp_path / "uiout"
+    names = plant_plan(out_dir)
+    shots = tmp_path / "flyby"
+    shots.mkdir(exist_ok=True)
+    for view in ("001-hold", "001-down", "003-down"):
+        (shots / f"pin-{view}.jpg").write_bytes(b"\xff\xd8jpeg")
+
+    popen = spawns([
+        "pin-001-hold -> 152341 bytes",
+        "pin-001-down -> 150122 bytes",
+        "1/3 : a.slab.txt",
+        "2/3 : b.slab.txt",                      # thinned out, no grabs
+        "pin-003-down -> 151044 bytes",
+        "pin-003-never-written -> 9 bytes",      # said, but not on disk
+        "3/3 : anchor.slab.txt",
+        "tiled 3 chunk(s) of pin at 960,539",
+    ])
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, popen=popen)) as (_, port):
+        snapshot = start_paste(port, stem="pin", name="pin")
+
+    assert snapshot["state"] == "done", snapshot["error"]
+    chunks = [e for e in snapshot["events"] if e["stage"] == "chunk"]
+    assert [c["file"] for c in chunks] == names
+    assert [c["index"] for c in chunks] == [1, 2, 3]
+    assert [s["name"] for s in chunks[0]["shots"]] == ["pin-001-hold.jpg",
+                                                       "pin-001-down.jpg"]
+    assert chunks[1]["shots"] == []
+    assert [s["name"] for s in chunks[2]["shots"]] == ["pin-003-down.jpg"]
+    assert chunks[0]["shots"][0]["view"] == "hold"
+
+    # The plan event carries the manifest, in the manifest's order.
+    plan = [e for e in snapshot["events"] if e["stage"] == "plan"][0]
+    assert plan["files"] == names
+    assert plan["files"] != sorted(plan["files"]), "the fixture stopped testing"
+
+
+def test_a_failing_run_is_reported_rather_than_retried(tmp_path):
+    """A second attempt stamps a second copy of the map, so nothing retries."""
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns(["1/3 : a.slab.txt", "review.ps1 : no chunk b.slab.txt"],
+                   code=1)
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, popen=popen)) as (_, port):
+        snapshot = start_paste(port, stem="pin")
+
+    assert snapshot["state"] == "error"
+    assert "after 1 chunk(s)" in snapshot["error"]
+    assert len(popen.calls) == 1
+    # Its own output is on the log, so the reason is on the page.
+    assert any("no chunk b.slab.txt" in e["text"] for e in snapshot["events"])
+
+
+def test_a_grab_is_served_from_its_own_directory_and_nothing_else_is(tmp_path):
+    """The grabs are not under ``out_dir``, so they are not `api_file`'s.
+
+    `grab.ps1` writes to ``out/flyby`` beside the repository whatever
+    ``--out-dir`` says. Widening the file endpoint's allowlist to reach them
+    would let a request ask the output directory for kinds of file it has no
+    business handing out, so they get their own root and their own set.
+    """
+    out_dir = tmp_path / "uiout"
+    out_dir.mkdir()
+    shots = tmp_path / "flyby"
+    shots.mkdir()
+    (shots / "pin-001-down.jpg").write_bytes(b"\xff\xd8jpeg")
+    (shots / "pin-paste-order.txt").write_text("x", encoding="utf-8")
+    (shots / "notes.exe").write_bytes(b"MZ")
+    (tmp_path / "secret.txt").write_text("not yours", encoding="utf-8")
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path)) as (_, port):
+        status, headers, body = call(port, "/api/paste/shots/pin-001-down.jpg")
+        assert status == 200 and body == b"\xff\xd8jpeg"
+        assert headers["Content-Type"] == "image/jpeg"
+
+        for escape in ("/api/paste/shots/../secret.txt",
+                       "/api/paste/shots/..%2Fsecret.txt",
+                       "/api/paste/shots/a/../../secret.txt",
+                       "/api/paste/shots//etc/passwd",
+                       "/api/paste/shots/C:%5CWindows%5Cwin.ini",
+                       "/api/paste/shots/notes.exe",
+                       "/api/paste/shots/pin-paste-order.txt"):
+            status, _, body = call(port, escape)
+            assert status in (400, 403, 404), escape
+            assert b"not yours" not in body and b"MZ" not in body, escape
+
+
+def test_a_paste_and_a_build_do_not_run_at_once(tmp_path):
+    """One job slot across both, and the refusal says which is in the way.
+
+    A build during a paste rewrites the very slabs being pasted, one chunk at a
+    time -- the same damage two builds do to each other, arriving more slowly.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    test_pipeline._layout(tmp_path)
+    gate = threading.Event()
+
+    def popen(command, **kwargs):
+        gate.wait(timeout=30)
+        return types.SimpleNamespace(stdout=iter([]), wait=lambda: 0)
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, popen=popen)) as (_, port):
+        status, started = call_json(port, "/api/paste", method="POST",
+                                    body={"stem": "pin"})
+        assert status == 202
+        try:
+            # Wait for the worker to be inside the stub rather than racing it.
+            for _ in range(500):
+                _, snapshot = call_json(port, f"/api/paste/{started['job']}")
+                if any(e["stage"] == "running" for e in snapshot["events"]):
+                    break
+                time.sleep(0.02)
+            status, refused = call_json(port, "/api/build", method="POST",
+                                        body={"source": only_source(port)})
+            assert status == 409
+            assert "A paste is running" in refused["error"]
+        finally:
+            gate.set()
+
+
+# -- windows only --------------------------------------------------------------
+
+def test_the_paste_screen_reports_the_platform_rather_than_offering_a_button(
+        tmp_path):
+    """Off Windows there is no control, and the server is what says so.
+
+    Generating and building a town is pure Python and runs anywhere; this half
+    is PowerShell over Win32. A disabled button reads as a broken feature, so
+    the page renders the sentence instead -- and the endpoints refuse there
+    too, because hiding a control is a UI decision and this is the rule.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns()
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, windows=False, popen=popen)
+                 ) as (_, port):
+        _, options = call_json(port, "/api/options")
+        assert options["paste"]["available"] is False
+        assert "Windows only" in options["paste"]["note"]
+
+        status, data = call_json(port, "/api/paste", method="POST",
+                                 body={"stem": "pin"})
+        assert status == 400 and "Windows only" in data["error"]
+        status, data = call_json(port, "/api/paste/preflight", method="POST",
+                                 body={})
+        assert status == 400 and "Windows only" in data["error"]
+
+    assert popen.calls == []
+
+    # And on Windows the same call offers the control.
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path)) as (_, port):
+        _, options = call_json(port, "/api/options")
+        assert options["paste"]["available"] is True
+        assert options["paste"]["note"] == ""
+
+
+# -- safety: named operations, on this side too --------------------------------
+
+def test_the_paste_endpoint_takes_no_command_string(tmp_path):
+    """Same rule as the build form, and it matters more here.
+
+    These values become arguments to a PowerShell script, so "typed parameters,
+    unknown keys are an error" is the difference between an API and a way to
+    run things. There is no field for a recipe, a flag or a path.
+    """
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path)) as (_, port):
+        for smuggled in ({"recipe": "tiled"}, {"cmd": "review.ps1"},
+                         {"args": ["-Recipe", "tiled"]}, {"out_dir": "/etc"},
+                         {"slab": "x.slab.txt"}, {"shell": True}):
+            status, data = call_json(port, "/api/paste", method="POST",
+                                     body={"stem": "pin", **smuggled})
+            assert status == 400, smuggled
+            assert "unknown field" in data["error"]
+            assert list(smuggled)[0] in data["error"]
+
+        bad = [
+            ({"stem": "../../etc/passwd"}, "stem"),
+            ({"stem": "pin; rm -rf /"}, "stem"),
+            ({"stem": "notabuild"}, "stem"),
+            ({"stem": 3}, "stem"),
+            ({"stem": "pin", "name": "../escape"}, "name"),
+            ({"stem": "pin", "name": "$(whoami)"}, "name"),
+            ({"stem": "pin", "name": 7}, "name"),
+            ({"stem": "pin", "shot_every": "2"}, "shot_every"),
+            ({"stem": "pin", "shot_every": 0}, "shot_every"),
+            ({"stem": "pin", "shot_every": True}, "shot_every"),
+        ]
+        for field, name in bad:
+            status, data = call_json(port, "/api/paste", method="POST",
+                                     body=field)
+            assert status == 400, field
+            assert name in data["error"], (field, data)
+
+        # And a cross-origin form post cannot reach the parser at all.
+        status, data = call_json(
+            port, "/api/paste", method="POST", body={"stem": "pin"},
+            content_type="application/x-www-form-urlencoded")
+        assert status == 400 and "application/json" in data["error"]
+
+
+def test_the_paste_driver_never_composes_a_shell_command(tmp_path):
+    """Argument lists, and nothing from a request inside a command line.
+
+    Two claims, and the second is the one worth a test. The module never asks
+    for a shell. And every value that came from a request is its own argv entry
+    behind its own switch: there is no string for a stem or a name to be quoted
+    into, so there is nothing to quote it wrongly.
+
+    `uiserver.py` keeps its own guard -- `test_nothing_in_the_server_can_reach_a_shell`
+    -- which is why this work is in a module of its own rather than a
+    convenient import there.
+    """
+    source = pathlib.Path(pastedrive.__file__).read_text(encoding="utf-8")
+    body = source.split('"""', 2)[-1]
+    # Not `pty.`, which `uiserver`'s copy of this list can afford and this one
+    # cannot: "is empty." contains it. A blunt check that fires on prose is a
+    # check somebody deletes.
+    for forbidden in ("shell=True", "os.system", "os.popen", "os.exec",
+                      "eval(", "exec(", "__import__", "import pty",
+                      "commands.getoutput"):
+        assert forbidden not in body, forbidden
+
+    out_dir = tmp_path / "uiout"
+    plant_plan(out_dir)
+    popen = spawns(["1/3 : a.slab.txt"])
+    run = probes()
+
+    with running(out_dir=out_dir, roots=(tmp_path,),
+                 palette_factory=palette_factory,
+                 paste_driver=driver(tmp_path, run=run, popen=popen)) as (_, port):
+        assert start_paste(port, stem="pin", name="grab_01",
+                           shot_every=5)["state"] == "done"
+
+    command, kwargs = popen.calls[0]
+    assert isinstance(command, list)
+    assert all(isinstance(part, str) for part in command)
+    assert kwargs.get("shell") in (None, False)
+    for switch, value in (("-Recipe", "tiled"), ("-Name", "grab_01"),
+                          ("-Stem", "pin"), ("-ShotEvery", "5")):
+        assert command[command.index(switch) + 1] == value, switch
+    # Nothing request-shaped is ever inside a -Command string. The one
+    # -Command in the module carries a path built from __file__ and no more.
+    inlines = [c[c.index("-Command") + 1] for c in run.calls if "-Command" in c]
+    assert inlines, "the window probe stopped being made"
+    for inline in inlines:
+        assert "ts.ps1" in inline and "review.ps1" not in inline
+        for smuggled in ("grab_01", "-Recipe", "-Stem"):
+            assert smuggled not in inline, smuggled
+
+
+def test_the_manifest_order_is_the_paste_order_and_nothing_sorts_it(tmp_path):
+    """A unit test, with names alphabetising into the wrong order.
+
+    The chunk covering the anchor cell is written LAST so the anchor is still
+    bare board for every paste before it. ``anchor.slab.txt`` sorts first;
+    reading it first is a quarter of a map standing a course proud.
+    """
+    out_dir = tmp_path / "out"
+    names = plant_plan(out_dir)
+    assert pastedrive.read_paste_order(out_dir, "pin") == names
+    assert names != sorted(names)
+
+    plans = pastedrive.scan_plans(out_dir)
+    assert [p["stem"] for p in plans] == ["pin"]
+    assert [f["file"] for f in plans[0]["files"]] == names
+    assert plans[0]["missing"] == [] and plans[0]["chunks"] == 3
+
+    (out_dir / "b.slab.txt").unlink()
+    assert pastedrive.scan_plans(out_dir)[0]["missing"] == ["b.slab.txt"]
+    with pytest.raises(pastedrive.PasteRefused, match="b.slab.txt"):
+        pastedrive.read_paste_order(out_dir, "pin")
+    with pytest.raises(pastedrive.PasteRefused, match="paste-order"):
+        pastedrive.read_paste_order(out_dir, "nosuch")
+
+
+@pytest.mark.parametrize("said,state", [
+    ("build plane off (rgb(71,71,71))", "off"),
+    ("  build plane off\n", "off"),
+    (PLANE_ON, "on"),
+    (PLANE_UNKNOWN, "unknown"),
+    ("build plane on", "unreadable"),
+    ("BUILD PLANE OFF", "unreadable"),
+    ("", "unreadable"),
+    (None, "unreadable"),
+    (42, "unreadable"),
+])
+def test_reading_the_build_plane_recognises_off_and_refuses_everything_else(
+        said, state):
+    """The classifier on its own, including the readings nobody plans for.
+
+    ``build plane on`` in lower case is not the script's message, so it is
+    unreadable rather than "on" -- and unreadable refuses, which is the safe
+    direction. Only the exact prefix `ts.ps1` prints for a plane that is DOWN
+    lets a run start.
+    """
+    assert pastedrive.read_plane_state(said) == state
+    assert state in pastedrive.PLANE_STATES
+
+
+def test_an_empty_precondition_set_is_not_a_pass():
+    """"Everything checked out" from nothing having been checked.
+
+    Same failure as a probe that answers without seeing the toolbar, one level
+    up: `all([])` is True, and a preflight that ran no probes would sail
+    through it.
+    """
+    assert pastedrive.Preflight().ok is False
+    assert "nothing was checked" in pastedrive.Preflight().refusal()
+    skipped = pastedrive.Preflight(
+        checks=(pastedrive.Check("build plane", None, "not checked"),))
+    assert skipped.ok is False
+    ran = pastedrive.Preflight(
+        checks=(pastedrive.Check("build plane", True, "down"),))
+    assert ran.ok is True and ran.refusal() == ""
+
+
+# -- the page ------------------------------------------------------------------
+
+def test_the_page_separates_building_from_verifying(tmp_path):
+    """A build that wrote its slabs succeeded, whatever verify then found.
+
+    Forest Church produces FAIL findings -- prop overlaps, a floating fringe,
+    both tracked -- and the header used to read BUILD FAILED over four slabs
+    that were written and are perfectly pasteable. That sends a reader looking
+    for output that is already on disk. The findings themselves are not
+    softened: they stay at FAIL, first in the list and counted on the chip.
+    """
+    with running(out_dir=tmp_path, roots=(tmp_path,),
+                 palette_factory=palette_factory) as (_, port):
+        _, _, raw = call(port, "/app.js")
+        _, _, html = call(port, "/")
+    # Comments stripped, because the file explains at length what it stopped
+    # saying and the words it stopped saying are in that explanation.
+    js = re.sub(r"/\*.*?\*/", "", raw.decode("utf-8"), flags=re.S)
+
+    assert "BUILD FAILED" not in js
+    assert "VERIFY: FAULTS FOUND" in js
+    assert "VERIFY: CLEAN" in js
+    # The failure verdict that remains is for a job that produced nothing.
+    assert "BUILD STOPPED" in js
+    # Two rows in the panel, not one.
+    assert b'id="verify-row"' in html and b'id="verdict-word"' in html
+
+
+def test_the_ok_findings_start_collapsed_and_nothing_else_does(tmp_path):
+    """Twenty findings, fifteen of them passes, buries the five that are not.
+
+    So `ok` starts collapsed -- collapsed, not dropped: the row is in the DOM,
+    the chip carries the count, one click has them back. `fail` and `warn` are
+    never collapsed, and the rule is one named set so it cannot drift into
+    them.
+    """
+    with running(out_dir=tmp_path, roots=(tmp_path,),
+                 palette_factory=palette_factory) as (_, port):
+        _, _, raw = call(port, "/app.js")
+        _, _, html = call(port, "/")
+    js = raw.decode("utf-8")
+
+    declaration = re.search(r"const COLLAPSED = new Set\(\[([^\]]*)\]\);", js)
+    assert declaration, "the collapse rule is no longer one named set"
+    collapsed = declaration.group(1)
+    assert '"pass"' in collapsed
+    assert "fail" not in collapsed and "warn" not in collapsed
+    # Collapsed by class, so the row is still rendered and still findable.
+    assert 'row.classList.add("is-hidden")' in js
+    assert b"starts collapsed" in html
+
+
+def test_the_page_names_the_paste_endpoints_and_the_tab(tmp_path):
+    """The seam the build screen left: one tab, one section, one set of rows."""
+    with running(out_dir=tmp_path, roots=(tmp_path,),
+                 palette_factory=palette_factory) as (_, port):
+        _, _, html = call(port, "/")
+        _, _, js = call(port, "/app.js")
+
+    assert b'data-screen="paste"' in html
+    assert b'id="screen-paste"' in html
+    for route in ("/api/paste/plans", "/api/paste/preflight", "/api/paste",
+                  "/api/paste/shots/"):
+        assert route.encode() in js, route

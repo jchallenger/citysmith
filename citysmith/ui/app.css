@@ -199,10 +199,34 @@ button[disabled] { opacity: 0.55; cursor: progress; }
 .verdict-counts { font-family: var(--mono); font-size: 0.85rem; color: var(--ink-dim); }
 .verdict-line { margin: 0.35rem 0 0; font-family: var(--mono); font-size: 0.85rem; }
 
-#verdict-panel.lv-fail { border-color: var(--fail); }
-#verdict-panel.lv-fail .verdict-word { color: var(--fail); }
-#verdict-panel.lv-warn .verdict-word { color: var(--warn); }
-#verdict-panel.lv-pass .verdict-word { color: var(--pass); }
+/* The second verdict. It is a separate row with its own rule above it because
+ * it answers a different question: the first says whether files were written,
+ * this says what verify thinks of the map in them. Merged, a map with known
+ * faults read as a build that produced nothing. */
+.verdict.verify {
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+.verdict.verify .verdict-word { font-size: 0.95rem; }
+
+/* "BUILT" is neutral ink, whatever verify found -- it is a statement about
+ * files on disk. Only `showFailure`, which is a job that never produced any,
+ * paints the top word red. */
+#verdict-panel .verdict-word { color: var(--ink); }
+#verdict-panel.lv-fail > .verdict > .verdict-word { color: var(--fail); }
+
+/* Id-scoped so they outrank the neutral rule above, which is id-scoped too. */
+#verdict-panel .verify.lv-fail .verdict-word { color: var(--fail); }
+#verdict-panel .verify.lv-warn .verdict-word { color: var(--warn); }
+#verdict-panel .verify.lv-pass .verdict-word { color: var(--pass); }
+/* `showFailure` empties the verify row and hides it: a job that produced
+ * nothing has no map for verify to have an opinion about. */
+#verdict-panel .verify.is-hidden { display: none; }
+
+#paste-verdict-panel.lv-fail { border-color: var(--fail); }
+#paste-verdict-panel.lv-fail .verdict-word { color: var(--fail); }
+#paste-verdict-panel.lv-pass .verdict-word { color: var(--pass); }
 
 /* -- progress log ---------------------------------------------------------- */
 
@@ -336,6 +360,87 @@ button[disabled] { opacity: 0.55; cursor: progress; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: 0.6rem 0 0;
+}
+
+/* -- the paste screen ------------------------------------------------------ */
+
+/* Off Windows this is the whole left column: the sentence, and no control. */
+.platform {
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: 8px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-bg);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.checks-list { list-style: none; margin: 0.5rem 0 0.2rem; padding: 0; display: grid; gap: 0.35rem; }
+
+.check-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.1rem 0.55rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 7px;
+  border-left: 3px solid var(--line);
+  background: var(--bg);
+}
+.check-row .lvl {
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding-top: 0.1rem;
+}
+.check-row .check { grid-row: 1; font-weight: 600; font-size: 0.86rem; }
+.check-row .detail {
+  grid-column: 1 / -1;
+  margin: 0.1rem 0 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+/* The probe's own words, kept. A reading you cannot see is a reading you
+ * cannot argue with, and a confident "ON" here was once a photograph of a
+ * field of grass. */
+.check-row .raw {
+  grid-column: 1 / -1;
+  margin: 0.35rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink-dim);
+}
+.check-row.st-ok { border-left-color: var(--pass); background: var(--pass-bg); }
+.check-row.st-ok .lvl { color: var(--pass); }
+.check-row.st-fail { border-left-color: var(--fail); background: var(--fail-bg); }
+.check-row.st-fail .lvl { color: var(--fail); }
+.check-row.st-skipped { border-left-color: var(--line); }
+.check-row.st-skipped .lvl { color: var(--ink-dim); }
+
+.hint.st-ok { color: var(--pass); }
+.hint.st-fail { color: var(--fail); }
+
+/* One row per chunk, with the grabs taken for it. Small enough that a
+ * hundred-chunk run stays scannable; click through for native pixels. */
+.paste-chunks .shots {
+  grid-column: 2;
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+.paste-chunks .shots img {
+  display: block;
+  width: 15rem;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 5px;
 }
 
 /* -- reference map --------------------------------------------------------- */
