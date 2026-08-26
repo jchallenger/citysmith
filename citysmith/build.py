@@ -3108,7 +3108,8 @@ FENCE_STYLES: dict[str, FenceStyle] = {
     # enclosure read as a garden fence on the board -- `paling` was the
     # tallest timber the palette had, and nothing had measured it. Corners are
     # a bundle of posts, so unlike the paling L they can take any turn.
-    "palisade": FenceStyle("palisade_wall", "palisade_corner", on_cells=True),
+    "palisade": FenceStyle("palisade_wall", "palisade_corner",
+                           post_min_turn=60.0, on_cells=True),
     # A hedge built exactly like the wall, to see whether a living boundary
     # survives being laid on a survey line.
     "hedge": FenceStyle("field_hedge", None),
@@ -3138,10 +3139,42 @@ def _is_closed(run) -> bool:
     return abs(x0 - x1) <= 0.01 and abs(z0 - z1) <= 0.01
 
 
+def _close_diagonals(cells: set) -> set:
+    """Add the cells that stop a stair-stepped run being see-through.
+
+    **A full cell of daylight is closed by a full-cell piece; a DIAGONAL step
+    is not.** `FenceStyle.on_cells` argues that stair-stepping is safe for
+    this kit because the piece fills its cell, and that is true where two
+    cells meet along an edge. Where the run steps corner-to-corner the two
+    pieces touch at a *point*, and what is between them is a slit straight
+    through the wall.
+
+    Measured on Sedgewater's barricade before this existed: 116 cells in
+    **34 four-connected pieces**, 14 of them with no orthogonal neighbour at
+    all. On the board that is a stockade you can see the field through, which
+    is the failure this repo already records three times over as a comb, a
+    rank of fins and a lattice of piers -- arrived at once more from a
+    direction that looked safe.
+
+    One connector per diagonal, chosen deterministically so a rebuild is
+    byte-identical.
+    """
+    out = set(cells)
+    for x, z in sorted(cells):
+        for dx, dz in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+            if (x + dx, z + dz) not in cells:
+                continue
+            if (x + dx, z) in out or (x, z + dz) in out:
+                continue
+            out.add((x + dx, z))
+    return out
+
+
 def _lay_palisade(b: Builder, tm, grade: float,
                   taper: dict[tuple[int, int], float | None],
                   scatter: "Scatter | None",
-                  panel, post, paved: frozenset, runs) -> int:
+                  panel, post, paved: frozenset, runs,
+                  min_turn: float = 0.0) -> int:
     """Lay a boundary of full-cell tiles on the cell lattice.
 
     The counterpart to the surveyed-line pass above, for a kit whose pieces
@@ -3153,17 +3186,62 @@ def _lay_palisade(b: Builder, tm, grade: float,
     One piece per cell of the stroked run, turned so its face is square to the
     run rather than to the world -- a stair-stepped line of full-cell pieces
     has no daylight in it, but a rank of pieces all facing north through a
-    corner still reads as a mistake. The turn is taken from which of the
-    cell's neighbours are also on the run, which is the cell-grid equivalent
-    of the bearing the other pass uses.
+    corner still reads as a mistake.
+
+    **A STAIR-STEP IS NOT A CORNER, and reading it as one is what put two
+    materials in a single run.** The first version asked whether a cell had
+    both an east-west and a north-south neighbour on the run, and called that
+    a turn. On a rasterised diagonal that is true at *every step*, so the
+    shoulders of a ring came out speckled with round-log corner bundles
+    between flat stake panels -- visibly two different materials on one
+    barricade, and the defect this docstring exists to prevent recurring.
+    Measured on Sedgewater: the source ring is a smooth 16-gon whose turns run
+    1.2 to 53.9 degrees, **not one of them a real corner**, and 21 of its 116
+    cells were built as corners anyway.
+
+    So a corner is decided on the **source polyline**, where an angle actually
+    exists, against ``min_turn`` -- the same policy `FenceStyle.post_min_turn`
+    states for the surveyed pass. A smooth ring gets none and a square pen
+    gets four, which is what each should have.
     """
     from . import raster as R
 
     laid = 0
     for run in runs:
-        on_run = {c for c in R._stroke_line(run, 1.0, tm.width, tm.depth)}
+        on_run = _close_diagonals(
+            {c for c in R._stroke_line(run, 1.0, tm.width, tm.depth)})
         if not on_run:
             continue
+
+        # Real corners: source vertices whose turn is sharp enough to want a
+        # piece of its own, mapped onto the cell they fall in.
+        corners: set[tuple[int, int]] = set()
+        if post is not None and min_turn > 0:
+            pts = run[:-1] if _is_closed(run) else run
+            n = len(pts)
+            for i in range(n):
+                if not _is_closed(run) and (i == 0 or i == n - 1):
+                    continue
+                a, c0 = pts[i - 1], pts[(i + 1) % n]
+                bx, bz = pts[i]
+                v1 = (bx - a[0], bz - a[1])
+                v2 = (c0[0] - bx, c0[1] - bz)
+                turn = abs(math.degrees(math.atan2(
+                    v1[0] * v2[1] - v1[1] * v2[0],
+                    v1[0] * v2[0] + v1[1] * v2[1])))
+                if turn < min_turn:
+                    continue
+                # **Snap to the nearest cell actually on the run, rather than
+                # truncating.** A vertex often lands exactly on a cell corner
+                # -- (50.0, 56.0) is the meeting point of four -- and `int()`
+                # then names one the stroke did not include, so the corner
+                # silently became a wall panel. Three of a square pen's four
+                # corners appeared; the fourth was this.
+                best = min(on_run,
+                           key=lambda c: (c[0] + 0.5 - bx) ** 2
+                           + (c[1] + 0.5 - bz) ** 2)
+                if (best[0] + 0.5 - bx) ** 2 + (best[1] + 0.5 - bz) ** 2 <= 2.0:
+                    corners.add(best)
         # **Which way the bracing faces, and it is not cosmetic.** The panel
         # is directional -- pointed stakes on one face, diagonal bracing and a
         # walk on the other -- so a rank of them turned the wrong way reads as
@@ -3188,11 +3266,17 @@ def _lay_palisade(b: Builder, tm, grade: float,
             if drop is None:
                 continue
 
-            along_x = (x - 1, z) in on_run or (x + 1, z) in on_run
-            along_z = (x, z - 1) in on_run or (x, z + 1) in on_run
+            # **The DOMINANT local axis, not "east-west if there is any
+            # east-west neighbour".** At a stair-step both are true, and
+            # taking the first one made the panel face across the run for
+            # every second cell of a diagonal. Looking two cells each way
+            # settles which direction the run is actually going.
+            span_x = sum(1 for d in (-2, -1, 1, 2) if (x + d, z) in on_run)
+            span_z = sum(1 for d in (-2, -1, 1, 2) if (x, z + d) in on_run)
+            along_x = span_x >= span_z
             piece = panel
-            if along_x and along_z and post is not None:
-                piece = post                  # the run turns here
+            if (x, z) in corners and post is not None:
+                piece = post                  # a real turn in the source line
                 rot = 0
             elif along_x:
                 # Runs east-west, so it presents a north or a south face.
@@ -3212,6 +3296,86 @@ def _lay_palisade(b: Builder, tm, grade: float,
             if scatter is not None:
                 scatter.reserve(piece, x + 0.5, z + 0.5, here, rot)
             laid += 1
+
+        laid += _hang_palisade_gate(b, tm, grade, taper, on_run, paved)
+    return laid
+
+
+#: The widest opening still read as a gateway rather than as a road the
+#: boundary runs alongside. A carriageway is at most 4 tiles; 6 leaves room
+#: for the stroke to clip a cell either side without swallowing a whole edge.
+GATE_MAX_CELLS = 6
+
+
+def _hang_palisade_gate(b: Builder, tm, grade: float,
+                        taper: dict[tuple[int, int], float | None],
+                        on_run: set, paved: frozenset) -> int:
+    """Put a gate in the opening a road leaves through a palisade.
+
+    **A barricade with a hole in it is not enclosed.** The ring skips its own
+    cells wherever a carriageway crosses -- correctly, or the road would be
+    walled off -- and on Sedgewater that leaves a three-cell, fifteen-foot gap
+    with nothing whatever in it. This project has been here before: `CLAUDE.md`
+    records the town gate standing open for eleven revisions with
+    `city_gate_arch` pinned and unused.
+
+    The piece is 2.00 x 2.75 x 0.50 -- two cells wide, and **taller than the
+    2.0 wall it hangs in**, so the lintel stands proud the way a gate should.
+    It is seated on a cell EDGE rather than centred in the cell: a 0.5-deep
+    tile centred in a 1.0 cell puts its min corner at a quarter tile, which is
+    precisely what the off-grid canary exists to catch.
+    """
+    gate = b.palette.resolve("palisade_gate")
+    if gate is None:
+        return 0
+
+    # The opening: cells the run wanted but a road took.
+    gap = {c for c in on_run
+           if tm.inside(*c) and tm.surface[c[1]][c[0]] in paved}
+    if len(gap) < 2:
+        return 0
+
+    # **Group the opening, and hang ONE gate in it.** Cell by cell this put
+    # seventeen gates along a single boundary, because a road running *beside*
+    # a fence paves every cell of that stretch and every pair of them looked
+    # like a crossing. An opening is a contiguous run, a crossing is a SHORT
+    # one, and a long paved stretch is a road the boundary happens to follow
+    # -- which wants no gate at all.
+    runs: list[list[tuple[int, int]]] = []
+    seen: set = set()
+    for cell in sorted(gap):
+        if cell in seen:
+            continue
+        group = [cell]
+        seen.add(cell)
+        queue = [cell]
+        while queue:
+            x, z = queue.pop()
+            for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (x + dx, z + dz)
+                if n in gap and n not in seen:
+                    seen.add(n)
+                    group.append(n)
+                    queue.append(n)
+        runs.append(group)
+
+    laid = 0
+    for group in runs:
+        if not 2 <= len(group) <= GATE_MAX_CELLS:
+            continue
+        xs = sorted({c[0] for c in group})
+        zs = sorted({c[1] for c in group})
+        mid = sorted(group)[len(group) // 2]
+        x, z = mid
+        if len(xs) >= len(zs):                       # the opening runs E-W
+            cx, cz, rot = x + 0.0, z + 0.25, 0
+        else:
+            cx, cz, rot = x + 0.25, z + 0.0, 6
+        drop = taper.get((x, z), 0.0)
+        if drop is None:
+            continue
+        b.add(place_centered(gate, cx, cz, grade - drop, rot))
+        laid += 1
     return laid
 
 
@@ -3279,7 +3443,7 @@ def _lay_fences(b: Builder, tm, grade: float,
         # The chosen style is a cell-laid one, so it was asked for by name:
         # honour it on everything.
         return _lay_palisade(b, tm, grade, taper, scatter, panel_asset,
-                             post_asset, paved, tm.fences)
+                             post_asset, paved, tm.fences, spec.post_min_turn)
 
     laid_rings = 0
     if ring_runs and enclosure_style and enclosure_style != style:
@@ -3289,7 +3453,8 @@ def _lay_fences(b: Builder, tm, grade: float,
             ring_post = b.palette.resolve(ring_spec.post) if ring_spec.post else None
             if ring_panel is not None and ring_spec.on_cells:
                 laid_rings = _lay_palisade(b, tm, grade, taper, scatter,
-                                           ring_panel, ring_post, paved, ring_runs)
+                                           ring_panel, ring_post, paved,
+                                           ring_runs, ring_spec.post_min_turn)
                 ring_runs = []
 
     for run in field_runs + ring_runs:

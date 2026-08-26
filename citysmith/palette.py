@@ -685,6 +685,15 @@ MEDIEVAL = Style(
         "palisade_wall_short": [
             _tile(name=("Palisade wall short 1x2",), **_MED),
         ],
+        # The gate. 2.00 x 2.75 x 0.50 -- two cells wide, and TALLER than the
+        # wall it hangs in (2.0), which is what a gate is: the lintel stands
+        # proud. It lives in `Doors` rather than `Palisade`, so the kit rule
+        # ("the kit is the folder") does not find it and a search for a
+        # palisade piece never turns it up -- the same reason `city_gate_arch`
+        # sat pinned and unused for eleven revisions.
+        "palisade_gate": [
+            _tile(name=("Doors - Palisade",), **_MED),
+        ],
         # Outdoor surfaces beyond the three the map used to have. Every pick
         # here was read off a board (`tools/surface_probe.py` under
         # `review.ps1 360`), because nothing in the catalog says what a tile

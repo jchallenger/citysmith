@@ -512,10 +512,53 @@ snapping.
 So a tile boundary is laid on **cells** (`FenceStyle.on_cells`), and for this
 kit that is right rather than a compromise. §2.2 argues against stair-stepping
 because a thin panel run leaves daylight at every step -- the comb, the rank of
-fins. A palisade piece is a **full cell deep**, so there is no daylight to
-leave; the same reasoning `city_wall_core` is built on. Use the 1x1 piece
+fins. A palisade piece is a **full cell deep**, so an ORTHOGONAL step has no
+daylight to leave; the same reasoning `city_wall_core` is built on.
+
+**That sentence used to stop one clause earlier, and it was wrong.** A full
+cell closes a full cell of daylight; it does not close a *diagonal* step. Two
+pieces stepping corner to corner touch at a **point**, and what is between
+them is a slit straight through the wall. Measured on Sedgewater's barricade:
+116 cells in **34 four-connected pieces**, 14 of them with no orthogonal
+neighbour at all -- a stockade you can see the field through, found by
+looking at the board and not by reading the collider. `_close_diagonals` adds
+one connector per diagonal step (116 -> 149 cells, 34 pieces -> 1, 14 slits ->
+0) and `test_a_stair_stepped_barricade_is_not_see_through` holds the line.
+
+This is the fourth time this repo has recorded a stair-stepped run of pieces
+reading as a comb, and the first time it arrived through a piece whose
+measurements said it could not happen. Use the 1x1 piece
 (`Palisade wall tall 1x2`, 1.00 x 2.00 x 1.00) and not the 2x2, because a
 2-wide piece cannot sit on a one-cell lattice run.
+
+**The corner, which is not where the cells say it is.** Asking whether a cell
+has both an east-west and a north-south neighbour on the run calls every step
+of a rasterised diagonal a turn. On Sedgewater's ring -- a smooth 16-gon whose
+turns run 1.2 to 53.9 degrees, **not one of them a real corner** -- that built
+21 of 116 cells as round-log corner bundles between flat stake panels: two
+materials on one barricade, and only on the angled stretches. A corner is
+decided on the **source polyline** against `post_min_turn`, where an angle
+actually exists. A smooth ring gets none, a square pen gets four.
+
+Two smaller ones fell out of testing that: the panel's facing at a step must
+take the *dominant* local axis, or every second cell of a diagonal faces
+across the run; and a vertex mapped to a cell by truncation lands on the wrong
+one when it sits exactly on a cell corner, which is how a square pen showed
+three corners instead of four.
+
+**The gate.** The ring skips its own cells wherever a carriageway crosses --
+correctly, or the road would be walled off -- which left a three-cell,
+fifteen-foot opening with nothing in it. `Doors - Palisade` (2.00 x 2.75 x
+0.50) is the kit's own gate, and it sits in folder `Doors` rather than
+`Palisade`, so the kit rule never finds it: the same way `city_gate_arch` sat
+pinned and unused for eleven revisions. It is taller than the 2.0 wall it
+hangs in, which is what a gate should be.
+
+Hung cell by cell it produced **seventeen gates along one boundary**, because
+a road running *beside* a fence paves every cell of that stretch and every
+pair of them looked like a crossing. An opening is a contiguous group, a
+crossing is a SHORT one, and a long paved stretch is a road the boundary
+happens to follow -- which wants no gate at all (`GATE_MAX_CELLS`).
 
 **The facing, which is the one that had to be read off a board.** The panel is
 directional: pointed stakes on one face, diagonal bracing and a walk platform

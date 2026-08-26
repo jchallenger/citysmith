@@ -217,3 +217,145 @@ def test_the_enclosure_material_is_taller_than_the_field_material():
     ring = p.resolve(FENCE_STYLES[DEFAULT_ENCLOSURE_STYLE].panel)
     field = p.resolve(FENCE_STYLES[DEFAULT_FENCE_STYLE].panel)
     assert ring.size_y > field.size_y * 1.5
+
+
+# -- the review: one run, one material ---------------------------------------
+
+def _square_pen():
+    """A pen with four REAL corners, to prove the corner piece still fires."""
+    layout = _keep()
+    # Clear of the road at z=14, so the pen's corners are not paved over --
+    # the first version overlapped it and lost a corner to the carriageway.
+    layout.fences = [[(16.0, 22.0), (50.0, 22.0), (50.0, 56.0),
+                      (16.0, 56.0), (16.0, 22.0)]]
+    return layout
+
+
+def _palisade_pieces(tm, p):
+    builder = build_from_tilemap(tm, p, storeys=2)
+    byid = {a.id: a for a in p.catalog.assets}
+    from collections import Counter
+    c = Counter()
+    for pl in builder.placements:
+        a = byid.get(pl.asset_id)
+        if a and "Palisade" in a.name:
+            c[a.name] += 1
+    return builder, c
+
+
+def test_a_stair_step_is_not_a_corner():
+    """**The defect this whole section exists for.** Asking whether a cell has
+    both an east-west and a north-south neighbour calls every step of a
+    rasterised diagonal a turn, so a smooth ring came out speckled with
+    round-log corner bundles between flat stake panels -- two materials on one
+    barricade. Measured on Sedgewater: a 16-gon whose turns run 1.2 to 53.9
+    degrees, not one of them a real corner, and 21 of 116 cells built as
+    corners anyway.
+    """
+    p = _palette()
+    _, pieces = _palisade_pieces(R.rasterize(_keep()), p)
+    assert pieces["Palisade wall tall 1x2"] > 40, pieces
+    assert pieces["Palisade wall tall corner"] == 0, \
+        f"a smooth ring grew {pieces['Palisade wall tall corner']} corners"
+
+
+def test_a_real_corner_still_gets_a_corner_piece():
+    """The other half: the fix must not simply delete the corner piece."""
+    p = _palette()
+    _, pieces = _palisade_pieces(R.rasterize(_square_pen()), p)
+    assert pieces["Palisade wall tall corner"] == 4, \
+        f"a square pen has four corners, got {pieces}"
+
+
+def test_a_palisade_run_is_one_material():
+    """Stated as the invariant rather than as a count: whatever the shape, a
+    boundary must not mix its wall piece and its corner piece along a stretch
+    that is visually straight."""
+    p = _palette()
+    for layout in (_keep(), _square_pen()):
+        _, pieces = _palisade_pieces(R.rasterize(layout), p)
+        corners = pieces["Palisade wall tall corner"]
+        walls = pieces["Palisade wall tall 1x2"]
+        assert corners <= 4, f"{corners} corners on one run is stair-stepping"
+        assert walls > corners * 5, (walls, corners)
+
+
+# -- the gate -----------------------------------------------------------------
+
+def test_a_road_through_the_barricade_gets_a_gate():
+    """A barricade with a hole in it is not enclosed. The ring skips its own
+    cells where a carriageway crosses -- correctly -- and that left a
+    fifteen-foot gap with nothing in it."""
+    p = _palette()
+    layout = _keep()
+    # Run the road through the ring rather than past it.
+    from citysmith.layout import LayoutRoad
+    layout.roads = [LayoutRoad(points=[(33.0, 0.0), (33.0, 70.0)], width=4.0)]
+    tm = R.rasterize(layout)
+    builder = build_from_tilemap(tm, p, storeys=2)
+    gate = p.resolve("palisade_gate")
+    assert gate is not None
+    assert any(pl.asset_id == gate.id for pl in builder.placements), \
+        "the road cut an opening and nothing was hung in it"
+
+
+def test_the_gate_stands_proud_of_the_wall_it_hangs_in():
+    p = _palette()
+    assert p.resolve("palisade_gate").size_y > p.resolve("palisade_wall").size_y
+
+
+def _four_connected_pieces(cells):
+    from collections import deque
+    seen, comps = set(), 0
+    for c in cells:
+        if c in seen:
+            continue
+        comps += 1
+        q = deque([c])
+        seen.add(c)
+        while q:
+            x, z = q.popleft()
+            for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (x + dx, z + dz)
+                if n in cells and n not in seen:
+                    seen.add(n)
+                    q.append(n)
+    return comps
+
+
+def test_a_stair_stepped_barricade_is_not_see_through():
+    """**A full-cell piece closes a full cell of daylight; it does not close a
+    DIAGONAL step.** Two pieces stepping corner-to-corner touch at a point,
+    and what is between them is a slit straight through the wall.
+
+    `FenceStyle.on_cells` argued stair-stepping was safe for this kit because
+    the piece fills its cell -- true along an edge, false at a corner.
+    Measured on Sedgewater before the fix: 116 ring cells in **34
+    four-connected pieces**, 14 of them with no orthogonal neighbour at all.
+    That is a stockade you can see the field through, and it is this repo's
+    comb / fins / lattice-of-piers failure arriving from a direction that
+    looked safe.
+    """
+    from citysmith.build import _close_diagonals
+
+    tm = R.rasterize(_keep())
+    ring = [r for r in tm.fences if len(r) >= 4][0]
+    raw = set(R._stroke_line(ring, 1.0, tm.width, tm.depth))
+    assert _four_connected_pieces(raw) > 1, \
+        "fixture is too axis-aligned to exercise the diagonal case"
+
+    closed = _close_diagonals(raw)
+    assert _four_connected_pieces(closed) == 1
+    assert all(any((c[0] + dx, c[1] + dz) in closed
+                   for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+               for c in closed), "a cell is still joined only at a corner"
+
+
+def test_closing_the_diagonals_is_deterministic():
+    """A rebuild has to be byte-identical; `boards.digest_of` depends on it."""
+    from citysmith.build import _close_diagonals
+
+    tm = R.rasterize(_keep())
+    raw = set(R._stroke_line([r for r in tm.fences if len(r) >= 4][0],
+                             1.0, tm.width, tm.depth))
+    assert _close_diagonals(raw) == _close_diagonals(set(sorted(raw)))
