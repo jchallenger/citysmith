@@ -29,5 +29,10 @@ citysmith = "citysmith.cli:main"
 [tool.setuptools.packages.find]
 include = ["citysmith*"]
 
+# The build UI is hand-written HTML/CSS/JS -- there is no bundler and no
+# build step, so the files ship as they are written.
+[tool.setuptools.package-data]
+"citysmith.ui" = ["*.html", "*.css", "*.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

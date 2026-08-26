@@ -50,6 +50,8 @@ This file is the internal engineering notes. User-facing docs:
 | `chatsession.py` | Holds the chat's spec history, and states what it cannot see. |
 | `pipeline.py` | One `build_town()` the CLI and the UI both call. Side effects live here. |
 | `cli.py` | Argument parsing and printing. Every decision is in `pipeline`. |
+| `uiserver.py` | Local web UI over `build_town`. Loopback, typed API, no deps. |
+| `ui/` | The page itself: hand-written HTML/CSS/JS, no bundler, no CDN. |
 
 ## Hard constraints
 
@@ -1559,8 +1561,12 @@ are genuine TaleSpire slabs and are the ground truth for the codec.
 
 ## Not built yet
 
-- Local UI. Deliberately deferred; `cli.py` is a thin shell over the core
-  modules so a UI can be added without touching generation code.
+- Paste and chat screens in the UI. The **build** screen is built --
+  `citysmith.uiserver.serve`, `python -m citysmith.uiserver` -- and it renders
+  the same `verify` findings the CLI prints, in full and worst first, beside
+  `city-raster.svg` and the chunk table **in paste order**. What it does not
+  do yet is drive a paste or hold a conversation; `_ROUTES` and the tab strip
+  in `ui/index.html` are where those go.
 - Creature/mini placement (`creatureCount` is always 0 in a v2 slab). This is
   why a scene pastes *marks* rather than a party: four contrasting floor tiles
   by the door, and the minis go on them by hand.

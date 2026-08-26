@@ -1,0 +1,353 @@
+/* citysmith build UI.
+ *
+ * Sized for a SECOND MONITOR, which on this desk is as often a tall narrow
+ * column as a wide one. So the layout is one column by default and only
+ * becomes two when there is genuinely room; nothing has a fixed width, every
+ * wide thing (the chunk table, the reference map, the paste help) scrolls
+ * inside its own box, and the page body never scrolls sideways.
+ *
+ * Nothing here truncates a finding. The report sentences are the product.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f4f3ef;
+  --panel: #ffffff;
+  --ink: #191817;
+  --ink-dim: #5d5a55;
+  --line: #d9d5cc;
+  --accent: #7a4f1d;
+  --accent-ink: #ffffff;
+
+  --fail: #a11c1c;
+  --fail-bg: #fbeaea;
+  --warn: #8a5a00;
+  --warn-bg: #fdf3e0;
+  --pass: #2c6b3f;
+  --pass-bg: #eaf3ec;
+
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --panel: #1e2024;
+    --ink: #e8e6e1;
+    --ink-dim: #9a968e;
+    --line: #33363c;
+    --accent: #c79351;
+    --accent-ink: #1a1408;
+
+    --fail: #ff8b84;
+    --fail-bg: #3a1e1e;
+    --warn: #e8bb6b;
+    --warn-bg: #382c14;
+    --pass: #8fd6a4;
+    --pass-bg: #1c2f22;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  overflow-x: hidden;
+}
+
+h1, h2 { margin: 0; font-weight: 650; }
+h1 { font-size: 1.05rem; letter-spacing: 0.02em; }
+h2 { font-size: 0.95rem; margin-bottom: 0.6rem; }
+h2 .hint { font-weight: 400; margin-left: 0.4rem; }
+
+code { font-family: var(--mono); font-size: 0.92em; }
+
+/* -- chrome ---------------------------------------------------------------- */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  padding: 0.6rem 1rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs { display: flex; gap: 0.25rem; }
+
+.tab {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.tab.is-on { color: var(--ink); border-color: var(--line); background: var(--bg); }
+
+.outdir {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+.screen { display: none; }
+.screen.is-on {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+  align-items: start;
+}
+
+@media (min-width: 1040px) {
+  .screen.is-on { grid-template-columns: minmax(320px, 27rem) minmax(0, 1fr); }
+  .form { position: sticky; top: 4rem; max-height: calc(100vh - 5rem); overflow-y: auto; }
+}
+
+.results { display: grid; gap: 1rem; min-width: 0; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  min-width: 0;
+}
+
+/* -- form ------------------------------------------------------------------ */
+
+fieldset {
+  border: none;
+  border-top: 1px solid var(--line);
+  padding: 0.7rem 0 0;
+  margin: 0.9rem 0 0;
+}
+legend {
+  padding: 0 0.4rem 0 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+.row { display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.6rem; }
+.row.inline { flex-direction: row; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.row > label { font-size: 0.82rem; color: var(--ink-dim); }
+
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: 0 0.7rem; }
+.grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr)); gap: 0 0.7rem; }
+
+input[type="text"], input[type="number"], select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+}
+input:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.checks { display: grid; gap: 0.3rem; margin: 0.4rem 0 0.6rem; }
+.checks label { display: flex; gap: 0.5rem; align-items: baseline; font-size: 0.9rem; }
+
+.hint { color: var(--ink-dim); font-size: 0.8rem; margin: 0.2rem 0; }
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--line);
+}
+
+button.primary, button.ghost {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 7px;
+  padding: 0.45rem 1.1rem;
+  border: 1px solid var(--line);
+}
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; font-weight: 600; }
+button.ghost { background: var(--bg); color: var(--ink); }
+button[disabled] { opacity: 0.55; cursor: progress; }
+
+#formerror { color: var(--fail); }
+
+/* -- verdict --------------------------------------------------------------- */
+
+.verdict { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; }
+.verdict-word { font-size: 1.15rem; font-weight: 700; letter-spacing: 0.02em; }
+.verdict-counts { font-family: var(--mono); font-size: 0.85rem; color: var(--ink-dim); }
+.verdict-line { margin: 0.35rem 0 0; font-family: var(--mono); font-size: 0.85rem; }
+
+#verdict-panel.lv-fail { border-color: var(--fail); }
+#verdict-panel.lv-fail .verdict-word { color: var(--fail); }
+#verdict-panel.lv-warn .verdict-word { color: var(--warn); }
+#verdict-panel.lv-pass .verdict-word { color: var(--pass); }
+
+/* -- progress log ---------------------------------------------------------- */
+
+.log {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.log:empty { display: none; }
+
+/* -- findings -------------------------------------------------------------- */
+
+.filters { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
+.filters button {
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: 999px;
+  padding: 0.15rem 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink-dim);
+}
+.filters button[aria-pressed="true"] { color: var(--ink); border-color: var(--ink-dim); }
+
+.findings { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+
+.finding {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.1rem 0.55rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 7px;
+  border-left: 3px solid transparent;
+  background: var(--bg);
+}
+.finding .lvl {
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding-top: 0.12rem;
+}
+.finding .check { grid-row: 1; font-weight: 600; font-size: 0.88rem; }
+.finding .detail {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  /* `pre-wrap`, not `normal`: some findings are continuation lines that the
+   * report indents, and collapsing that indent loses which finding they hang
+   * off. Long sentences still wrap. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+@media (min-width: 34rem) {
+  .finding .detail { grid-column: 2; }
+}
+
+.finding.lv-fail { background: var(--fail-bg); border-left-color: var(--fail); }
+.finding.lv-fail .lvl { color: var(--fail); }
+.finding.lv-warn { background: var(--warn-bg); border-left-color: var(--warn); }
+.finding.lv-warn .lvl { color: var(--warn); }
+.finding.lv-pass { background: var(--pass-bg); border-left-color: var(--pass); }
+.finding.lv-pass .lvl { color: var(--pass); }
+.finding.is-hidden { display: none; }
+
+/* -- chunks ---------------------------------------------------------------- */
+
+.meta { margin: 0 0 0.6rem; font-size: 0.84rem; color: var(--ink-dim); font-family: var(--mono); }
+
+.gridmap {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 0.8rem;
+  overflow-x: auto;
+  justify-content: start;
+}
+.gridmap i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--line);
+}
+.gridmap i.on { background: var(--accent); }
+
+.chunks { margin: 0; padding: 0; list-style: none; counter-reset: paste; }
+.chunks li {
+  counter-increment: paste;
+  display: grid;
+  grid-template-columns: 2.1rem minmax(0, 1fr);
+  gap: 0.1rem 0.5rem;
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--line);
+}
+.chunks li::before {
+  content: counter(paste) ".";
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  text-align: right;
+}
+.chunks .file { font-family: var(--mono); font-size: 0.83rem; overflow-wrap: anywhere; }
+.chunks .file a { color: inherit; }
+.chunks .span { grid-column: 2; font-size: 0.78rem; color: var(--ink-dim); font-family: var(--mono); }
+.chunks .layer {
+  grid-column: 1 / -1;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  padding-top: 0.5rem;
+}
+
+.skipped { margin: 0.6rem 0 0; padding: 0; list-style: none; }
+.skipped li { font-size: 0.78rem; color: var(--ink-dim); font-family: var(--mono); }
+
+.pastehelp { margin-top: 0.8rem; }
+.pastehelp summary { cursor: pointer; font-size: 0.85rem; color: var(--ink-dim); }
+.pastehelp pre {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0.6rem 0 0;
+}
+
+/* -- reference map --------------------------------------------------------- */
+
+.rasterbox {
+  overflow: auto;
+  max-height: 60vh;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+}
+.rasterbox img { display: block; image-rendering: pixelated; }
+
+#files { margin-top: 0.6rem; overflow-wrap: anywhere; }
+#files a { color: inherit; }

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>citysmith</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1>citysmith</h1>
+  <nav class="tabs" id="tabs">
+    <button type="button" class="tab is-on" data-screen="build">Build</button>
+    <!-- SEAM. A second screen is one button here, one <section class="screen">
+         below, and one row in uiserver._ROUTES. Nothing in app.js knows what a
+         screen is beyond swapping which section is shown. -->
+  </nav>
+  <span class="outdir" id="outdir" title="every file the page reads comes from here"></span>
+</header>
+
+<section class="screen is-on" id="screen-build">
+
+  <form class="panel form" id="form" autocomplete="off">
+    <h2>Build a town</h2>
+
+    <fieldset>
+      <legend>Source</legend>
+      <div class="row">
+        <label for="source">Layout or GeoJSON export</label>
+        <select id="source" name="source" required></select>
+      </div>
+      <p class="hint" id="source-detail">&nbsp;</p>
+      <div class="row inline">
+        <button type="button" class="ghost" id="rescan">Rescan</button>
+        <span class="hint" id="scan-note"></span>
+      </div>
+      <p class="hint">
+        The list is the server's own scan of its output directory, <code>samples/</code>
+        and the working directory. A GeoJSON is imported first, with default
+        options and this seed, and the layout is written to
+        <code>layout.json</code>.
+      </p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Town</legend>
+      <div class="grid2">
+        <div class="row">
+          <label for="style">Style</label>
+          <select id="style" name="style"></select>
+        </div>
+        <div class="row">
+          <label for="seed">Seed</label>
+          <input type="number" id="seed" name="seed" min="0" step="1" value="0">
+        </div>
+        <div class="row">
+          <label for="storeys">Storey cap</label>
+          <input type="number" id="storeys" name="storeys" min="1" max="12" step="1" value="3">
+        </div>
+        <div class="row">
+          <label for="stem">Filename stem</label>
+          <input type="text" id="stem" name="stem" value="city" pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,39}">
+        </div>
+        <div class="row">
+          <label for="fence_style">Field walls</label>
+          <select id="fence_style" name="fence_style"></select>
+        </div>
+        <div class="row">
+          <label for="hour">Hour</label>
+          <select id="hour" name="hour"></select>
+        </div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="roofs" checked> Roofs</label>
+        <label><input type="checkbox" id="bridges" checked> Bridges over water</label>
+        <label><input type="checkbox" id="quarters" checked> Vary surfaces by quarter</label>
+        <label><input type="checkbox" id="npcs" checked> NPC marks</label>
+      </div>
+      <div class="row">
+        <label for="npc_budget">NPC mark cap <span class="hint">(blank = no cap)</span></label>
+        <input type="number" id="npc_budget" name="npc_budget" min="0" step="1" placeholder="no cap">
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Chunking</legend>
+      <div class="grid2">
+        <div class="row">
+          <label for="chunk_tiles">Chunk edge (tiles)</label>
+          <input type="number" id="chunk_tiles" name="chunk_tiles" min="8" max="512" step="8" value="64">
+        </div>
+        <div class="row">
+          <label for="max_assets">Assets per chunk <span class="hint">(blank = board size)</span></label>
+          <input type="number" id="max_assets" name="max_assets" min="100" step="100" placeholder="from board size">
+        </div>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="by_region"> One slab per region, tiled onto blank board</label>
+        <label><input type="checkbox" id="per_building"> One slab per building</label>
+        <label><input type="checkbox" id="keep_open_country"> Keep open-country chunks</label>
+        <label><input type="checkbox" id="multi_slab"> Also write a multi-slab plugin document</label>
+      </div>
+      <p class="hint">
+        Assets per chunk is the lever, not chunk edge: a smaller cell splits
+        fewer chunks in the quadtree and can make the largest slab
+        <em>bigger</em>. Aim for the largest slab near two thirds of the
+        30,720&nbsp;byte cap.
+      </p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Crop <span class="hint">(optional, tiles)</span></legend>
+      <div class="grid4">
+        <div class="row"><label for="crop_x">x</label><input type="number" id="crop_x" min="0" step="1" placeholder=""></div>
+        <div class="row"><label for="crop_z">z</label><input type="number" id="crop_z" min="0" step="1" placeholder=""></div>
+        <div class="row"><label for="crop_w">width</label><input type="number" id="crop_w" min="1" step="1" placeholder=""></div>
+        <div class="row"><label for="crop_d">depth</label><input type="number" id="crop_d" min="1" step="1" placeholder=""></div>
+      </div>
+      <p class="hint">All four, or none. A crop makes its own straight edge, so
+        do not review the map edge from one.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Reference map</legend>
+      <div class="row">
+        <label for="raster_scale">SVG pixels per tile</label>
+        <input type="number" id="raster_scale" name="raster_scale" min="1" max="12" step="1" value="3">
+      </div>
+    </fieldset>
+
+    <div class="actions">
+      <button type="submit" class="primary" id="run">Build</button>
+      <span class="hint" id="formerror" role="alert"></span>
+    </div>
+  </form>
+
+  <div class="results">
+
+    <section class="panel" id="verdict-panel" hidden>
+      <div class="verdict" id="verdict">
+        <span class="verdict-word" id="verdict-word"></span>
+        <span class="verdict-counts" id="verdict-counts"></span>
+      </div>
+      <p class="verdict-line" id="verdict-summary"></p>
+    </section>
+
+    <section class="panel" id="log-panel">
+      <h2>Progress</h2>
+      <p class="hint" id="idle-note">Nothing has been built yet. A big town is
+        minutes; every stage appears here as it happens.</p>
+      <pre class="log" id="log" aria-live="polite"></pre>
+    </section>
+
+    <section class="panel" id="report-panel" hidden>
+      <h2>Report
+        <span class="hint">every <code>verify</code> finding, in full, worst first</span>
+      </h2>
+      <div class="filters" id="filters" role="group" aria-label="filter findings by level"></div>
+      <ul class="findings" id="findings"></ul>
+    </section>
+
+    <section class="panel" id="chunk-panel" hidden>
+      <h2>Chunks <span class="hint">in PASTE ORDER, which is not filename order</span></h2>
+      <p class="meta" id="chunk-meta"></p>
+      <div class="gridmap" id="gridmap" aria-hidden="true"></div>
+      <ol class="chunks" id="chunks"></ol>
+      <ul class="skipped" id="skipped"></ul>
+      <details class="pastehelp">
+        <summary>How to paste this</summary>
+        <pre id="paste-help"></pre>
+      </details>
+    </section>
+
+    <section class="panel" id="raster-panel" hidden>
+      <h2>Reference map
+        <span class="hint">tile numbers match the chunk table</span>
+      </h2>
+      <div class="rasterbox" id="rasterbox">
+        <img id="raster" alt="rasterised plan of the town, one pixel block per tile">
+      </div>
+      <div class="row inline">
+        <label for="zoom">Zoom</label>
+        <input type="range" id="zoom" min="25" max="400" step="5" value="100">
+        <span class="hint" id="zoom-note">100%</span>
+      </div>
+      <p class="meta" id="files"></p>
+    </section>
+
+  </div>
+</section>
+
+<script src="/app.js"></script>
+</body>
+</html>
