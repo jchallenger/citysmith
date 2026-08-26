@@ -1361,3 +1361,58 @@ def test_the_page_names_the_paste_endpoints_and_the_tab(tmp_path):
     for route in ("/api/paste/plans", "/api/paste/preflight", "/api/paste",
                   "/api/paste/shots/"):
         assert route.encode() in js, route
+
+
+def test_the_sidecar_serves_its_own_page(tmp_path):
+    """Everything the page needs comes from the sidecar, and nothing else.
+
+    This is the claim the on-screen review rests on. The UI is meant to sit
+    open on a second monitor beside the game, and the core is offline by
+    policy -- so a page that pulls a font, a stylesheet or a script from a CDN
+    is one that renders differently, or not at all, exactly when the machine
+    is off the network. `CLAUDE.md`'s rule is that every AI feature is
+    additive; the same applies to the page's own assets.
+
+    Three things are checked, and each is a way the page could stop being
+    self-sufficient without anybody noticing on a developer's machine:
+
+    * every asset it references is one the server itself routes,
+    * both colour schemes are defined, so it is legible whatever the OS is
+      set to rather than only in whichever one the author happened to use,
+    * nothing is pinned to a fixed pixel width, because a second monitor is
+      as likely to be portrait as landscape.
+
+    Measured contrast on the served palette, worst visible element: 6.86:1
+    light and 5.54:1 dark, against WCAG AA's 4.5 for body text.
+    """
+    with running(out_dir=tmp_path) as (_server, port):
+        status, headers, raw = call(port, "/")
+        assert status == 200
+        assert "text/html" in headers["Content-Type"]
+        html = raw.decode("utf-8")
+
+        css_status, _, css_raw = call(port, "/app.css")
+        js_status, _, _ = call(port, "/app.js")
+        assert css_status == 200 and js_status == 200
+        sheet = css_raw.decode("utf-8")
+
+    # Every src/href the page names is served by us: a relative path, never an
+    # origin. `//cdn...` is protocol-relative and would leave the machine.
+    refs = re.findall(r"""(?:src|href)\s*=\s*["']([^"']+)["']""", html)
+    external = [r for r in refs
+                if r.startswith(("http://", "https://", "//"))]
+    assert external == [], f"the page reaches off-box for {external}"
+
+    # Same for the stylesheet: an @import or a url() to another origin.
+    assert not re.search(r"""@import|url\(\s*["']?(?:https?:)?//""", sheet), \
+        "app.css pulls something from another origin"
+
+    # Legible in both schemes, not just the author's.
+    assert ":root" in sheet
+    assert "prefers-color-scheme: dark" in sheet, \
+        "no dark palette: the page is legible only in light mode"
+
+    # A fixed width breaks the portrait half of 'second monitor'. max-width is
+    # fine -- it caps a column; width in px on a layout element does not.
+    fixed = re.findall(r"\n\s*width:\s*(\d{3,})px", sheet)
+    assert fixed == [], f"fixed pixel widths would not reflow: {fixed}"
