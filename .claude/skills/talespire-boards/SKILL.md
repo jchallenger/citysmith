@@ -178,6 +178,43 @@ Three things about that list:
   ~30 s before it is safe to click anything. Wait, then screenshot to confirm
   the title bar changed before doing anything else.
 
+### Group into folders
+
+**A campaign has folders, and this is almost always what you want instead of a
+second campaign.** Verified end to end 2026-08-26. Expand a row with the `▶` at
+its **left** (x=79) and the row opens three items -- offsets are from the row's
+own y, and the expansion is about 90 px, so rows below it shift:
+
+| item | client x, y |
+|---|---|
+| **Delete board** | 150, `row + 40` |
+| **Set Folder** | 150, `row + 66` |
+| **Reload Board** | 150, `row + 92` |
+
+*Set Folder* opens a **Move to folder** dialog: "enter a new folder name or
+pick an existing folder from the dropdown". Free text creates one; the dropdown
+flips itself to `- CREATE NEW FOLDER -` as soon as you type. Text goes in by
+clipboard, like every other field here. Coordinates are from the client centre
+because the dialog is centred:
+
+| control | client |
+|---|---|
+| text field | `CX, CY - 16` |
+| existing-folder dropdown | `CX, CY + 20` |
+| **ACCEPT** | `CX - 105, CY + 70` |
+| CANCEL | `CX + 95, CY + 70` |
+
+**Folders sort ABOVE the ungrouped boards and collapse**, which is what makes
+them worth reaching for: twenty-one `Unknown Realm N` rows become one line you
+can fold away. A board lives in at most one folder, and moving it is not a
+copy -- there is no second board afterwards.
+
+**There is no "move to campaign".** The row menu is those three items and
+nothing else, so separating work across two *campaigns* means copying or
+re-pasting, while separating it across two *folders* is one dialog. That is the
+whole argument: `Workshop` and `Ready to publish` inside the campaign you
+already have.
+
 ### Delete
 
 **Decide what to delete before you learn how.** This is the one irreversible
