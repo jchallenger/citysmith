@@ -497,7 +497,7 @@
       "state": "open",
       "doc": ".claude/skills/talespire-boards/SKILL.md",
       "evidence": "test:test_a_board_is_found_by_name_rather_than_by_row",
-      "note": "**Seen on screen 2026-08-26 and not yet measured.** The Campaign Boards panel carries a `Filter...` box at roughly client (228, 163) on a 1920x1080 window, with a clear `x` at (384, 163). Nothing in this repo mentions it, and it is very likely the answer to the oldest entry in CLAUDE.md's 'Not built yet': *switching to an existing board, unattended*, which is blocked because the list re-sorts on every rename and nothing can read text off the screen -- 'needs either OCR or a keybind we have not found'. A filter needs neither: paste the name, the list narrows, click the first row.\n\nFour things must be measured before anything is built on it, and they are the four that decide whether a row position can be trusted: prefix or substring matching; case sensitivity; whether filtered rows start at the same y=200 as unfiltered ones; and whether the current board's row still expands in place (~134 px) when filtered, since that expansion is what breaks row arithmetic today. Method is a paste, a screenshot, and a diff against the unfiltered shot.\n\nBlocked in the session that found it: driving synthetic clicks into the game was refused by the permission layer, so the box was observed in a screenshot and never operated. Existence is evidence; behaviour is not. Do NOT write `scene.ps1 switch -ByName` on the strength of a screenshot -- this project's own rule is that a probe read from one angle is a probe that lies.",
+      "note": "MEASURED 2026-08-26, and the filter holds up. Clicking the box at client (220,163) focuses it and Ctrl+V pastes from the clipboard -- typing still does not work, same as the rename dialog, because TaleSpire reads raw input. Filtering for 'Sedgewater' collapsed a 30-board campaign to the 4 matches, and the documented row arithmetic HELD on the filtered list: rows start at client y=200, 42 apart, play arrow at x=360, expander at x=79. The current board is highlighted in place and shows a person icon where the others show a play arrow, so 'which one am I on' is readable off the shot without counting. What is still unmeasured is the SWITCH itself -- clicking a filtered row's play arrow and confirming the right board loads. **Seen on screen 2026-08-26 and not yet measured.** The Campaign Boards panel carries a `Filter...` box at roughly client (228, 163) on a 1920x1080 window, with a clear `x` at (384, 163). Nothing in this repo mentions it, and it is very likely the answer to the oldest entry in CLAUDE.md's 'Not built yet': *switching to an existing board, unattended*, which is blocked because the list re-sorts on every rename and nothing can read text off the screen -- 'needs either OCR or a keybind we have not found'. A filter needs neither: paste the name, the list narrows, click the first row.\n\nFour things must be measured before anything is built on it, and they are the four that decide whether a row position can be trusted: prefix or substring matching; case sensitivity; whether filtered rows start at the same y=200 as unfiltered ones; and whether the current board's row still expands in place (~134 px) when filtered, since that expansion is what breaks row arithmetic today. Method is a paste, a screenshot, and a diff against the unfiltered shot.\n\nBlocked in the session that found it: driving synthetic clicks into the game was refused by the permission layer, so the box was observed in a screenshot and never operated. Existence is evidence; behaviour is not. Do NOT write `scene.ps1 switch -ByName` on the strength of a screenshot -- this project's own rule is that a probe read from one angle is a probe that lies.",
       "tags": [
         "boards",
         "talespire",
@@ -613,6 +613,18 @@
       "tags": [
         "fencing",
         "palette"
+      ]
+    },
+    {
+      "id": "board-delete-drive",
+      "what": "Delete probe boards from the campaign, driven",
+      "state": "open",
+      "doc": "docs/pasting-into-talespire.md",
+      "evidence": "tools/ts.ps1:deleteboard",
+      "note": "MEASURED end to end 2026-08-26 -- 34 `Unknown Realm` probe boards removed by hand-driven clicks -- but NOT yet a command, which is why this is open. The procedure: row EXPANDER at x=90, `Delete board` at row+38, click at x=160. That opens a TYPED confirmation -- 'Type DELETE below to confirm' -- so the field at (960,551) must be focused and the word pasted (Ctrl+V; typing never works, TaleSpire reads raw input), then OK at (830,605). A 'Board deleted' toast confirms. That dialog is why an accidental delete is essentially impossible, and it is worth knowing before anyone builds a loop.\n\nTwo geometry traps. With the list at rest rows are 42 apart, and deleting the top one leaves the NEXT board at the same y -- so a loop can reuse one coordinate. But the sections re-flow: once Workshop emptied, y=406 stopped being a probe board and became a Sedgewater row, and the ungrouped section below Workshop starts at y=581. Re-read the list between batches; never reuse a coordinate across a section change.\n\nFILTERED ROWS CANNOT BE EXPANDED. The filter renders a bullet where the unfiltered list renders an expander, and clicking it does nothing -- so the filter finds boards but cannot delete them, and the filter has to be cleared first. That is the constraint `board-filter-switch` did not know.",
+      "tags": [
+        "talespire",
+        "boards"
       ]
     }
   ]
