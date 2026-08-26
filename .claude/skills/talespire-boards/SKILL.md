@@ -181,39 +181,57 @@ Three things about that list:
 ### Group into folders
 
 **A campaign has folders, and this is almost always what you want instead of a
-second campaign.** Verified end to end 2026-08-26. Expand a row with the `▶` at
-its **left** (x=79) and the row opens three items -- offsets are from the row's
-own y, and the expansion is about 90 px, so rows below it shift:
+second campaign.** Characterised end to end on throwaway boards 2026-08-26.
+There is **no "move to campaign"** anywhere, so separating work across two
+campaigns costs a copy or a re-paste of every board; separating it across two
+folders costs one dialog.
 
-| item | client x, y |
-|---|---|
-| **Delete board** | 150, `row + 40` |
-| **Set Folder** | 150, `row + 66` |
-| **Reload Board** | 150, `row + 92` |
+**A folder is not an object you create.** It exists only while at least one
+board is in it: name one in the dialog and it appears, move the last board out
+and it is **gone**. Measured -- `Workshop` vanished from the list the moment
+its only board was filed elsewhere. So you cannot pre-create `Ready to publish`
+and then fill it, and there is no folder-rename: renaming means re-filing every
+board in it under the new name.
 
-*Set Folder* opens a **Move to folder** dialog: "enter a new folder name or
-pick an existing folder from the dropdown". Free text creates one; the dropdown
-flips itself to `- CREATE NEW FOLDER -` as soon as you type. Text goes in by
-clipboard, like every other field here. Coordinates are from the client centre
-because the dialog is centred:
+**How to file a board.** Expand a row with the `▶` at its **left** (x=79).
+Offsets are from the row's own y, and **the menu is shorter for a board you are
+not standing on** -- *Reload Board* only appears for the current board:
+
+| item | any board | current board |
+|---|---|---|
+| **Delete board** | 150, `row + 42` | 150, `row + 37` |
+| **Set Folder** | 150, `row + 68` | 150, `row + 63` |
+| *Reload Board* | — | 150, `row + 89` |
+
+*Set Folder* opens a centred **Move to folder** dialog -- "enter a new folder
+name or pick an existing folder from the dropdown". Text goes in by clipboard
+like every other field here, and the dropdown flips itself to
+`- CREATE NEW FOLDER -` as soon as you type:
 
 | control | client |
 |---|---|
 | text field | `CX, CY - 16` |
-| existing-folder dropdown | `CX, CY + 20` |
+| folder dropdown | `CX, CY + 20` |
 | **ACCEPT** | `CX - 105, CY + 70` |
 | CANCEL | `CX + 95, CY + 70` |
 
-**Folders sort ABOVE the ungrouped boards and collapse**, which is what makes
-them worth reaching for: twenty-one `Unknown Realm N` rows become one line you
-can fold away. A board lives in at most one folder, and moving it is not a
-copy -- there is no second board afterwards.
+The dropdown lists **`- NO FOLDER -`** first and then every existing folder, so
+filing is reversible and a board can be pulled back out. A board is in at most
+one folder, and the move is a **move** -- there is no second board afterwards.
 
-**There is no "move to campaign".** The row menu is those three items and
-nothing else, so separating work across two *campaigns* means copying or
-re-pasting, while separating it across two *folders* is one dialog. That is the
-whole argument: `Workshop` and `Ready to publish` inside the campaign you
-already have.
+**What folders do to the list, which is the point:**
+
+- They sort **alphabetically among themselves, above every ungrouped board**
+  (`Ready to publish` sits above `Workshop`, both above `East Tradebourne`).
+- Each **collapses to a single row** on the triangle at x≈70. Twenty-one
+  `Unknown Realm N` rows become one line you can fold away.
+- **They break row arithmetic, so stop counting.** A folder header eats a row
+  slot, an expanded folder inserts its children, and an expanded *row menu*
+  inserts two or three more. The 42 px pitch still holds, but the mapping from
+  "Nth board" to a y is gone. Read positions off the shot, every time.
+- The folder header carries an icon at its far right (x≈378, a figure in a
+  dashed circle) that is **unidentified** -- it shows no tooltip on hover and
+  has not been clicked.
 
 ### Delete
 
