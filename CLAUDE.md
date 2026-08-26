@@ -123,9 +123,40 @@ these, and the remaining stages. Built and pasted on all three exports:
 
 | town | tiles | buildings | assets | chunks | chunk size |
 |---|---|---|---|---|---|
-| Pelvesthollow | 175x184 | 35 | 20,687 | 9 | 64 |
-| Graybank | 434x306 | 150 | 91,429 | 24 | 80 |
-| East Tradebourne | 739x598 | 991 | 387,381 | 114 | 112 |
+| Pelvesthollow | 176x184 | 35 | 20,514 | 8 | 64 |
+| Graybank | 434x306 | 150 | 94,139 | 22 | 80 |
+| East Tradebourne | 739x598 | 989 | 411,106 | 102 | 112 |
+
+Rebuilt 2026-08-25 with the surfaces, massing, yard and fence work, and
+re-pasted on all three. **The three towns now differ from each other in the
+report, which is the whole argument for that work:**
+
+| | Pelvesthollow | Graybank | East Tradebourne |
+|---|---|---|---|
+| storeys | `1:34 2:1`, mean 1.03 | `1:78 2:71 3:1`, mean 1.49 | `1:167 2:575 3:247`, mean 2.08 |
+| yards | 20 of 35 | 89 of 150 | 230 of 989 |
+| field walls | 9 runs | 5 runs | 22 runs |
+| quarters | none, 0.00x lift | none, 0.86x | 1.28x -> residential 70%, craft 15%, market 9% |
+| surface materials | 9 | 9 | 9 |
+
+**The storey counts are fixed at IMPORT, not at build**, so rebuilding an
+existing `layout.json` does not re-run `storeys_for` -- a `main` build off the
+same layout produces the identical skyline. Re-import to change it.
+Measured against `main` on the same Pelvesthollow layout, what the *build*
+changes is the surfacing and the dressing: 14 surface materials became 19, and
+the single 2,289-tile cobble carpet became 1,509 castle-stone main street,
+1,430 swamp-floor lane, 731 cobble, 317 tilled earth, 171 dry ground and 49
+castle floor. Roofs went from one material to two.
+
+**The 2026-08-25 dressing ate the byte headroom, and `--max-assets` is the
+lever, not `--chunk-tiles`.** Yards, field walls and the wider surface palette
+took East Tradebourne's largest slab from 23,085 bytes to **30,546 against the
+30,720 cap** -- 99.4%, valid but with nothing to spare. Going *down* to 96
+tiles makes it worse, not better: the build fails outright with a chunk at
+31,739 bytes, because a smaller cell means the quadtree splits fewer of them.
+`--max-assets 6500` at 112 tiles restores it -- 114 chunks, largest 24,204
+bytes, 79%. This is the "re-check after any change that adds dressing" line
+below, firing for real.
 
 **Chunk size is bounded by the byte cap -- until `--max-assets` binds, and then
 it stops mattering.** Graybank at 96 tiles is 20 chunks with the largest slab
@@ -240,11 +271,25 @@ actually matters, all confirmed in-game:
 - **Every binding is in the table in `docs/pasting-into-talespire.md`.** Do not
   duplicate it here; it is read off the game's own hint bar and it is the one
   copy. What belongs here is *why* the ones that bite, bite:
-  * **Duration is a parameter, not a detail.** A left-drag pan has to be slow
-    (60 steps x 40 ms tracks; 24 x 16 ms outruns the camera and registers as
-    nothing). WASD ramps, so it has to be *held* -- 0.4 s crawls, 3 s crosses
-    a map. Tapping it is what made an earlier revision of this file claim
-    "WASD does nothing here". `ts.ps1 key -Keys w -Hold 3.0`.
+  * **Duration is a parameter, not a detail -- but it is ONE FRAME, not one
+    second (MEASURED 2026-08-24, correcting what stood here).** A key has to be
+    held across at least one game frame or it is never seen: 0 ms registers
+    0/12 times, 40 ms 12/12, and 40 ms is one frame. WASD still ramps, so
+    *distance* still needs a long hold -- 0.4 s crawls, 3 s crosses a map --
+    but that is the camera's acceleration curve, not input polling.
+    `ts.ps1 key -Keys w -Hold 3.0`. See "Input timing is set by a 25 fps cap".
+    **The claim that a drag has to be slow is REFUTED.** This file used to say
+    "60 steps x 40 ms tracks; 24 x 16 ms outruns the camera and registers as
+    nothing". `tools/drag_speed.ps1` rotates by a fixed amount at a range of
+    cadences and compares each resulting frame against a 60x40 reference:
+    60x40, 40x25, 30x20, 20x16, 12x16 and **8x10 -- 80 ms of dragging against
+    the reference's 2400 -- all land on the identical view**, at the 0.47 noise
+    floor. Removing the pause between the press and the first motion changes
+    nothing either. Whatever the original failure was, it was not the cadence.
+    `ts.ps1`'s orbit/pan/rdrag now use 16x12 with trimmed pauses (`$CAM`),
+    about 3x faster per camera move end to end (3430 ms -> 1073 ms measured);
+    `select` and `elev` keep the old timings, because only the orbit was
+    measured.
   * **The scroll modifiers retarget on whether the hand is empty**: with
     something held, `Ctrl` is vertical and `Shift` is *horizontal*.
     `raise`/`lower` were built on Shift, so a whole session of "nudge it down
@@ -358,18 +403,48 @@ actually matters, all confirmed in-game:
   - **While the select tool is armed the whole scene renders washed out.** It
     reads exactly like distance fog and it is not; the tool stays armed
     between selections.
-- **`ts.ps1 camera -DY -300` drives the height slider**, scanning the track
-  column for the handle rather than assuming a position, because the handle
-  moves with the height. Never drag the track by hand: it sits close enough to
-  the screen edge that the drag once opened the Windows widgets flyout over the
-  game. Raise in `-DY 150` steps and check the compass after each; a new board
-  resets anything that gets stuck.
+- **The right-hand vertical track is the ELEVATION CUT PLANE, not a camera
+  height slider (SETTLED 2026-08-24), and `ts.ps1 camera` is withdrawn.**
+  Two independent errors were stacked here.
+  * **It was reading the wrong pixels.** The track is anchored to the RIGHT
+    window border -- it sits 102 px in from it -- and the scan column was
+    written as `client.X + 1540`, an offset from the LEFT. That was 60 px from
+    the right edge of the 1600-wide window it was written on and is 380 px from
+    the edge of the maximised 1920 one, where it lands on Cutscene Mode's blue
+    "Grab Shot" button, rgb(0,114,165). `camerastate` reported "handle at y=38
+    of 700" off that button. **Third recurrence of the same failure**, after
+    `planestate` reading the board and the toolbar being centred.
+  * **It was the wrong widget.** Hover its markers and the game names them:
+    the sliding handle reads **"0 TILES"**, a fixed reticle beside it "0.5
+    TILES", and the locked green marker at the top of the track "60 TILES".
+    Dragged, it raises a cut plane and everything below it renders with a heavy
+    green tint. A large camera height change (Ctrl+scroll) leaves it exactly
+    where it was, which is the measurement that settles what it is not.
+
+  **Camera height is Ctrl+scroll with an empty hand, or Ctrl+right-drag**
+  (`ts.ps1 nudge -Mode vertical`, `ts.ps1 elev`) -- the play-mode hint bar says
+  so directly: `CTRL + [mouse] MOVE CAMERA VERTICALLY`. `elev` was documented
+  here as setting "the working plane"; it moves the camera.
+
+  **Driving the ruler needs both halves right**, and either one alone does
+  nothing: grab the blue **chevrons** (rgb(28,175,255)), not the diamond on the
+  track line -- that diamond is a fixed 0-tile marker and a press on it goes
+  through to the board -- and move with **relative mouse motion**, for the same
+  reason a creature needs it. `ts.ps1 elevplane -DY -200` raises it,
+  `ts.ps1 elevstate` reads it back; verified reversible, frac 1.0 -> 0.751 ->
+  1.0.
+
+  This matters beyond tidiness: `X`+drag copy-out "behaves like a thin
+  horizontal slice at the plane's height" and "the plane could not be driven
+  down to the turf" was guesswork, because nothing could read the plane. Now it
+  can be read in tiles and driven to a repeatable position.
 - **Read the camera back rather than tracking it in your head.** Every camera
   command is a *relative* move; a session that only issues them ends up over the
-  void wondering where the map went. `ts.ps1 camerastate` reports the height
-  slider's handle position -- numeric and comparable between calls -- and saves
-  a crop of the compass rose, which gives bearing by where N points and pitch by
-  how squashed the circle is. Check it before concluding something is missing
+  void wondering where the map went. `ts.ps1 camerastate` saves a crop of the
+  compass rose, which gives bearing by where N points and pitch by how squashed
+  the circle is. The compass is anchored **bottom-left**, and its crop was
+  `(X+490, Y+660)` -- correct on 1600x900, open board on 1920x1080 -- so it is
+  derived from the rect now too. Check it before concluding something is missing
   from the board.
 - **Derive screen coordinates from the window, never hardcode them.** The
   window gets moved and resized between sessions, and a stale rectangle does
@@ -414,13 +489,198 @@ actually matters, all confirmed in-game:
   * **The board switcher is `Space` then the top icon of the left-hand
     column** -- "Campaign Boards", a list with a play arrow per board.
     `ts.ps1 boards` opens it and screenshots it, which is the point: the list
-    puts the *current* board first and sorts the rest alphabetically, so the
-    rows move every time a board is renamed. Read them, do not assume an
-    order.
+    is sorted **alphabetically, with the current board highlighted in place**
+    rather than lifted to the top -- measured on a seven-board campaign where
+    the current board sat fourth. Either way the rows move every time a board
+    is renamed, so read them off the shot rather than reusing a position. Each
+    row's triangle expands a per-board menu that includes **Delete board**, so
+    aim at the play arrow and not at the row.
+    `Space` is a toggle and `boards` sends it blind: if the panel does not
+    appear in the shot it was toggled shut, and running the command again
+    opens it.
   * Switching to a 387k-asset board takes tens of seconds. Wait before
     clicking anything on it.
 - The full binding table lives in `docs/pasting-into-talespire.md`. One copy,
   read off the hint bar; this file keeps only the reasons above.
+
+## Input timing is set by a 25 fps cap (MEASURED 2026-08-24)
+
+Every hold and sleep in `ts.ps1` was chosen to be safely large and never
+measured. The number they were all groping for is the frame period.
+
+**TaleSpire renders at ~24 Hz on this machine, so a frame is ~41 ms.**
+Measured by `tools/probe_input.ps1 renderrate`, which holds a camera key so the
+scene is continuously in motion and counts how many captured frames differ from
+the one before: 118 captures in 2005 ms, 49 of them different, giving 24 Hz.
+That is not a property of the hardware -- `TaleSpireSettings.json` carries
+`RefreshRateSettingV0: 25`, and the measurement lands on it exactly. **It is a
+setting, and raising it would make every one of these numbers smaller**; it is
+the user's call, not ours, so nothing here changes it.
+
+Everything else follows:
+
+- **A press must span one frame.** Swept over twelve trials per value on the
+  camera rotate: 0 ms registered 0/12, 10 ms 2/12, 20 ms 8/12, 30 ms 11/12 and
+  **40 ms 12/12**. 40 ms is one frame. This is the real content of "the hold is
+  not optional".
+- **The screen answers in 42-55 ms** (median 53 over ten trials,
+  `probe_input.ps1 latency`) -- one frame plus capture quantisation. Any fixed
+  sleep longer than ~150 ms after a keystroke is waiting on nothing.
+- **The oracle can see at 60 Hz and no faster.** `CopyFromScreen` of a 200x200
+  patch and of a 400x400 patch both come back at 16.7 ms, because the desktop
+  compositor bounds it; a full 1920x1080 grab is 34 ms. So measurements here
+  resolve to one compositor frame, which is finer than anything TaleSpire does.
+  A static board drifts by 0.49 on the diff metric, so a threshold of 2 is
+  clear of the noise.
+
+What this does **not** cover is the left press that commits a paste. It was not
+measured -- that needs a scratch board to paste onto -- so `Press`'s 250 ms hold
+is untouched and the 200 ms rule stands. A missed Ctrl+V is the most expensive
+failure this tool has; `Send-Chord` is set to 120 ms (three frames) rather than
+the 40 the measurement allows, deliberately.
+
+## Creatures: picked up and carried, and the motion has to be REAL
+
+`creatureCount` is always 0 in a v2 slab, so a scene pastes *marks* and the
+minis go on by hand -- but the minis can be driven, and this is how.
+
+**Read the interaction off the hint bar with the cursor over a mini**, which is
+where it was found and is the one authority:
+
+    [mouse] PICKUP CREATURE
+    ALT   + [mouse] ROTATE CREATURE
+    CTRL  + [mouse] ELEVATE CREATURE
+    SHIFT + [mouse] TELEPORT CREATURE
+
+So a creature is **picked up and carried**, not click-placed like a slab: the
+button stays down, the mini follows the cursor on a leash line with a live
+"N TILES" readout, and the release drops it. A click that goes down and up in
+one place picks it up and drops it again where it was, which looks exactly like
+nothing happening -- that cost three attempts before a mid-drag screenshot
+showed the mini lifted with a "0 TILES" label under it.
+
+**`SetCursorPos` is not enough to carry it, and this is the whole trick.**
+`ts.ps1`'s `Drag()` walks the cursor with `SetCursorPos`. That works for the
+*camera* -- verified both ways with `tools/drag_compare.ps1`, which orbits with
+each method and gets the same 47-unit screen change -- but a carried creature
+tracks pointer *motion*, and `SetCursorPos` teleports the pointer without
+generating any. The A/B is unambiguous: same start, same delta, same gesture.
+
+| motion | game's own readout | result |
+|---|---|---|
+| `SetCursorPos` walk | **0 TILES** | mini stays put |
+| `mouse_event(MOUSEEVENTF_MOVE)` | **4.0 TILES** | mini lands at the cursor |
+
+This is the same shape of failure as `keybd_event` with `scan = 0`, which this
+file already records: the input looks right from outside and arrives as
+nothing. `tools/creature_drag.ps1` is the implementation, and it keeps the
+broken method behind `-Method setcursorpos` so the finding stays reproducible
+rather than becoming folklore. Relative motion is subject to pointer
+acceleration, so it overshoots by ~10%; the landing point is read back with
+`GetCursorPos` rather than assumed.
+
+**Ground truth is on disk, not on the screen.** TaleSpire persists creature
+state under `primary/Persistence/<campaign>/<board>/Creatures/`,
+zlib-deflated around a blob with the **same 0xD1CEFACE magic as a slab,
+version 4**, carrying the content id and an f32 x/y/z.
+`tools/creature_state.py` reads it. Two things about that store:
+
+- **It is content-addressed and append-only.** A move writes a *new* file; the
+  filename is a hash of the state, not a creature id. Three files on an
+  untouched board are three saved states of one mini, not three minis -- which
+  is exactly how it was misread first. **The current position is the newest
+  file by mtime.**
+- **It is written on a ~30 s tick**, not on the move, so a read straight after
+  a drag still shows the old value. Wait for the tick before concluding a drag
+  failed.
+
+Verified end to end: a drag reading "4.1 TILES" in game moved the mini from
+(1.5, 0.5, -4.5) to (5.5, 0.5, -3.5), and sqrt(3^2 + 1^2) = 3.16 for the
+snapped cells against 4.12 for the carried point -- the readout is the live
+carry distance, and the drop snaps.
+
+## The board has three modes, and they name themselves
+
+The three icons at the top centre are not decoration. Hovered, they are
+**Exploration Mode** (footprints), **Turnbased Mode** (hourglass) and
+**Cutscene Mode** (film strip); the active one is orange. This is board state
+and it persists, so a board can be sitting in Cutscene Mode from some earlier
+session -- `GRB/T14` was, which is why a "Grab Shot" panel was occupying the
+right of the screen and read as clutter.
+
+What changes with the mode, all observed:
+
+| mode | on screen | carrying a mini |
+|---|---|---|
+| Exploration | dice tray + hotbar | works, "N TILES" readout |
+| Turnbased | PREV / gear / NEXT, cyan ring on the active mini, dice tray | works, plus **dashed movement-range rings** at origin and destination |
+| Cutscene | Grab Shot panel | works, "N TILES" readout |
+
+**Turnbased Mode is only part-built in this version**: its bottom bar reads
+"TURNBASED MODE - SETUP AN INIATIVE TRACKER AND SOME OTHER DESCRIPTIVE TEXT.
+THIS SHOULD PROBABLY BE FETCHED FROM ONE PLACE", misspelling and all. Do not
+plan a scene workflow around an initiative tracker that is not there yet.
+
+**Build mode is a fourth axis, not a fourth mode**, and the top bar's
+"[B] Build Mode" is a *button*, not a state light -- it looks identical either
+way. The state is on the **hint bar**: camera bindings out of build mode,
+`PICK UP OBJECT / MOVE OBJECT VERTICALLY / ...` in it. **Creatures render as
+grey ghosts in build mode and cannot be picked up there**, so anything driving
+a mini has to leave build mode first.
+
+## Taking screenshots off a board (MEASURED 2026-08-24)
+
+The README gallery is the one artifact this project has that a reader judges it
+by, and every image in it is a hand-framed capture. Three things decide whether
+a capture is usable, and only one of them is composition.
+
+**Crop, do not try to hide the HUD.** `Space` does not clear the screen: it
+toggles the left tool column and the dice tray / hotbar, and leaves the top bar,
+the Role card, the Cutscene "Grab Shot" panel, the compass and the hint bar
+exactly where they were. What works is a crop window chosen to miss all of them.
+On a 1920x1080 client:
+
+    tools\grab.ps1 -Name shot -X 200 -Y 150 -W 1250 -H 703
+
+is clean 16:9 at native pixels. It clears the Role card (ends x=175), the Grab
+Shot panel (starts x=1470), the compass and bottom bar (start y=955), the dice
+tray (y=870) and the hint bar. Derive it from `ts.ps1 client` on any other
+window size rather than reusing those numbers.
+
+**Depth of field decides the framing, and it does not follow the camera.**
+`TaleSpireSettings.json` has `DepthOfFieldSettingV0: true`. `Ctrl`+scroll moves
+the camera without moving the focal target, so changing height throws the whole
+frame out of focus -- not a soft far-field blur, the entire image. Dropping the
+camera ten notches turned a sharp market square into mush, and going back up
+ten did not reliably restore it. What does work:
+
+- Find a height where the frame is sharp and then **fly horizontally** (`ts.ps1
+  fly -Keys w -Hold 2.0`); WASD preserves focus, height changes do not.
+- Judge focus on the capture, not on the composition -- the blur is even enough
+  across the frame to be missed at a glance.
+- Turning the setting off would remove the whole problem, but it is the user's
+  graphics setting; ask before changing it.
+
+**A vertical orbit that does nothing means the pitch is CLAMPED, not that the
+drag failed.** Middle-drag with `-DY -110` and `-DY -250` both left the view
+pixel-identical, which reads exactly like the dead synthetic drags this project
+has chased before. `-DY 250` in the same session pitched the camera to near
+plan immediately. The camera was simply against its upper pitch limit. The
+diagnostic is one drag in the opposite direction, and it costs seconds --
+`drag_compare.ps1` would have said the drag was fine.
+
+Wheel zoom is a no-op at town distances, which is the cap this file already
+records; `Ctrl`+scroll is the only height control that responds.
+
+**The haze is board state, not the camera.** The left tool column's third icon
+is **Atmosphere Settings**: Day Cycle with a sun dial, **Fog Multiplier**,
+Exposure and Post Effects, plus "Apply to Game Board". East Tradebourne's warm
+pink cast and the wall of fog a few hundred tiles out come from there. Nothing
+in this session changed it -- a board's atmosphere is an authored choice -- but
+it is where to go if a gallery shot needs the distance to read.
+
+Five captures from one pass over East Tradebourne are in `docs/images/`:
+`east-tradebourne-bridge`, `-plan`, `-waterfront`, `-market2` and `-quay2`.
 
 ## Chunking: layer first, region second
 

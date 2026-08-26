@@ -193,7 +193,11 @@ chunk files remain the default and a vanilla install needs nothing extra.
 Other useful flags: `--style {medieval,cyberpunk}`, `--seed N`, `--storeys N`
 (ceiling on building height, default 3), `--no-roofs`, `--no-bridges`,
 `--max-assets N`, `--chunk-tiles N`, `--keep-open-country`,
-`--crop X,Z,W,D` (build one region for a staged in-game test), `--scale N`.
+`--crop X,Z,W,D` (build one region for a staged in-game test), `--scale N`,
+`--fence-style NAME` (how field boundaries are built — see
+[docs/fencing.md](docs/fencing.md)), `--no-quarters` (do not vary lane and yard
+surfaces by derived quarter; the measurement already switches this off on a
+town whose trades do not cluster).
 
 ---
 
@@ -214,6 +218,34 @@ sparse on the flank, **never at the back** — and a building fronting a main
 street gets the show facade. Single-storey buildings get a lantern by the door
 where a porch would sit level with their own eaves.
 
+**How tall a building is depends on the settlement, not on a die roll.** The
+importer classifies the town by size and by how tightly it is built, and deals
+storeys from that: a hamlet is single-storey cottages with a taller inn or
+hall, a village stacks its trades on the through road, a town stacks inside its
+walls where the plot is expensive and stays low on the outskirts. Warehouses,
+stables and sheds are one storey everywhere. `--storeys N` still caps the lot.
+
+**A building standing clear of its neighbours gets a yard** — enclosed with
+timber fence, surfaced, and dressed with whatever its trade works with. The
+test is a measurement: three clear cells to the nearest neighbour. On East
+Tradebourne that is 230 of 989 buildings, and the packed centre keeps its
+street wall.
+
+**The ground is paved by what the ground is for.** Main street, cart street,
+lane, plaza, yard and field edge each get their own material, and where a town
+is big enough for its trades to actually cluster, the lanes in a craft quarter
+are surfaced differently from the ones in a market quarter. That last part is
+switched on by measurement and not by hope: `quarters.clustering_lift` compares
+the observed clustering against a shuffled baseline and returns nothing at all
+below 1.20×, which is what it does on both the hamlet and the village.
+
+**Field boundaries** are built from the export's own boundary polylines, laid
+along each segment at its true bearing so a wall turns a corner once instead of
+stair-stepping the grid. `--fence-style` picks from seven: `drystone` (the
+default), `drystone-plain`, `drystone-tall`, `drystone-corner`, `hedge`,
+`hedgerow` and `paling`. A *yard* fence is a different role and a different
+material — the timber post-and-rail in the shots below.
+
 **The town wall** is a faced rampart 35 ft to the wall-walk and 45 ft to the top
 of the merlons, with square mural towers at every corner and flanking every
 gate. Gate passages are cut square through the band so the portcullis has
@@ -230,83 +262,168 @@ below is off the finished board:
 
 | Town | Tiles | Buildings | Assets | Chunks | `--chunk-tiles` |
 |---|---|---|---|---|---|
-| Pelvesthollow — a hamlet in woodland | 175 × 184 | 35 | 20,647 | 9 | 64 |
-| Graybank — a river village | 434 × 305 | 150 | 91,609 | 24 | 80 |
-| East Tradebourne — a walled town | 739 × 598 | 991 | 386,562 | 114 | 112 |
+| Pelvesthollow — a hamlet in woodland | 176 × 184 | 35 | 20,514 | 8 | 64 |
+| Graybank — a river village | 434 × 306 | 150 | 94,139 | 22 | 80 |
+| East Tradebourne — a walled town | 739 × 598 | 989 | 411,106 | 102 | 112 |
 
-East Tradebourne is 38.7% of the per-board asset limit, so a town roughly two
+East Tradebourne is 41.1% of the per-board asset limit, so a town roughly two
 and a half times its size is the ceiling.
+
+**The three are not the same town at three sizes, and that is the point.** Run
+`build` on each and the report says so in its own words:
+
+| | Pelvesthollow | Graybank | East Tradebourne |
+|---|---|---|---|
+| storeys | `1:34 2:1`, mean **1.03** | `1:78 2:71 3:1`, mean **1.49** | `1:167 2:575 3:247`, mean **2.08** |
+| yards | 20 of 35 | 89 of 150 | 230 of 989 |
+| field walls | 9 runs | 5 runs | 22 runs |
+| quarters | none — trades cluster at 0.00× | none — 0.86× | **1.28×** → residential 70%, craft 15%, market 9% |
+
+Height used to be `randint(1, 3)` gated on footprint area, which gave every
+town the same skyline — about a third at each height, mean 2.0, whether it had
+thirty-five buildings or a thousand. A hamlet is single-storey cottages with a
+taller hall; a walled town stacks inside its circuit where the plot is
+expensive. The quarters row is the same idea for trades: they are *derived* and
+only used when they are actually there, and on two of these three towns the
+measurement says they are not.
 
 #### Pelvesthollow — 35 buildings
 
-![A three-storey timber-framed cottage under thatch, barrels by its door and a
-handcart in the lane, with pines and stumps around
-it](docs/images/pelvesthollow-lane.jpg)
+![Two single-storey thatched cottages either side of a cobbled crossroads, each
+inside a post-and-rail fence, with a market stall and a table of wares in the
+yards](docs/images/pelvesthollow-yards.jpg)
 
-Common-tier fabric: timber frame, thatch, a peasant door. The lane is cobble
-laid by its *top* surface, not its bottom — cobble is 0.25 thick and grass is
-0.5, so aligning them at the base would put a 15-inch kerb along every street.
+Thirty-four of the thirty-five buildings here are one storey. Common-tier
+fabric: timber frame, thatch, a peasant door. The lane is cobble laid by its
+*top* surface, not its bottom — cobble is 0.25 thick and grass is 0.5, so
+aligning them at the base would put a 15-inch kerb along every street.
 
-![Thatched cottages around a junction with crates and barrels stacked in the
-street](docs/images/pelvesthollow-crossroads.jpg)
-![The hamlet from above, cottages clustered along lanes with woodland between](docs/images/pelvesthollow-aerial.jpg)
+**A building that stands clear of its neighbours gets a yard**, enclosed and
+dressed with the working life of its trade. It is gated on a measurement rather
+than given to everyone: a building needs three clear cells to the next one
+before it claims any ground, so a packed street front stays a street front.
+
+![The same crossroads from a lower angle, a butcher's block and carcass under an
+awning in the right-hand yard, a dry-stone field wall running away to the
+south-east](docs/images/pelvesthollow-crossroads.jpg)
+
+Two kinds of boundary in one frame, and they are different features: the timber
+post-and-rail around each yard, and the **dry-stone field wall** at the lower
+right, which encloses farmland rather than a building. The yard dressing is
+keyed on the building's trade — the butcher gets a block and an awning, not a
+generic scatter of crates.
+
+![A tilled field of wheat stooks and hay bales, ringed by a dry-stone wall that
+turns a right-angled corner, pines and stumps around
+it](docs/images/pelvesthollow-fields.jpg)
+
+**Field walls are surveyed lines, not stair-steps.** A boundary in the export
+is a polyline at whatever angle it likes; panels are laid along each segment at
+its true bearing and never across a vertex, so a wall that turns a corner turns
+it once rather than climbing a flight of grid steps. Seven styles are available
+(`--fence-style`); this is the default.
 
 #### Graybank — 150 buildings
 
-![A terracotta-roofed trade building with barrels outside, standing among
-thatched cottages](docs/images/graybank-trade.jpg)
+![A two-storey terracotta-roofed trade building with a market stall, barrels
+and sacks in its fenced yard, a thatched cottage with its own fence
+opposite](docs/images/graybank-trade.jpg)
 
 Trade tier beside common tier. Importance reads off the *roof material* rather
 than off storey count, because a facade that changes material at the corner
-reads as a mistake.
+reads as a mistake — and roofs are dealt per building rather than per map, so
+a street is not one material end to end. Graybank is a village and so it
+stacks: 78 buildings at one storey, 71 at two, one at three — neither the
+hamlet's uniformity nor the town's density.
 
-![Two cottages either side of a gravel yard with a lantern on a post between
-them](docs/images/graybank-yard.jpg)
+![A terracotta-roofed house and a thatched one, each in a fenced yard with a
+bench, a workbench and market awnings](docs/images/graybank-yards.jpg)
+
+Out on the edge of the village, where there is room, both of these get a yard.
+89 of Graybank's 150 buildings do; the rest stand closer together than the
+three-cell gap the rule asks for and get none.
 
 A single-storey building gets a lantern by the door instead of a porch: a porch
 hood seats at `storey_h + 0.5`, which on a one-storey cottage is level with its
 own eaves — a second roof grafted onto the first.
 
-#### East Tradebourne — 991 buildings, walled
+#### East Tradebourne — 989 buildings, walled
 
-![The town wall: coursed stone stepping diagonally, crenellated parapet and a
-square tower, thatch and terracotta roofs behind it, cleared ground
-outside](docs/images/east-tradebourne-rampart.jpg)
+![The town wall: coursed stone stepping diagonally with a crenellated parapet,
+thatch and terracotta roofs and fenced yards behind it, woodland thinning
+away outside](docs/images/east-tradebourne-rampart.jpg)
 
 A faced rampart, 35 ft to the wall-walk and 45 ft to the top of the merlons.
 The mass is a full-cell block with the thin curtain pieces hung on the faces
 that show — a wall built from 0.5-deep curtain pieces laid one per cell scores
 perfectly on any check that reads the tile grid while being visibly
-see-through on the board. The ground outside is clear because a rampart counts
-as *built* for the woodland falloff; seeded from buildings alone, pines grew
+see-through on the board. The woodland thins as it approaches because a rampart
+counts as *built* for the falloff; seeded from buildings alone, pines grew
 flush against the masonry.
 
-![The quay: a paved waterfront with rope-and-bollard railings along the river, a
-tall warehouse with a porch hood over its
-door](docs/images/east-tradebourne-quay.jpg)
+![A dressed-stone civic hall with arched windows under a terracotta roof,
+standing in its own fenced yard with a workbench, a grey slate roof to one side
+and thatch to the other](docs/images/east-tradebourne-tiers.jpg)
 
-![The market square, crates and barrels spread over the paving, trade buildings
-with porch hoods around it](docs/images/east-tradebourne-market.jpg)
+Three roof materials in one frame — terracotta, slate and thatch — and the
+civic tier's dressed stone with its arched windows. Roofs are dealt per
+building rather than once for the map, so a street is not one material end to
+end. This hall is also a yard on the town's edge: fenced, with the workbench
+and crates its trade works with.
+
+![Streets of a town centre: dark cobble carriageway, pale gravel lane, cream
+flagstone paving and grass verges, with a civic building on the
+left](docs/images/east-tradebourne-quarters.jpg)
+
+Four surfaces meeting: the cobbled cart street, a pale gravel lane, flagstone
+paving and the grass verge between paving and building. East Tradebourne is the
+only one of the three towns whose trades cluster tightly enough to key lane
+surfaces on a derived quarter — 1.28× against a shuffled baseline, against a
+1.20× threshold. On the hamlet and the village the same measurement returns
+nothing and the feature stays off.
+
+![Three-storey terracotta-roofed trade buildings packed along cobbled streets
+with handcarts and barrels between them](docs/images/east-tradebourne-centre.jpg)
+
+The packed centre has no yards at all, which is the yard rule working rather
+than failing: a building needs three clear cells to its nearest neighbour before
+it claims any ground, so 230 of 989 get one and the street wall survives.
+
+![A green ringed with cream flagstone paving, three-storey trade buildings
+around it and thatched cottages in the
+foreground](docs/images/east-tradebourne-green.jpg)
 
 FTG exports a market square as a `BUILDING` with `material: PAVEMENT`. Built as
 one it is a roofed box over the square, so it is diverted into a plaza instead —
 this is that rule working on the file it was written for.
 
-![Trade buildings under terracotta on one side of a street, common houses under
-thatch on the other](docs/images/east-tradebourne-tiers.jpg)
-![Densely packed rooftops running down to the waterfront](docs/images/east-tradebourne-rooftops.jpg)
-![A waterfront quarter seen from above, quay railings along the right](docs/images/east-tradebourne-quarter.jpg)
+![The quay: a paved waterfront with rope-and-bollard railings along the river
+and a timber bridge crossing at the top](docs/images/east-tradebourne-quay.jpg)
+
+FTG marks a bridge by `raised: true` — across all three exports it is true for
+exactly five features, and every one is a ~20x20 m `ROAD_TEXTURE_TYPE` quad over
+water. `bridge_deck` is pinned to `Harbor Middle 06`: the harbour deck tiles are
+1.0 tall and laid by their top, so the underside rests on the water and the
+crossing reads as a timber pier rather than a causeway. A thin floor on dock
+legs floated; a stone span read as a fortification.
 
 **Sizing the chunks is a two-regime problem, and most people only meet the
 first.** Below about 90,000 assets the *byte cap* binds: pick a cell size whose
-largest slab lands near two thirds of 30,720, because a different seed can
-push it over. Graybank at 96 tiles is 20 chunks and 29,817 bytes — 97% of the
-cap and too close; at 80 tiles it is 24 chunks and 20,772 bytes. Above that,
-`--max-assets` binds instead and the cell size stops mattering: East
-Tradebourne at 80 / 112 / 160 tiles gives 146 / 114 / 137 chunks and all three
-land within 40 bytes of the same slab size. In that regime pick the size that
-*splits least* — 160 is worse than 112, because an oversized cell splits into
-four where a smaller one would not have split at all.
+largest slab lands near two thirds of 30,720, because a different seed can push
+it over. Graybank at 80 tiles is 22 chunks and 24,192 bytes — 79% of the cap,
+which is about right. Above that, `--max-assets` binds instead and the cell
+size stops mattering much; pick the size that *splits least*, because an
+oversized cell splits into four where a smaller one would not have split at
+all.
+
+**Anything that adds dressing eats the headroom, and it has to be re-measured
+after.** These towns were rebuilt with yards, field walls and a wider surface
+palette, and East Tradebourne's largest slab went from 23,085 bytes to
+**30,546 against a 30,720 cap** — 99.4%, still valid but with nothing to spare,
+and at 96 tiles the build now *fails* outright with a chunk at 31,739 bytes.
+The fix is not a smaller cell but a tighter split: `--max-assets 6500` at 112
+tiles gives 114 chunks and a largest slab of **24,204 bytes**, back at 79%.
+That is the setting to use on a town this size.
 
 ### One board per town
 
@@ -364,6 +481,13 @@ The procedural path additionally writes `out/city.json` / `city.svg`,
   is unbroken coursed stone from the ground to the parapet when you look at it,
   and the void only exists where no camera can reach; but the build does print
   `[FAIL]` and the slabs are written anyway.
+- **A fenced build fails the prop-collision check, and that one is a false
+  positive.** Consecutive fence panels overlap as *bounding boxes* and not as
+  meshes, and TaleSpire's drop test is on the oriented collider — measured on a
+  real build, where 78 flagged pairs all came out as continuous wall on the
+  board. The check does not know that yet, so it reports the pairs and the
+  build prints `[FAIL]`. The report names how many of the flagged pairs are
+  fence panels so the real overlaps stay visible underneath.
 - **No interiors on the town board.** `floorplan.py` builds them, but nothing
   wires an interior onto a second board per building yet.
 - **No UI.** `cli.py` is a thin shell over the core modules; a UI would slot in
@@ -451,11 +575,30 @@ searchable dump of your library grouped by kit. **The kit is the catalog's
 whether two pieces belong together.
 
 The `*_probe.py` scripts each build one question as a slab you paste and look
-at — roof rotations, wall masses, corner pairings. The standing rule on this
-project is that an asset's shape is never assumed from its name or its
-measurements; it is probed and read from four sides. `tools/review.ps1` and
-`tools/ts.ps1` drive TaleSpire over Windows synthetic input to do that
-automatically (Windows only, and the game must be windowed).
+at — roof rotations, wall masses, corner pairings, fence styles side by side,
+several large buildings each on their own lot, the generated interior of one
+building per trade. The standing rule on this project is that an asset's shape
+is never assumed from its name or its measurements; it is probed and read from
+four sides. `tools/review.ps1` and `tools/ts.ps1` drive TaleSpire over Windows
+synthetic input to do that automatically (Windows only, and the game must be
+windowed).
+
+**What is designed but not yet built is tracked, and the tracker is checked
+against the code:**
+
+```bash
+citysmith tasks              # grouped by state
+citysmith tasks --check      # import every claim and report the liars
+```
+
+Every entry in `tasks.json` carries *evidence* — the dotted path of the symbol
+that exists once it is done, or `test:<name>`. A task marked done whose
+evidence is missing is a false claim; one marked open whose evidence already
+exists is stale bookkeeping. Both are reported, and the same check runs in the
+test suite, so the file cannot quietly drift from the code. It exists because a
+feature was designed three times, described as outstanding in two documents,
+and deferred by three consecutive passes — a paragraph of prose saying a thing
+is unbuilt looks exactly like a paragraph saying it is built.
 
 ---
 
@@ -473,6 +616,20 @@ automatically (Windows only, and the game must be windowed).
   board is reused rather than rebuilt.
 - [docs/ftg-geojson-import.md](docs/ftg-geojson-import.md) — the Fantasy Town
   Generator schema, reverse-engineered.
+- [docs/building-massing.md](docs/building-massing.md) — storeys, footprints
+  and yards by settlement size, with the measurements behind each threshold.
+- [docs/district-surfaces.md](docs/district-surfaces.md) — what a town is paved
+  with, and whether "district" is something we can key on at all.
+- [docs/fencing.md](docs/fencing.md) — field walls: the seven styles, why a
+  boundary is a surveyed line rather than a stair-step, and how TaleSpire's
+  prop drop test actually works.
+- [docs/interior-slabs.md](docs/interior-slabs.md) — what hand-builders put
+  inside a building, decoded from 2,382 community-placed props.
+- [docs/board-strategy.md](docs/board-strategy.md) — interior versus exterior
+  boards and moving a party between them: what the community recommends, what
+  we do instead, and why.
+- [docs/branching.md](docs/branching.md) — worktrees, and the policy that
+  closes them.
 - [docs/slab-format-v2.md](docs/slab-format-v2.md) — BouncyRock's official slab
   format spec, kept alongside the implementation in `citysmith/slab.py`.
 - [.claude/skills/talespire-boards/SKILL.md](.claude/skills/talespire-boards/SKILL.md)
