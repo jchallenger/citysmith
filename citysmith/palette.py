@@ -31,6 +31,20 @@ REQUIRED_ROLES = ("floor", "wall", "door", "roof")
 #: Roles placed into a wall segment; all must share the wall's footprint.
 WALL_SEGMENT_ROLES = ("door", "wall_window", "wall_interior")
 
+def segment_shape(asset) -> tuple[float, float]:
+    """A wall segment's ``(span, thickness)`` -- which axis it lies on is not part of it.
+
+    **The mesh may be authored along either axis and both are placed correctly.**
+    `place_wall` reads which axis is thin and takes the quarter turn from that,
+    so `Tavern Wall - Small 01` (0.5 x 2.0 x 1.0) and `Village Roof Side Wall
+    With Window 01` (1.0 x 2.0 x 0.5) are the same slot filled two ways.
+    Comparing raw footprints called them incompatible and kept the common house
+    off its own kit's wall for as long as this file has existed.
+    """
+    return (round(max(asset.size_x, asset.size_z), 2),
+            round(min(asset.size_x, asset.size_z), 2))
+
+
 #: Roles that fill a whole cell in the *wall* course: an outside corner is one
 #: full-cell piece rather than two wall segments meeting. Their height must
 #: match the wall's or the storeys either side of a corner drift apart.
@@ -170,7 +184,24 @@ MEDIEVAL = Style(
         # seam that showed wherever a floor slab met a wall. Village is a flat
         # plane, and it is the family our window already comes from, so a
         # facade is now one kit instead of three meeting at each corner.
+        # **The Tavern kit's own wall, not its gable panel.** Both live in
+        # folder `Tavern`, so they were always one kit -- `group='roof'` on
+        # the Village panels names a form, not a family. But they do not mix
+        # at panel granularity: probed on a board, a Village panel between two
+        # `Tavern Wall 01`s carries no timber frame of its own and reads as a
+        # bare plaster patch, and stacked by a level-blind packer it is a pale
+        # column the full height of the wall.
+        #
+        # `Tavern Wall - Small 01` is that wide panel's own partner and blends
+        # invisibly against it; both carry the plinth band that gives a run a
+        # base and a floor line. It is authored 0.5x2.0x1.0 -- thin on the
+        # other axis from the Village panel -- which `place_wall` has always
+        # handled and which `validate` now does too.
+        #
+        # The Village panel keeps one job, below: it is the only 1-cell window
+        # in the whole Medieval Fantasy pack.
         "wall": [
+            _tile(name="Tavern Wall - Small 01", **_MED),
             _tile(name=("Village Roof Side Wall 01", "Village Roof Side Wall 02"), **_MED),
             _tile(name=("Wall (Plain, Small)", "md_wall_1x1_01", "md_wall_1x1_02"), **_MED),
             _tile(group=("wall", "Wall"), tags=("wall",), exclude_tags=_NOT_PLAIN_WALL,
@@ -622,16 +653,32 @@ MEDIEVAL = Style(
         ],
         # 1.39 tall against the field wall's 1.00, and half as thick again:
         # an estate or churchyard wall rather than a boundary between fields.
+        #
+        # **TWO QUERIES, NOT ONE QUERY LISTING TWO NAMES, and the difference
+        # is the whole role.** `resolve` seeds its choice *inside* the first
+        # matching query, so `name=("Stone Wall 02", "Stone Wall 01")` dealt
+        # the ordinary wall on five seeds in eight -- `--fence-style
+        # drystone-tall` was byte for byte `drystone` on most maps, and a
+        # style you can select that silently is not the style
+        # (`docs/fencing.md` §10.5). Split, the second entry is what it was
+        # always meant to be: a fallback for a catalog that does not have the
+        # tall wall, reached only when the first finds nothing.
         "field_wall_tall": [
-            _prop(name=("Stone Wall 02", "Stone Wall 01"), **_MED),
+            _prop(name=("Stone Wall 02",), **_MED),
+            _prop(name=("Stone Wall 01",), **_MED),
         ],
         # The joint. 0.51 square and 1.02 tall -- a hair proud of the wall it
         # ends, which is what a gate post does. 72% of fence vertices turn less
         # than 20 degrees (`docs/fencing.md` §2.3), so a post is the piece that
         # fits the whole distribution; the kit's corner pieces are authored at
         # 90 degrees and suit one vertex in eight.
+        # Split for the same reason as `field_wall_tall` above, and here it
+        # mattered more: the fallback is a 1.98-long WALL PANEL, so a seed that
+        # picked it put a full panel across every vertex of every boundary
+        # instead of a post.
         "field_wall_post": [
-            _prop(name=("Stone fence 01", "Stone Wall 01"), **_MED),
+            _prop(name=("Stone fence 01",), **_MED),
+            _prop(name=("Stone Wall 01",), **_MED),
         ],
         # Timber paling at 3.5 ft: a paddock or a yard boundary, not a field.
         "yard_fence": [
@@ -1183,7 +1230,7 @@ class Palette:
                 other = self.resolve(role)
                 if other is None or other is wall:
                     continue
-                if other.footprint != wall.footprint:
+                if segment_shape(other) != segment_shape(wall):
                     problems.append(
                         f"role {role!r} resolves to {other.name!r} with footprint "
                         f"{other.size_x}x{other.size_z}, but it is placed into a wall "

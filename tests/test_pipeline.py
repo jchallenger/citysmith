@@ -158,40 +158,43 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
   chunk budget: 9,000 assets (from board size)
   wrote {npcs}  (4 post(s))
 
-997 assets in 2 chunk(s)
+986 assets in 2 chunk(s)
 
 [FAIL] placements: 94 tile placements are off the half-tile grid (first at x=9.66, z=9.32) -- minis with grid snap will not line up with the floors
-[FAIL] floating geometry: 472 placement(s) stand over nothing (md_stairblock_01 at (0.0, -1.0, 0.0), md_stairblock_01 at (2.0, -1.0, 0.0), md_stairblock_01 at (4.0, -1.0, 0.0)) -- left hanging where the edge fringe took the ground away, or beyond where ground was ever laid
+[FAIL] placements: 2 boundary piece(s) lie outside the 30x30 map (first at x=-0.28, z=9.98) -- an off-map prop drags the bounding box every registration check is measured against
+[FAIL] placements: 72 boundary piece(s) stand in a street or lane (first at x=10.00, z=10.00) -- a wall across a way is an obstacle on the one thing the map is for
+[FAIL] floating geometry: 499 placement(s) stand over nothing (md_stairblock_01 at (0.0, -1.0, 0.0), md_stairblock_01 at (28.0, -1.0, 0.0), md_stairblock_01 at (2.0, -0.5, 2.0)) -- left hanging where the edge fringe took the ground away, or beyond where ground was ever laid
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
 [WARN] storeys: 1:4, mean 1.00  -- every building the same height
-[WARN] tile seams: 287 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
+[WARN] tile seams: 280 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
 [ok  ] connectivity: one connected town covering 100% of walkable space
 [ok  ] building access: 4 of 4 buildings (100.0%) can be entered from the street network
 [ok  ] street width: 0 of 141 street tiles (0.0%) are under 2 tiles (10 ft) wide -- a creature fills one tile, so two cannot pass abreast there
 [ok  ] vehicle width: main street 92/92 tiles hold 4 (20 ft), lane 49/49 tiles hold 2 (10 ft); 0 of 92 through-route tiles (0.0%) are under 3 tiles (15 ft), where a 10 ft cart cannot get past a pedestrian
 [ok  ] board size: 30x30 tiles (150x150 ft) fits the 2000x2000 board
-[ok  ] asset budget: 997 assets = 0.1% of the 1,000,000 per-board limit
-[ok  ] slab export: 2 slab paste(s), largest 2,514 compressed bytes (cap 30,720)
+[ok  ] asset budget: 986 assets = 0.1% of the 1,000,000 per-board limit
+[ok  ] slab export: 2 slab paste(s), largest 2,724 compressed bytes (cap 30,720)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] field walls: none in the source
-[ok  ] yards: 4 of 4 buildings stand apart enough for a yard (207 cells)
+[ok  ] yards: 4 of 4 buildings stand apart enough for a yard (366 cells; wrapped 4)
 [ok  ] marsh: none in the source
 [ok  ] quarters: none; trades cluster at 0.00x, under the threshold -- this settlement has no quarters to find
 
   wrote {svg}  (tile numbers here match the chunk table below)
   wrote 2 slab file(s) in {out}
 
-Chunk grid: 1 row(s) x 2 col(s) of 24x24 tiles (120x120 ft)
+Chunk grid: 2 row(s) x 2 col(s) of 24x24 tiles (120x120 ft)
 
       c00 c01
  r00   #   # 
+ r01   #   # 
         # = written    . = open country, skipped
 
   [landscape]
-          r00c00+1  x    0-29   z    2-25      763 assets (2 cells)  pin-landscape-r00c00+1.slab.txt
+          r00c00+3  x    0-25   z    0-27      752 assets (4 cells)  pin-landscape-r00c00+3.slab.txt
   [structure]
-            r00c00  x    0-23   z    2-25      234 assets, 4 buildings  pin-structure-r00c00.slab.txt
+            r00c00  x    0-23   z    0-23      234 assets, 4 buildings  pin-structure-r00c00.slab.txt
 
 Every chunk shares one origin (a registration marker at the map's corner),
 so paste each file at the SAME anchor point. Do not move the camera between
@@ -214,41 +217,46 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
   surfaces: 631 ground, 128 floor, 92 street, 49 plaza
   0 wall cells, 0 gate cells, 4 buildings with doors
 
-994 assets in 5 chunk(s)
+974 assets in 7 chunk(s)
 
 [FAIL] placements: 95 tile placements are off the half-tile grid (first at x=9.66, z=9.32) -- minis with grid snap will not line up with the floors
-[FAIL] floating geometry: 473 placement(s) stand over nothing (md_stairblock_01 at (0.0, -1.0, 0.0), md_stairblock_01 at (2.0, -1.0, 0.0), md_stairblock_01 at (4.0, -1.0, 0.0)) -- left hanging where the edge fringe took the ground away, or beyond where ground was ever laid
+[FAIL] placements: 2 boundary piece(s) lie outside the 30x30 map (first at x=-0.28, z=9.98) -- an off-map prop drags the bounding box every registration check is measured against
+[FAIL] placements: 67 boundary piece(s) stand in a street or lane (first at x=10.00, z=10.00) -- a wall across a way is an obstacle on the one thing the map is for
+[FAIL] floating geometry: 491 placement(s) stand over nothing (md_stairblock_01 at (0.0, -1.0, 0.0), md_stairblock_01 at (28.0, -1.0, 0.0), md_stairblock_01 at (2.0, -0.5, 2.0)) -- left hanging where the edge fringe took the ground away, or beyond where ground was ever laid
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
 [WARN] storeys: 1:4, mean 1.00  -- every building the same height
-[WARN] tile seams: 287 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
+[WARN] tile seams: 280 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
 [ok  ] connectivity: one connected town covering 100% of walkable space
 [ok  ] building access: 4 of 4 buildings (100.0%) can be entered from the street network
 [ok  ] street width: 0 of 141 street tiles (0.0%) are under 2 tiles (10 ft) wide -- a creature fills one tile, so two cannot pass abreast there
 [ok  ] vehicle width: main street 92/92 tiles hold 4 (20 ft), lane 49/49 tiles hold 2 (10 ft); 0 of 92 through-route tiles (0.0%) are under 3 tiles (15 ft), where a 10 ft cart cannot get past a pedestrian
 [ok  ] board size: 30x30 tiles (150x150 ft) fits the 2000x2000 board
-[ok  ] asset budget: 994 assets = 0.1% of the 1,000,000 per-board limit
-[ok  ] slab export: 5 slab paste(s), largest 840 compressed bytes (cap 30,720)
+[ok  ] asset budget: 974 assets = 0.1% of the 1,000,000 per-board limit
+[ok  ] slab export: 7 slab paste(s), largest 798 compressed bytes (cap 30,720)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] field walls: none in the source
-[ok  ] yards: 4 of 4 buildings stand apart enough for a yard (207 cells)
+[ok  ] yards: 4 of 4 buildings stand apart enough for a yard (366 cells; wrapped 4)
 [ok  ] marsh: none in the source
 [ok  ] quarters: none; trades cluster at 0.00x, under the threshold -- this settlement has no quarters to find
 
   wrote {svg}  (tile numbers here match the chunk table below)
-  wrote 5 slab file(s) in {out}
+  wrote 7 slab file(s) in {out}
 
-Chunk grid: 1 row(s) x 2 col(s) of 24x24 tiles (120x120 ft)
+Chunk grid: 2 row(s) x 2 col(s) of 24x24 tiles (120x120 ft)
 
       c00 c01
  r00   #   # 
+ r01   #   # 
         # = written    . = open country, skipped
 
-          r00c00ne  x   12-23   z    2-13      229 assets, 1 buildings  pin-r00c00ne.slab.txt
-          r00c00nw  x    0-11   z    2-13      225 assets, 1 buildings  pin-r00c00nw.slab.txt
-          r00c00se  x   12-23   z   14-25      229 assets, 1 buildings  pin-r00c00se.slab.txt
-          r00c00sw  x    0-11   z   14-25      235 assets, 1 buildings  pin-r00c00sw.slab.txt
-            r00c01  x   24-29   z    2-25       76 assets  pin-r00c01.slab.txt
+          r00c00ne  x   12-23   z    0-11      199 assets, 1 buildings  pin-r00c00ne.slab.txt
+          r00c00nw  x    0-11   z    0-11      208 assets, 1 buildings  pin-r00c00nw.slab.txt
+          r00c00se  x   12-23   z   12-23      167 assets, 1 buildings  pin-r00c00se.slab.txt
+          r00c00sw  x    0-11   z   12-23      164 assets, 1 buildings  pin-r00c00sw.slab.txt
+            r00c01  x   24-25   z    0-23       90 assets  pin-r00c01.slab.txt
+            r01c00  x    0-23   z   24-27      132 assets  pin-r01c00.slab.txt
+            r01c01  x   24-25   z   24-27       14 assets  pin-r01c01.slab.txt
 
 TILE THE CHUNKS ONTO BLANK BOARD. Each file holds one region of the map with
 its terrain, buildings and walls together, and the regions do not overlap --

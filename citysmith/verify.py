@@ -29,6 +29,7 @@ from .raster import (
     CART_TILES,
     FLOOR,
     GROUND,
+    LANE,
     LANE_ROAD,
     LANE_TILES,
     MAIN_ROAD,
@@ -464,6 +465,8 @@ def check_placements(builder, tm) -> list[str]:
     problems.extend(_ground_sheet(builder, tm))
     problems.extend(_wall_solidity(builder, tm))
     problems.extend(_prop_collisions(builder))
+    problems.extend(_boundaries_stay_on_the_map(builder, tm))
+    problems.extend(_boundaries_do_not_block_a_way(builder, tm))
     return problems
 
 
@@ -632,6 +635,91 @@ def _obb(asset, placement) -> tuple[float, ...]:
     return oriented_box(asset, placement.x + ox, placement.z + oz, placement.rot)
 
 
+def _boundary_ids(builder) -> set[str]:
+    """Every asset a boundary pass can lay: field walls, yard boundaries, posts.
+
+    Derived from the tables rather than listed, for the reason
+    `_fences_built` records at length -- a hardcoded list reported
+    `--fence-style paling` as unbuilt over 782 standing panels. `YARD_BOUNDARY`
+    is here too now that the yard boundary is dealt per tier and can be any of
+    four pieces.
+    """
+    from .build import FENCE_STYLES, YARD_BOUNDARY
+
+    roles = {r for spec in FENCE_STYLES.values()
+             for r in (spec.panel, spec.post) if r}
+    roles |= set(YARD_BOUNDARY.values())
+    roles |= {"yard_fence", "field_wall", "field_wall_post", "field_wall_tall",
+              "field_hedge"}
+    return {a.id for r in roles
+            for a in (builder.palette.resolve(r),) if a is not None}
+
+
+def _boundary_boxes(builder):
+    """``(placement, asset)`` for every boundary piece on the board."""
+    catalog = builder.palette.catalog
+    ids = _boundary_ids(builder)
+    for p in builder.placements:
+        if p.asset_id not in ids:
+            continue
+        asset = catalog.by_id(p.asset_id)
+        if asset is not None:
+            yield p, asset
+
+
+def _boundaries_stay_on_the_map(builder, tm) -> list[str]:
+    """No boundary piece may lie outside the map rectangle.
+
+    `docs/fencing.md` §2.4: a fence segment reaches 258 tiles at its longest
+    and a quarter of every line lies outside the crop window, so a run laid
+    without clipping puts props up to 188 tiles off the map. Every other
+    consumer clips by construction -- `_fill_polygon` writes into a bounded
+    grid and discards the rest -- and a prop run gets no such protection.
+
+    This **fails** rather than warns, and not for tidiness: the build's
+    bounding box is what every registration marker, chunk anchor and
+    `anchor_on_a_whole_tile` check is measured against, so one prop off the map
+    moves all of them.
+    """
+    from .build import rotated_footprint
+
+    out = []
+    for p, asset in _boundary_boxes(builder):
+        sx, sz = rotated_footprint(asset, p.rot)
+        if (p.x - sx / 2 < -0.5 or p.x + sx / 2 > tm.width + 0.5
+                or p.z - sz / 2 < -0.5 or p.z + sz / 2 > tm.depth + 0.5):
+            out.append(p)
+    if not out:
+        return []
+    first = out[0]
+    return [f"{len(out)} boundary piece(s) lie outside the {tm.width}x{tm.depth} "
+            f"map (first at x={first.x:.2f}, z={first.z:.2f}) -- an off-map prop "
+            "drags the bounding box every registration check is measured against"]
+
+
+def _boundaries_do_not_block_a_way(builder, tm) -> list[str]:
+    """No boundary piece may stand in a street, lane, plaza or pier.
+
+    The playability check of the three, and the one that matters: a drystone
+    wall laid across a road is an impassable line through the one thing the map
+    exists to let people walk down. Both boundary passes avoid it by
+    construction -- `_lay_fences` opens the run where the paving is,
+    `_lay_yards` refuses a panel whose overhang would land in one -- so this is
+    the artifact-side proof that they did.
+    """
+    from .build import blocks_a_way
+
+    ways = frozenset({STREET, PLAZA, LANE, PIER})
+    out = [p for p, asset in _boundary_boxes(builder)
+           if blocks_a_way(tm, asset, p.x, p.z, p.rot, ways)]
+    if not out:
+        return []
+    first = out[0]
+    return [f"{len(out)} boundary piece(s) stand in a street or lane "
+            f"(first at x={first.x:.2f}, z={first.z:.2f}) -- a wall across a "
+            "way is an obstacle on the one thing the map is for"]
+
+
 def _prop_collisions(builder) -> list[str]:
     """Props whose colliders intersect another prop's.
 
@@ -656,22 +744,15 @@ def _prop_collisions(builder) -> list[str]:
     measures, for every prop rather than by exempting fences, and a real
     overlap between two fence panels still fails.
     """
-    from .build import FENCE_STYLES, oriented_aabb, oriented_depth
+    from .build import oriented_aabb, oriented_depth
 
     catalog = builder.palette.catalog
-    boundary_ids = {
-        a.id for spec in FENCE_STYLES.values()
-        for r in (spec.panel, spec.post) if r
-        for a in (builder.palette.resolve(r),) if a is not None
-    }
-    boundary_ids |= {
-        a.id for r in ("yard_fence", "field_wall", "field_wall_post")
-        for a in (builder.palette.resolve(r),) if a is not None
-    }
+    boundary_ids = _boundary_ids(builder)
 
     boxes: list[tuple[float, ...]] = []
     spans: list[tuple[float, float]] = []
     joinable: list[float] = []
+    rots: list[int] = []
     for p in builder.placements:
         asset = catalog.by_id(p.asset_id)
         if asset is None or asset.kind != "prop":
@@ -682,6 +763,7 @@ def _prop_collisions(builder) -> list[str]:
         # burial. Zero for anything that is not a boundary panel.
         joinable.append(min(asset.size_x, asset.size_z)
                         if p.asset_id in boundary_ids else 0.0)
+        rots.append(p.rot)
 
     at: dict[tuple[int, int], list[int]] = {}
     for i, box in enumerate(boxes):
@@ -711,14 +793,29 @@ def _prop_collisions(builder) -> list[str]:
                     continue
                 # **A boundary turns corners, and a corner is an overlap by
                 # design.** Measured on Pelvesthollow: 577 of the flagged pairs
-                # are `Wooden Fence` against `Wooden Fence` at a penetration of
+                # were `Wooden Fence` against `Wooden Fence` at a penetration of
                 # exactly 0.180, which is that panel's own thickness -- one
-                # panel running east meeting the next running north. The yard
-                # fences on the board have complete corners, so the game is
-                # plainly not dropping them. Anything deeper than a panel's own
-                # thickness is a panel buried in another and still fails.
+                # panel running east meeting the next running north.
+                #
+                # **A corner is not the only thing that penetrates by a
+                # thickness, and that is what this allowance used to miss.**
+                # Two panels lying along the SAME line, lapped by half their
+                # length, separate on their thin axis first, so the minimum
+                # penetration is also exactly the thickness -- and the
+                # allowance waved through every one. That is how the yard
+                # boundary came to be laid twice over on every board this
+                # project has built, invisibly to the checks:
+                # `docs/fencing.md` §10.1. The 577 pairs above were not all
+                # corners; 507 of them were laps.
+                #
+                # So a join has to be a TURN. Rotation is a step index and 12
+                # steps is a half turn, so two pieces are parallel exactly when
+                # their steps agree modulo 12 -- whatever bearing the run is
+                # on, which matters because a field wall follows a surveyed
+                # line and uses all 24.
                 limit = min(joinable[i], joinable[j])
-                if limit > 0.0 and depth <= limit + e:
+                if (limit > 0.0 and depth <= limit + e
+                        and (rots[i] - rots[j]) % 12 != 0):
                     joins += 1
                     continue
                 clashing.update((i, j))
@@ -1148,6 +1245,33 @@ def _fences_built(builder) -> bool:
     return bool(ids & {p.asset_id for p in builder.placements})
 
 
+def _yards_built(builder) -> bool:
+    """Did the yard pass lay a boundary? See the note at the call site."""
+    count = getattr(builder, "yard_pieces", None)
+    if count is not None:
+        return count > 0
+    ids = {a.id for r in FEATURE_ROLES["yards"]
+           for a in (builder.palette.resolve(r),) if a is not None}
+    return bool(ids & {p.asset_id for p in builder.placements})
+
+
+def _yard_forms(tm, yards) -> str:
+    """The mix of yard shapes, so a report line says what a town looks like.
+
+    A count of cells cannot tell a town of back yards from a town of full ones,
+    and the whole point of sizing a yard from its site is that they differ.
+    """
+    from collections import Counter
+    from .build import yard_form, yard_reach_by_side
+
+    forms = Counter()
+    for bid in yards:
+        doors = tm.doors.get(bid) or []
+        forms[yard_form(yard_reach_by_side(tm, bid),
+                        doors[0][2] if doors else None)] += 1
+    return ", ".join(f"{k} {v}" for k, v in forms.most_common())
+
+
 def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
     """What each designed feature had available, and what it actually built.
 
@@ -1202,11 +1326,19 @@ def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
     yards = yard_cells(tm)
     total = len({v for row in tm.building for v in row if v})
     if yards:
-        level = "pass" if built(FEATURE_ROLES["yards"]) else "fail"
+        # **Ask the pass, do not infer from asset ids** -- the same rule
+        # `_fences_built` states, and the yard boundary walked into it the
+        # moment it was dealt per tier: `FEATURE_ROLES["yards"]` named
+        # `yard_fence`, which only the utility tier builds from now, so a town
+        # of hedged cottages reported its yards as unbuilt. And the reverse
+        # fails too, since `field_wall` and `field_hedge` are shared with
+        # `_lay_fences`. `Builder.yard_pieces` is what the pass laid.
+        level = "pass" if _yards_built(builder) else "fail"
         cells = sum(len(c) for c in yards.values())
+        forms = _yard_forms(tm, yards)
         out.append((level, "yards",
                     f"{len(yards)} of {total} buildings stand apart enough for a "
-                    f"yard ({cells} cells)"
+                    f"yard ({cells} cells; {forms})"
                     + ("" if level == "pass" else " but none was surfaced")))
     else:
         out.append(("pass", "yards",

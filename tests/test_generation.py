@@ -1015,15 +1015,24 @@ def test_the_roof_sits_on_the_wall_head():
     from citysmith.palette import MEDIEVAL, Palette
     from citysmith.raster import FLOOR, TileMap, _find_perimeters, _place_doors
 
+    from citysmith import walls as W
+
     palette = Palette(load_or_build(), MEDIEVAL)
     wall = palette.require("wall")
+    # **The head is measured over the whole family, not over the 1-cell piece.**
+    # A run is packed with the kit's 2-cell panel wherever one fits, so on a
+    # 5x4 building the narrow piece may not be placed at all -- looking only
+    # for it reported "nothing built" on a wall that was there.
+    fam = W.families(palette.catalog).get(wall.folder)
+    assert fam is not None
+    wall_ids = {a.id for v in fam.pieces.values() for a in v}
     # `_lay_roofs` deals ridge, side and corner pieces, not the flat cap the
     # "roof" role resolves to, so the roof is found by form. The Village wall
     # panels are tagged `group='roof'` too -- they ship in a roof set -- so
     # they have to come back out, or the wall counts as its own roof.
     roof_ids = {a.id for a in palette.catalog.assets
                 if "roof" in (a.group_tag or "").lower()
-                and "wall" not in a.name.lower()}
+                and "wall" not in a.name.lower()} - wall_ids
     assert roof_ids
 
     for floors in (1, 2, 3):
@@ -1037,7 +1046,7 @@ def test_the_roof_sits_on_the_wall_head():
         _place_doors(tm, None)
         b = build_from_tilemap(tm, palette, storeys=floors, roofs=True)
 
-        heads = [p.y + wall.size_y for p in b.placements if p.asset_id == wall.id]
+        heads = [p.y + wall.size_y for p in b.placements if p.asset_id in wall_ids]
         roofs = [p.y for p in b.placements if p.asset_id in roof_ids]
         assert heads and roofs, f"{floors} storey: nothing built"
         assert abs(min(roofs) - max(heads)) < 1e-6, (
@@ -2177,19 +2186,33 @@ def test_every_tier_turns_its_corner_in_its_own_kit():
         "trade": ("wall", "wall_corner"),
     }
 
+    # **What is placed is the tier's whole FAMILY, not the role's own asset.**
+    # A run is packed with the kit's 2-cell panel wherever one fits, so the
+    # 1-cell piece the `wall` role resolves to need never appear on a small
+    # building -- looking only for it reported "no variant was placed" on a
+    # wall that was standing. The role still names the kit, which is the part
+    # this test is about.
+    from citysmith import walls as W
+
+    families = W.families(palette.catalog)
     checked = 0
     for bid in ("house-0001", "tavern-0001", "temple-0001", "stable-0001"):
         wall_role, corner_role = roles[tier_of(bid)]
-        # Common and trade deal the wall per building across three variants,
-        # so ask which one this building actually got rather than assuming
-        # variant 0 -- that is the whole point of the deal.
-        walls = [palette.resolve(wall_role, v) for v in range(3)]
-        corners = [palette.resolve(corner_role, v) for v in range(3)]
+        role_wall = next((palette.resolve(wall_role, v) for v in range(3)
+                          if palette.resolve(wall_role, v) is not None), None)
+        assert role_wall is not None, f"{bid}: {wall_role!r} resolves to nothing"
+        fam = families.get(role_wall.folder)
+        assert fam is not None, f"{bid}: no wall family for {role_wall.folder!r}"
+
         b = build_from_tilemap(_one_building(bid), palette, storeys=2)
         placed = {p.asset_id for p in b.placements}
-        wall = next((w for w in walls if w is not None and w.id in placed), None)
-        assert wall is not None, f"{bid}: no {wall_role!r} variant was placed"
-        corner = next((c for c in corners if c is not None and c.id in placed), None)
+        members = [a for v in fam.pieces.values() for a in v]
+        wall = next((a for a in members
+                     if a.id in placed and "corner" not in a.name.lower()), None)
+        assert wall is not None, (
+            f"{bid}: nothing from the {fam.kit!r} family was placed")
+        corner = next((a for a in members
+                       if a.id in placed and "corner" in a.name.lower()), None)
         if corner is None:
             continue          # mitred, which is the allowed fallback
         assert _kit_of(corner) == _kit_of(wall), (
@@ -2498,6 +2521,147 @@ def test_wall_stairs_are_inside_parallel_and_land_on_the_curtain():
     for c in by_height[top]:
         assert any((c[0] + dx, c[1] + dz) in curtain for _, dx, dz in SIDE_OFFSETS), (
             f"top tread {c} does not reach the curtain")
+
+
+def test_a_wall_stair_is_filled_solid_underneath():
+    """A tread is a tread and not a stringer, so the column under it reaches
+    the ground -- and the ground has to still be there when it does.
+
+    This is the invariant `_lay_wall_stairs` claims and it shipped broken, in a
+    way no test that read the tilemap could have seen: the grid said "ground"
+    at the foot of the flight the whole time. What actually happened is two
+    correct passes disagreeing about what a placement covers. `_lay_terrain`
+    sheets open country in 2x2 blocks; `_lay_npc_marks` runs last and *clears*
+    the cell it marks, because a mark that merely covers the ground is two
+    coplanar surfaces and a person arriving inside a barrel. `clear_cells`
+    identifies a placement by its collider centre, which for a 2x2 block is one
+    of its four cells -- so one post took the ground out from under four, and
+    on Forest Church six posts left fifteen cells of bare board. Two of them
+    were under the rampart stair, which then stood over nothing.
+
+    So the fixture is built twice: once to find where the treads and the ground
+    tiles under them actually landed, and again with a post standing on each of
+    those ground tiles' own cells -- the cell a clear would name. Then the
+    column under every tread is sampled from the emitted boxes.
+    """
+    from citysmith.build import (
+        TOWN_WALL_TILES, build_from_tilemap, cell_of, placed_bounds,
+    )
+    from citysmith.catalog import load_or_build
+    from citysmith.npcs import GUARD, Population, Post
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.verify import _Occupancy
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    stair = palette.resolve("city_wall_stair")
+    assert stair is not None, "the fixture needs a stair to look for"
+    assert palette.resolve("npc_guard_mark") is not None, (
+        "no mark asset, so no cell would ever be cleared and this would pass "
+        "without testing anything")
+
+    tm = _ring_map(thickness=3)
+
+    def town(population):
+        return build_from_tilemap(tm, palette, storeys=1, roofs=False,
+                                  wall_tiles=TOWN_WALL_TILES,
+                                  npc_population=population)
+
+    plain = town(None)
+    treads = [p for p in plain.placements if p.asset_id == stair.id]
+    assert treads, "no stair was laid on the rampart"
+
+    # Which cell `clear_cells` would name for the ground under each tread.
+    # Read off the placements rather than recomputed from the 2x2 grid: the
+    # thing being tested is where the tiles landed.
+    byid = plain.byid
+    marks: set[tuple[int, int]] = set()
+    for p in plain.placements:
+        asset = byid.get(p.asset_id)
+        if asset is None or p.asset_id in plain.prop_ids or asset.size_y > 0.75:
+            continue
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        if any(x0 <= t.x < x1 and z0 <= t.z < z1 for t in treads):
+            marks.add(cell_of(p, asset))
+    assert marks, "no ground was found under any tread"
+
+    posts = [Post(x=x, z=z, duty=GUARD, name=f"Sentry {i}", role="guard")
+             for i, (x, z) in enumerate(sorted(marks))]
+    built = town(Population(posts=posts))
+
+    # Sample the emitted boxes at every quarter tile from the board up to the
+    # underside of each tread. A quarter is the thinnest surface tile in the
+    # medieval set, so nothing can hide between two samples.
+    treads = [p for p in built.placements if p.asset_id == stair.id]
+    heights = sorted({round(h * 0.25, 3) for p in treads
+                      for h in range(1, int(round(p.y / 0.25)))})
+    occupancy = {h: _Occupancy(built, h) for h in heights}
+    hollow = [(p.x, p.z, h) for p in treads for h in heights
+              if h < p.y - 1e-6
+              and not occupancy[h].solid_at(p.x + 0.5, p.z + 0.5)]
+    assert not hollow, (
+        f"{len(hollow)} sample(s) under a tread stand over nothing "
+        f"{hollow[:4]} -- the flight is a folded ribbon, not a stair")
+
+
+def test_an_npc_mark_does_not_take_the_ground_from_the_cells_around_it():
+    """The general form of the bug the stair test caught, stated as a hole.
+
+    `verify.floating_placements` only fires when something happens to be
+    standing on the missing ground, and mostly nothing is: of the fifteen cells
+    a Forest Church build lost this way, thirteen were empty, and of East
+    Tradebourne's fifty-four, fifty-two were. The FAIL that was raised against
+    the build named a sack and a bush, and the note written on it blamed the
+    border taper -- when not one of the fifty-four holes was anywhere near the
+    border. So this asks the question the report could not: does every cell the
+    map gives ground to have ground in the placements?
+    """
+    import math
+
+    from citysmith import raster as R
+    from citysmith.build import build_from_tilemap, edge_taper, placed_bounds
+    from citysmith.catalog import load_or_build
+    from citysmith.npcs import GUARD, Population, Post
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import TileMap
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    block = palette.resolve("ground_2x2")
+    mark = palette.resolve("npc_guard_mark")
+    assert block is not None and mark is not None, (
+        "without a 2x2 block and a mark there is nothing here to over-reach")
+
+    tm = TileMap.blank(24, 24)
+    # Odd/odd cells: a 2x2 block is laid from an even corner, so its collider
+    # centre -- the cell `clear_cells` names it by -- is the odd one. These are
+    # exactly the posts that used to delete a whole block.
+    posts = [Post(x=x, z=z, duty=GUARD, name=f"Sentry {i}", role="guard")
+             for i, (x, z) in enumerate([(9, 9), (13, 15), (17, 11)])]
+    b = build_from_tilemap(tm, palette, storeys=1, roofs=False,
+                           npc_population=Population(posts=posts))
+    laid = sum(1 for p in b.placements if p.asset_id == mark.id)
+    assert laid == len(posts), f"{laid} of {len(posts)} marks were laid"
+
+    ground: set[tuple[int, int]] = set()
+    for p in b.placements:
+        asset = b.byid.get(p.asset_id)
+        if (asset is None or p.asset_id in b.prop_ids or asset.size_y > 0.75
+                or asset.size_x < 0.9 or asset.size_z < 0.9):
+            continue
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        for cx in range(int(math.floor(x0 + 1e-6)), int(math.ceil(x1 - 1e-6))):
+            for cz in range(int(math.floor(z0 + 1e-6)), int(math.ceil(z1 - 1e-6))):
+                ground.add((cx, cz))
+
+    # The ragged fringe is ground the build deliberately never laid, so it is
+    # not a hole. Everything else is.
+    taper = edge_taper(tm)
+    holes = [(x, z) for z in range(tm.depth) for x in range(tm.width)
+             if tm.surface[z][x] != R.VOID and taper.get((x, z), 0.0) is not None
+             and (x, z) not in ground]
+    assert not holes, (
+        f"{len(holes)} cell(s) the map gives ground to have none in the "
+        f"placements {holes[:6]} -- bare board, and nothing standing on it to "
+        "make it visible")
 
 
 # -- scatter clearance --------------------------------------------------------

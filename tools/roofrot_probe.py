@@ -61,13 +61,40 @@ from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
 from citysmith.slab import Slab, encode
 
+#: Footprint filters. **`1x1` was the only one for as long as this tool has
+#: existed, and that hid the family the gable needs.** Tavern and Rural each
+#: ship their roof at TWO scales: a single-course family of 1x1x1 pieces, and
+#: a double-course family of 1x2x2 and 2x2x2 ones that steps two rings at a
+#: time. `_lay_roofs` builds at the single-course scale, and **both of the
+#: kit's `end` pieces -- the only gable terminators in the whole catalog --
+#: are in the double-course family**, so the tool built to answer "which
+#: quarter turn closes this" could not see either of them.
+FOOTPRINTS = {
+    "1x1": ((1.0, 1.0),),
+    "1x2": ((1.0, 2.0), (2.0, 1.0)),
+    "2x2": ((2.0, 2.0),),
+    "wide": ((1.0, 2.0), (2.0, 1.0), (2.0, 2.0)),
+    "all": None,
+}
+
+
+def _footprint_ok(a, footprint: str) -> bool:
+    allowed = FOOTPRINTS.get(footprint)
+    if allowed is None:
+        return max(a.size_x, a.size_z) <= 2.0
+    return (a.size_x, a.size_z) in allowed
+
+
 ROTS = (0, 6, 12, 18)
-COL_PITCH = 3          #: cells between piece columns
-ROW_PITCH = 3          #: cells between rotation rows
+COL_PITCH = 3          #: cells between piece columns (1x1 scale)
+ROW_PITCH = 3          #: cells between rotation rows (1x1 scale)
+WIDE_PITCH = 5         #: ... and at the double-course scale, where a piece is
+                       #: two cells deep and would otherwise sit on its
+                       #: neighbour rather than beside it
 RUN = 3                #: pieces in the straight-run band
 
 
-def roof_pieces(catalog, kit: str) -> list:
+def roof_pieces(catalog, kit: str, footprint: str = "1x1") -> list:
     """Every 1x1-footprint roof tile in one kit, by name.
 
     Chimneys are included deliberately: the point is to see what each piece
@@ -78,7 +105,7 @@ def roof_pieces(catalog, kit: str) -> list:
     for a in catalog.assets:
         if a.kind != "tile" or (a.folder or "") != kit:
             continue
-        if (a.size_x, a.size_z) != (1.0, 1.0):
+        if not _footprint_ok(a, footprint):
             continue
         if "roof" not in ((a.group_tag or "") + a.name).lower():
             continue
@@ -155,6 +182,11 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--kit", default="Tavern",
                     help="catalog folder, e.g. Tavern, 'Castle Fortified', Rural")
+    ap.add_argument("--footprint", default="1x1", choices=sorted(FOOTPRINTS),
+                    help="which SCALE of the kit's roof family to sweep. "
+                         "1x1 is the single-course family _lay_roofs builds "
+                         "from; wide is the double-course family, which is "
+                         "the only one with an `end` piece.")
     ap.add_argument("--hips", action="store_true",
                     help="lay four hips, one per rotation offset, instead of "
                          "the piece matrix -- the decisive test, and small "
@@ -170,9 +202,9 @@ def main() -> None:
 
     palette = Palette(load_or_build(), MEDIEVAL)
     cat = palette.catalog
-    pieces = roof_pieces(cat, args.kit)
+    pieces = roof_pieces(cat, args.kit, args.footprint)
     if not pieces:
-        ap.error(f"no 1x1 roof pieces in folder {args.kit!r}")
+        ap.error(f"no {args.footprint} roof pieces in folder {args.kit!r}")
 
     byname = {}
     for a in cat.assets:
@@ -210,8 +242,10 @@ def main() -> None:
         return
 
     out: list = []
-    width = len(pieces) * COL_PITCH + 4
-    depth = len(ROTS) * ROW_PITCH + RUN * 0 + 12
+    cp = WIDE_PITCH if args.footprint != "1x1" else COL_PITCH
+    rp = WIDE_PITCH if args.footprint != "1x1" else ROW_PITCH
+    width = len(pieces) * cp + 4
+    depth = len(ROTS) * rp + 12
 
     for dz in range(-4, depth):
         for dx in range(-4, width):
@@ -220,18 +254,18 @@ def main() -> None:
     # Row labels: rotation index, in a stack west of each row.
     for r, rot in enumerate(ROTS):
         for t in range(r + 1):
-            out.append(place_tile(marker, -3, r * ROW_PITCH, t * marker.size_y))
+            out.append(place_tile(marker, -3, r * rp, t * marker.size_y))
     # Column labels: piece index, in a stack south of each column.
-    south = len(ROTS) * ROW_PITCH + 2
+    south = len(ROTS) * rp + 2
     for c in range(len(pieces)):
         for t in range(c + 1):
-            out.append(place_tile(marker, c * COL_PITCH, south, t * marker.size_y))
+            out.append(place_tile(marker, c * cp, south, t * marker.size_y))
 
     # Band A: the matrix. One pedestal per (piece, rotation), with a marker
     # block off its north side.
     for c, piece in enumerate(pieces):
         for r, rot in enumerate(ROTS):
-            x, z = c * COL_PITCH, r * ROW_PITCH
+            x, z = c * cp, r * rp
             out.append(place_tile(pedestal, x, z, 0.0))
             out.append(place_tile(marker, x, z - 1, 0.0))
             out.append(place_tile(piece, x, z, pedestal.size_y, rot))
@@ -242,9 +276,9 @@ def main() -> None:
     runz = south + 4
     for c, piece in enumerate(pieces):
         for r, rot in enumerate(ROTS):
-            z = runz + r * (RUN + 1)
+            z = runz + r * (RUN + 2)
             for i in range(RUN):
-                x = c * COL_PITCH
+                x = c * cp
                 out.append(place_tile(pedestal, x, z + i, 0.0))
                 out.append(place_tile(piece, x, z + i, pedestal.size_y, rot))
 

@@ -35,12 +35,14 @@ import collections
 import contextlib
 import math
 import random
+import weakref
 import zlib
 from dataclasses import dataclass, field
 
 from .catalog import Asset
 from .city import Building, City, Rect
-from .palette import Palette
+from .palette import Palette, segment_shape
+from . import walls as W
 from .slab import MAX_COMPRESSED_BYTES, Placement, Slab, SlabError, encode
 
 #: Rotation steps per quarter turn (24 steps in a full turn).
@@ -592,6 +594,93 @@ def place_wall(asset: Asset, tx: int, tz: int, side: str, y: float = 0.0) -> Pla
     return place_centered(asset, tx + 1 - thickness / 2, tz + 0.5, y, rot)
 
 
+#: Catalog -> its wall families. **A `WeakKeyDictionary`, and the first cut of
+#: this was keyed on `id(catalog)`, which is a bug.** CPython reuses an id once
+#: the object it belonged to is collected, so a catalog built, used and dropped
+#: could hand its id to the next one and the second catalog would silently be
+#: served the first one's families. Nothing held a reference to the catalog, so
+#: there was nothing stopping the collection either -- the cache made the
+#: aliasing *more* likely, not less.
+#:
+#: That is the shape of an order-dependent test failure: correct in isolation,
+#: wrong only when something else ran first and freed an address. Keying on the
+#: object drops the entry when the catalog goes, and keeps no catalog alive.
+_WALL_FAMILIES: dict[int, dict] = {}
+
+
+def wall_families(catalog) -> dict:
+    """Every wall family in a catalog, built once and remembered.
+
+    Cached because the facade pass asks for a family per building, and
+    rebuilding the index 989 times on East Tradebourne is the kind of cost
+    that only shows on the largest map anyone runs.
+
+    **The entry is dropped when the catalog is, and that is not tidiness.**
+    Keyed on `id(catalog)` alone -- which is what this was first -- the cache
+    is wrong rather than merely stale: CPython reuses an address once the
+    object at it is collected, so a catalog built, used and dropped could hand
+    its id to the next one and the second catalog would silently be served the
+    first one's families. Nothing here held a reference to the catalog, so
+    nothing prevented the collection either; the cache made the aliasing more
+    likely, not less. That is the shape of an order-dependent failure --
+    correct in isolation, wrong only when something else ran first and freed
+    an address.
+
+    `Catalog` is a dataclass with `eq`, so it is unhashable and cannot key a
+    `WeakKeyDictionary`. `weakref.finalize` gets the same guarantee without a
+    hash: the entry cannot outlive the object whose address it is filed under.
+    """
+    key = id(catalog)
+    got = _WALL_FAMILIES.get(key)
+    if got is None:
+        got = W.families(catalog)
+        _WALL_FAMILIES[key] = got
+        weakref.finalize(catalog, _WALL_FAMILIES.pop, key, None)
+    return got
+
+
+def wall_family_of(catalog, asset: Asset | None):
+    """The wall family the piece ``asset`` belongs to, or None.
+
+    **The kit is the folder**, so this is a folder lookup and nothing cleverer.
+    It is what lets the palette keep choosing a tier's *material* -- its style
+    queries are the only thing that knows civic means dressed stone -- while
+    the catalog supplies everything else that kit ships.
+    """
+    if asset is None:
+        return None
+    return wall_families(catalog).get(asset.folder)
+
+
+def place_wall_span(asset: Asset, tx: int, tz: int, side: str, span: int,
+                    y: float = 0.0) -> Placement:
+    """Place a wall piece covering ``span`` cells from ``(tx, tz)`` along ``side``.
+
+    The generalisation of :func:`place_wall`, which is this with ``span=1`` and
+    is kept as the name every caller already uses. Only the centre along the
+    run changes; the rotation and the inset onto the cell boundary are the same
+    rules and deliberately the same code, **because which axis the mesh is
+    authored along is read off the collider and never assumed** -- `Rural Wall
+    02` is 0.5 x 2 x 2 and `castle wall 2x2` is 2 x 2 x 0.5, and both have to
+    end up lying along the run.
+    """
+    rot = _SIDE_ROT.get(side)
+    if rot is None:
+        raise ValueError(f"side must be one of {SIDES}, got {side!r}")
+    if asset.size_z > asset.size_x:
+        rot = (rot + _QUARTER) % 24
+
+    sx, sz = rotated_footprint(asset, rot)
+    thickness = min(sx, sz)
+    if side in ("n", "s"):
+        cx = tx + span / 2.0
+        cz = tz + (thickness / 2 if side == "n" else 1 - thickness / 2)
+    else:
+        cz = tz + span / 2.0
+        cx = tx + (thickness / 2 if side == "w" else 1 - thickness / 2)
+    return place_centered(asset, cx, cz, y, rot)
+
+
 @dataclass
 class BuildStats:
     """What a build produced, for reporting and for slab-splitting decisions."""
@@ -637,6 +726,11 @@ class Builder:
         #: boundary built". A pass knows what it did; nothing downstream can
         #: recover it from a finished placement. Same argument as `layer_of`.
         self.fence_pieces: int | None = None
+        #: How many boundary pieces `_lay_yards` laid, for the same reason
+        #: `fence_pieces` exists: the yard boundary is dealt per tier now, and
+        #: `field_wall` and `field_hedge` are shared with `_lay_fences`, so no
+        #: asset id can say which pass placed one. Ask the pass.
+        self.yard_pieces: int | None = None
         #: Which layer each placement belongs to, parallel to ``placements``.
         #: Recorded at ``add`` time because it is a property of the *pass* that
         #: emitted it, and nothing about a finished placement can recover it.
@@ -1859,9 +1953,9 @@ def interior_fabric(palette: Palette, tier: str, variant: int = 0) -> Fabric:
     partition = palette.resolve("wall_interior")
     if partition is None or _kit_of(partition) != _kit_of(wall):
         partition = wall
-    if window is not None and window.footprint != wall.footprint:
+    if window is not None and segment_shape(window) != segment_shape(wall):
         window = None      # would overhang the cell; see Palette.validate
-    if door is None or door.footprint != wall.footprint:
+    if door is None or segment_shape(door) != segment_shape(wall):
         door = palette.require("door")
 
     corner = palette.resolve(corner_role)
@@ -2282,6 +2376,13 @@ _PROP_CATEGORY_BY_KIND: dict[str, str] = {
 #: raster (there is no PARK surface), so they tile as ground.
 _BLOCK_SURFACES = {"ground": "ground_2x2", "field": "field", "marsh": "marsh_2x2"}
 
+#: Which role each of those blocks actually lays, so `_block_role` can tell a
+#: cell that still wants the class default from one a yard or a quarter has
+#: repainted. These mirror `base_roles` in `build_from_tilemap`; they are
+#: separate because the block pass runs before that closure is in scope, and
+#: because getting them out of step is exactly the bug §10.2 records.
+_CLASS_DEFAULT_ROLE = {"ground": "ground", "field": "field_edge", "marsh": "marsh"}
+
 #: How much deeper the bed goes per cell away from the bank, and the most it
 #: is allowed to drop. **TaleSpire's water tile is translucent and tints with
 #: what is under it** -- verified with a three-channel probe whose beds sat 0,
@@ -2375,8 +2476,24 @@ def _bed_role(b: "Builder", preferred: str, fallback: str) -> str:
     return preferred if b.palette.resolve(preferred) is not None else fallback
 
 
+def _block_role(b: Builder, role: str, surface: str) -> str | None:
+    """The 2x2 block that lays ``role``, or None if it has to go a tile at a time.
+
+    ``_BLOCK_SURFACES`` is keyed on the surface *class*, which is right only
+    while the class's default role is the one being laid. A yard repaints a
+    GROUND cell with `lane_earth` or `yard_gravel`, and the class's block is
+    grass -- see the note in pass 1.
+    """
+    block = _BLOCK_SURFACES.get(surface or "")
+    if block is not None and role == _CLASS_DEFAULT_ROLE.get(surface or ""):
+        return block if b.palette.resolve(block) is not None else None
+    twin = f"{role}_2x2"
+    return twin if b.palette.resolve(twin) is not None else None
+
+
 def _lay_terrain(b: Builder, tm, surface_role, grade: float,
-                 taper: dict[tuple[int, int], float | None]) -> None:
+                 taper: dict[tuple[int, int], float | None],
+                 reserved: set[tuple[int, int]] | None = None) -> None:
     """Lay the ground plane, preferring 2x2 tiles over 1x1 where it can.
 
     Open country is most of a map by area and almost all of it by tile count:
@@ -2384,6 +2501,23 @@ def _lay_terrain(b: Builder, tm, surface_role, grade: float,
     uniform, one 2x2 tile replaces four 1x1s for an identical result, so the
     saving is free. Edges and anything mixed fall back to 1x1, which is what
     keeps coastlines and road margins crisp instead of blocky.
+
+    **A cell a later pass will take back is never fused into a block.** That is
+    what ``reserved`` is for, and it is not a nicety: `Builder.clear_cells`
+    identifies a placement by its collider centre, which for a 2x2 block is one
+    of its four cells, so clearing one cell of a block deletes the whole block
+    and strips the ground from the other three. Measured on Forest Church
+    before this argument existed: 53 posts landed on six 2x2 grass blocks and
+    took all six up, orphaning eighteen cells of which **fifteen were left with
+    no ground in them at all** -- and the only two anyone could see were under
+    the town wall's stair, which then stood over nothing and failed
+    `verify.floating_placements`. The other thirteen were bare board in open
+    country with nothing standing on them to give them away, which is why this
+    survived several reviews. The same trap is written up for yards in
+    `build_from_tilemap`, where it was avoided by deciding the material once
+    instead of clearing and re-laying; a mark cannot do that, because clearing
+    is also how it takes the props out of the cell, so here the block is
+    refused. Forest Church pays 44 tiles in 28,586 for it.
     """
     from . import raster as R
 
@@ -2418,6 +2552,12 @@ def _lay_terrain(b: Builder, tm, surface_role, grade: float,
             s = surface_at(x, z)
             quad = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)]
 
+            # Before every other test, including the water one: a block laid
+            # over a cell something will clear later takes its neighbours with
+            # it when it goes. See the note on ``reserved``.
+            if reserved and any(q in reserved for q in quad):
+                continue
+
             # Open water is the largest single surface on a river map and it
             # tiles perfectly, so a 2x2 quad of it saves three water tiles and
             # three bed tiles. It only qualifies where the whole quad is the
@@ -2440,16 +2580,30 @@ def _lay_terrain(b: Builder, tm, surface_role, grade: float,
                     covered.update(quad)
                 continue
 
-            role = _BLOCK_SURFACES.get(s or "")
-            if role is None or b.palette.resolve(role) is None:
-                continue
             if any(surface_at(qx, qz) != s for qx, qz in quad):
                 continue
             # Same surface is not the same *material*: a yard is GROUND and so
             # is the lawn beside it, and a 2x2 block laid across both puts
             # grass over worked ground. Four cells have to agree on the role,
             # not just the class.
-            if len({surface_role(s, qx, qz) for qx, qz in quad}) != 1:
+            agreed = {surface_role(s, qx, qz) for qx, qz in quad}
+            if len(agreed) != 1:
+                continue
+            # **And agreeing is not enough -- the block has to be that role's
+            # own.** The check above was written against a MIXED quad and
+            # passes a uniform one, after which `_BLOCK_SURFACES` looked the
+            # block up by the surface CLASS: four cells that all agree on
+            # `lane_earth` sailed through and were then sheeted in
+            # `ground_2x2`, which is grass. Between 41% and 60% of every yard
+            # on all four towns came out as lawn that way
+            # (`docs/fencing.md` §10.2), and on the board that is the whole
+            # of "the surface is contributing nothing".
+            #
+            # A role with a 2x2 of its own still gets one; anything else falls
+            # through to pass 2 and is laid a tile at a time, which costs
+            # tiles and is the only way to get the material right.
+            role = _block_role(b, agreed.pop(), s)
+            if role is None:
                 continue
             if any(tm.building[qz][qx] for qx, qz in quad):
                 continue
@@ -2640,11 +2794,84 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
                 b.add(place_tile(piece, x, z, crown + (r - 1) * rise, rot))
 
 
-#: How far a yard reaches out from its building, in cells. Two is 10 ft --
-#: enough for a wood stack and somewhere to stand, and short enough that two
-#: neighbours 13 ft apart (Pelvesthollow's median gap) share one strip of
-#: worked ground rather than each claiming a separate one.
+#: How far a yard reaches out from its building, in cells, when nothing is
+#: measured. Two is 10 ft -- enough for a wood stack and somewhere to stand.
+#: **This is now only the fallback**, for a building with no footprint to
+#: measure clearance from; :func:`yard_reach_by_side` is what a real building
+#: gets. See :data:`YARD_MAX_REACH`.
 YARD_REACH = 2
+
+#: The most ground a yard may take on ONE side, in cells. Four is 20 ft.
+#:
+#: **A single reach for every building was the whole of the sizing, and on a
+#: board it is the wrong shape twice over.** At 2 cells a plot is an L round
+#: one corner of the house -- a corner, not an enclosure; reviewed on four
+#: boards at reach 1 to 4, nothing reads until 3 (`docs/fencing.md` §10.6).
+#: And a uniform apron gives a farmstead standing in open country the same
+#: 10 ft skirt as a house wedged between two neighbours, so every yard in a
+#: town is the same yard.
+#:
+#: Cost was expected to be the objection and is not, because `YARD_MIN_GAP`
+#: already gates *which* buildings qualify: across all four towns a uniform
+#: reach of 4 is 7-10% of open ground against reach 2's 3-5%.
+YARD_MAX_REACH = 4
+
+#: How deep the yard on the DOOR's side is allowed to be.
+#:
+#: A house fronting a street keeps a shallow strip in front and puts its ground
+#: behind: that is where the wood, the midden and the work go, and it is the
+#: difference between a front yard and a back one. Capping the door side is the
+#: whole of that distinction -- everything else falls out of the clearance
+#: measurement, so a building with room only in front still gets a front yard,
+#: it is just a shallow one.
+YARD_FRONT_REACH = 2
+
+#: Clearance below this does not make a yard on that side: one cell of worked
+#: ground against a wall is a verge, not somewhere to stand.
+YARD_MIN_SIDE = 2
+
+#: How long a stretch of STREET FRONTAGE has to run straight before it is
+#: worth fencing, in cells.
+#:
+#: **The old rule left every edge onto a way open, and that is two failures in
+#: one line** (`docs/fencing.md` §10.4). A plot fronting a lane along its whole
+#: side had that whole side missing -- 27-29% of every town's yard perimeter,
+#: and on the board a three-sided pen rather than an enclosure. And a yard
+#: that touches no way at all had nothing to borrow an opening from, so 17 of
+#: East Tradebourne's 230 were sealed rings.
+#:
+#: Closing the ring outright is not the answer either, and the board said so:
+#: a frontage against a *diagonal* lane is a stair-step, and a stair-step built
+#: from 2-tile panels is a comb of crossed pieces lying over the paving. So the
+#: frontage is fenced where it actually runs straight and left open where it
+#: steps -- which is what a street frontage is, and it makes the openings fall
+#: where the boundary was ragged anyway. Three cells is 15 ft: enough to read
+#: as a length of wall rather than as one more step.
+FRONTAGE_MIN_RUN = 3
+
+#: The shortest boundary run worth building when nothing meets either end of
+#: it, in cells. Four is two panels: enough to read as a length of fence.
+#:
+#: A single panel standing alone is the stub this pass exists to stop building,
+#: and chaining the runs did not remove it -- it removed the one-cell version
+#: and left the two-cell one, 11% of Graybank's kept runs. A run with a real
+#: corner at either end is a different thing and has no minimum: the
+#: perpendicular run holds it, which is what a boundary turning a corner looks
+#: like.
+FENCE_MIN_ISOLATED = 4
+
+#: The shortest boundary run worth building at all, in cells.
+#:
+#: A run with nothing at either end and less than a panel in it is not a fence,
+#: it is a panel lying in the grass -- and there were a lot of them: 22-36% of
+#: every town's yard boundary runs are one or two cells
+#: (`docs/fencing.md` §10.3). A short run that *is* part of a continuous
+#: boundary is kept, because the perpendicular runs meeting it take the
+#: overhang as an ordinary corner. Two cells is exactly one panel, so this
+#: only ever drops the ones that cannot be built without overhanging both
+#: their own ends -- which is the rule `FENCE_MIN_SEGMENT` states for field
+#: walls, applied to a boundary made of cell edges rather than of a polyline.
+FENCE_MIN_RUN = 2
 
 #: A yard is only worth surfacing if this many of its cells survive. A single
 #: cell of gravel beside a wall is a smudge, not a yard.
@@ -2686,6 +2913,103 @@ YARD_SURFACE = {
 DEFAULT_YARD_SURFACE = "lane_earth"
 
 
+def _clearance(tm, cells: set, side: str, dx: int, dz: int) -> int:
+    """How far open ground reaches out from one face of a building, in cells.
+
+    Walked from every footprint cell that actually has that face exposed, and
+    reported as the **median** of those runs rather than the least of them. A
+    face with one corner clipped by a neighbour still has a yard on it; taking
+    the minimum would let a single blocked cell veto the whole side, which on
+    a rasterised L-shaped footprint is most of them.
+
+    The walk stops at anything that is not open ground -- a building, a road, a
+    watercourse, the map edge -- so the number is "how much of somebody's own
+    ground is out this way", which is exactly what decides how big a yard can
+    be. It stops early at :data:`YARD_MAX_REACH`, since nothing above that is
+    used and open country would otherwise walk to the edge of the map.
+    """
+    from . import raster as R
+
+    runs = []
+    for x, z in cells:
+        if (x + dx, z + dz) in cells:
+            continue                      # interior: this face is not exposed
+        n = 0
+        nx, nz = x + dx, z + dz
+        while (tm.inside(nx, nz) and not tm.building[nz][nx]
+               and tm.surface[nz][nx] == R.GROUND and n < YARD_MAX_REACH):
+            n += 1
+            nx += dx
+            nz += dz
+        runs.append(n)
+    if not runs:
+        return 0
+    runs.sort()
+    return runs[len(runs) // 2]
+
+
+def yard_reach_by_side(tm, bid: str, cells: set | None = None) -> dict[str, int]:
+    """How far this building's yard reaches on each of its four sides.
+
+    **The variance comes from the site, not from a seed**, and that is
+    deliberate: two farmsteads with the same room round them should get the
+    same yard, and the thing that ought to differ between a farmstead and a
+    terrace house is the ground each actually has. `docs/district-surfaces.md`
+    makes the same argument about wards -- an axis that does not discriminate
+    is a knob dressed as a feature.
+
+    Three inputs, in order of how much they decide:
+
+    * **Clearance per side** (:func:`_clearance`) sets the reach. A side with
+      20 ft of its own ground gets 20 ft of yard; a side against a neighbour's
+      wall gets none.
+    * **The door's side is capped** at :data:`YARD_FRONT_REACH`, so a house on
+      a street keeps a shallow frontage and puts its ground round the back.
+    * **A side under :data:`YARD_MIN_SIDE` gets nothing**, so a one-cell gap
+      between two buildings is not fenced as though it were a yard.
+
+    Returns ``{"n": r, "e": r, "s": r, "w": r}``; :func:`yard_form` names the
+    shape that comes out.
+    """
+    if cells is None:
+        cells = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+                 if tm.building[z][x] == bid}
+    if not cells:
+        return {side: 0 for side, _, _ in SIDE_OFFSETS}
+
+    doors = tm.doors.get(bid) or []
+    front = doors[0][2] if doors else None
+
+    out: dict[str, int] = {}
+    for side, dx, dz in SIDE_OFFSETS:
+        reach = _clearance(tm, cells, side, dx, dz)
+        if side == front:
+            reach = min(reach, YARD_FRONT_REACH)
+        out[side] = reach if reach >= YARD_MIN_SIDE else 0
+    return out
+
+
+#: What a set of per-side reaches is called, for the build report and the
+#: scene brief. The names are the ones a person uses about a plot, so a report
+#: line reads as a description of the town rather than as four integers.
+def yard_form(reaches: dict[str, int], front: str | None = None) -> str:
+    """Name the shape of a yard: full, back, front, through, corner, side."""
+    live = [s for s, r in reaches.items() if r > 0]
+    if not live:
+        return "none"
+    if len(live) == 4:
+        return "full"
+    opposite = {"n": "s", "s": "n", "e": "w", "w": "e"}
+    if len(live) == 1:
+        if front is None:
+            return "side"
+        return "front" if live[0] == front else (
+            "back" if live[0] == opposite[front] else "side")
+    if len(live) == 2:
+        return "through" if opposite[live[0]] == live[1] else "corner"
+    return "wrapped"
+
+
 def yard_cells(tm) -> dict[str, set[tuple[int, int]]]:
     """Building id -> the open ground worth calling its yard.
 
@@ -2698,18 +3022,39 @@ def yard_cells(tm) -> dict[str, set[tuple[int, int]]]:
 
     Street and lane cells are excluded: the ground in front of a shop is the
     street's, not the shop's, and paving it as a yard would eat the way.
+
+    **The apron is not square.** Each side reaches as far as that side's own
+    open ground allows (:func:`yard_reach_by_side`), capped in front of the
+    door, so a farmstead in open country gets a full yard up to 20 ft deep and
+    a house wedged into a terrace gets a back yard and nothing else. The forms
+    that come out are named by :func:`yard_form`.
     """
     from . import raster as R
 
     apart = _standing_apart(tm)
+
+    # **Measured once per building, not once per cell.** The apron is walked
+    # cell by cell below, and `yard_reach_by_side` walks the whole footprint;
+    # doing it inside the sweep made a 989-building town quadratic in its own
+    # footprints.
+    footprints: dict[str, set[tuple[int, int]]] = {}
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            bid = tm.building[z][x]
+            if bid in apart:
+                footprints.setdefault(bid, set()).add((x, z))
+    reaches = {bid: yard_reach_by_side(tm, bid, cells)
+               for bid, cells in footprints.items()}
+
     claimed: dict[tuple[int, int], str] = {}
     for z in range(tm.depth):
         for x in range(tm.width):
             bid = tm.building[z][x]
             if not bid or bid not in apart:
                 continue
-            for dz in range(-YARD_REACH, YARD_REACH + 1):
-                for dx in range(-YARD_REACH, YARD_REACH + 1):
+            reach = reaches[bid]
+            for dz in range(-reach["n"], reach["s"] + 1):
+                for dx in range(-reach["w"], reach["e"] + 1):
                     nx, nz = x + dx, z + dz
                     if not tm.inside(nx, nz):
                         continue
@@ -2776,6 +3121,202 @@ def _standing_apart(tm) -> set[str]:
     return {b for b in everyone if nearest.get(b, 99) >= YARD_MIN_GAP}
 
 
+#: The four cardinal sides, as the world segment each cell edge lies on.
+#: ``(t along the run, the boundary line, which way is inward, runs along x)``
+#: -- the whole of what :func:`_run_panels` needs to know about a side.
+_RUN_AXIS = {
+    "n": (0.0, +1.0, True),
+    "s": (1.0, -1.0, True),
+    "w": (0.0, +1.0, False),
+    "e": (1.0, -1.0, False),
+}
+
+
+def boundary_runs(tm, cells: set, all_yard: set, ways: frozenset,
+                  *, skip_ways: bool = True
+                  ) -> list[tuple[str, int, int, int]]:
+    """One yard's edge, chained into maximal straight runs.
+
+    ``(side, fixed coordinate, first, last)`` -- for n/s a run travels along x
+    at a fixed z, for e/w along z at a fixed x.
+
+    **A boundary is a set of cell edges and a fence is a run of panels, and
+    those are not the same thing.** Laying one piece per cell edge is what the
+    yard pass used to do, and with a 2-tile panel on a 1-tile edge it built
+    every fence twice over -- 507 of Pelvesthollow's 599 panels had another
+    lying on them lengthwise, which on the board is posts every 5 ft instead of
+    every 10 and a stub overhanging past every corner (`docs/fencing.md` §10.1).
+    Chaining first is what lets the run be stepped at the panel's own length.
+
+    An edge is on the boundary when the cell across it is neither yard nor
+    building; an edge onto a way is left open, because that is the way in.
+    """
+    lanes: dict[tuple[str, int], list[int]] = {}
+    for x, z in cells:
+        for side, dx, dz in SIDE_OFFSETS:
+            nx, nz = x + dx, z + dz
+            if not tm.inside(nx, nz):
+                continue
+            if (nx, nz) in all_yard or tm.building[nz][nx]:
+                continue
+            if skip_ways and tm.surface[nz][nx] in ways:
+                continue
+            key = (side, z) if side in ("n", "s") else (side, x)
+            lanes.setdefault(key, []).append(x if side in ("n", "s") else z)
+
+    runs: list[tuple[str, int, int, int]] = []
+    for (side, fixed), vals in sorted(lanes.items()):
+        vals.sort()
+        start = prev = vals[0]
+        for v in vals[1:]:
+            if v == prev + 1:
+                prev = v
+                continue
+            runs.append((side, fixed, start, prev))
+            start = prev = v
+        runs.append((side, fixed, start, prev))
+    return runs
+
+
+def facing_a_way(tm, run, ways: frozenset) -> int:
+    """How many cells of this run look out onto a street, lane, plaza or pier."""
+    side, fixed, a, b = run
+    dx, dz = {s: (x, z) for s, x, z in SIDE_OFFSETS}[side]
+    n = 0
+    for v in range(a, b + 1):
+        x, z = (v, fixed) if side in ("n", "s") else (fixed, v)
+        nx, nz = x + dx, z + dz
+        if tm.inside(nx, nz) and tm.surface[nz][nx] in ways:
+            n += 1
+    return n
+
+
+def _run_ends(run) -> tuple[tuple[int, int], tuple[int, int]]:
+    """The two cells a run starts and ends at, for the isolation test."""
+    side, fixed, a, b = run
+    if side in ("n", "s"):
+        return (a, fixed), (b, fixed)
+    return (fixed, a), (fixed, b)
+
+
+def _stub(run, runs) -> bool:
+    """Is this run too short to build, with nothing at either end to hold it?
+
+    Two thresholds, because there are two ways a short run goes wrong. A run
+    under :data:`FENCE_MIN_RUN` cannot be built at all without the panel
+    overhanging both its own ends; a run under :data:`FENCE_MIN_ISOLATED` can,
+    but with nothing at either end it is one panel lying in the grass rather
+    than a fence. Together they were 22-36% of every town's yard boundary runs
+    (`docs/fencing.md` §10.3). A run with a real corner at either end is held
+    by it and has no minimum.
+
+    **The neighbour has to be long enough itself, and that is not pedantry.**
+    The first cut only asked whether any perpendicular run shared an endpoint,
+    which a LONE YARD CELL satisfies four times over -- its own four sides all
+    meet at itself. Graybank built 21 of those, each a cross of four 2-tile
+    panels centred on one 5 ft square, and because such a cell is usually an
+    island cut off by a road, the arms landed in the carriageway. That is the
+    comb this whole pass exists to avoid, arriving from the one direction the
+    run-chaining did not cover.
+    """
+    length = run[3] - run[2] + 1
+    if length >= FENCE_MIN_ISOLATED:
+        return False
+    mine = set(_run_ends(run))
+    for other in runs:
+        if other is run or other[0] == run[0]:
+            continue
+        if other[3] - other[2] + 1 < FENCE_MIN_RUN:
+            continue
+        if mine & set(_run_ends(other)):
+            return False               # a corner holds it, whatever its length
+    return True
+
+
+def _run_panels(piece, run) -> list[tuple[float, float, int]]:
+    """Where pieces go along one run, stepped at the piece's own length.
+
+    Not at :data:`FENCE_MODULE`, though for every piece in the `Fences` kit it
+    is the same 2.0: the length is read off the collider so a per-tier boundary
+    built from some other kit still steps correctly. Same rule as everywhere
+    else here -- an asset's shape is data, and assuming it is the bug.
+
+    **Panels butt outward from BOTH ends and the remainder is one gap in the
+    middle** -- not a last panel pulled back over its neighbour, which was the
+    first cut. A boundary is only ever an odd number of cells long half the
+    time, and rounding *up* laps one panel per odd run: 70 pairs on
+    Pelvesthollow, every one of them a genuine collinear lap that
+    `_prop_collisions` is right to fail now that it can tell a lap from a
+    corner. Rounding down instead puts a 5 ft gap mid-run, where a gate would
+    be, and keeps both corners flush -- and a corner is the part that reads.
+
+    A run shorter than one panel gets a single centred piece. That is a jog
+    inside a longer boundary (`_stub` drops the ones with nothing at either
+    end), and the perpendicular runs meeting it take the overhang as an
+    ordinary corner.
+    """
+    plen = max(piece.size_x, piece.size_z)
+    thick = min(piece.size_x, piece.size_z)
+    at_end, inward, along_x = _RUN_AXIS[run[0]]
+    side, fixed, a, b = run
+
+    t0, t1 = float(a), float(b + 1)
+    line = float(fixed) + at_end
+    off = line + inward * thick / 2.0
+    rot = _SIDE_ROT[side]
+    if piece.size_z > piece.size_x:
+        rot = (rot + _QUARTER) % 24
+
+    length = t1 - t0
+    n = math.floor(length / plen + 1e-9)
+    if n <= 1:
+        ts = [(t0 + t1) / 2.0]
+    else:
+        front = (n + 1) // 2
+        ts = [t0 + plen / 2.0 + i * plen for i in range(front)]
+        ts += [t1 - plen / 2.0 - i * plen for i in range(n - front)][::-1]
+    return [(t, off, rot) if along_x else (off, t, rot) for t in ts]
+
+
+#: How much of a way cell a boundary piece has to cover before it counts as
+#: standing in the road. A 2.06-long hedge on a 2.0 run overhangs its
+#: neighbours by 0.03 -- an inch and a half -- and calling that an obstruction
+#: would fail every build for nothing.
+WAY_INTRUSION = 0.25
+
+
+def covered_cells(piece, cx: float, cz: float, rot: int,
+                  threshold: float = WAY_INTRUSION):
+    """Which cells a boundary piece substantially stands on.
+
+    The panel's own body, rather than points sampled along it. Sampling is what
+    `_lay_fences` did -- centre and both ends -- and it cannot see a panel that
+    crosses the corner of a road cell between two samples: 14 of
+    Pelvesthollow's field-wall panels were standing in a lane, found by a check
+    that measured the box.
+    """
+    sx, sz = rotated_footprint(piece, rot)
+    x0, x1 = cx - sx / 2, cx + sx / 2
+    z0, z1 = cz - sz / 2, cz + sz / 2
+    for x in range(math.floor(x0), math.ceil(x1)):
+        for z in range(math.floor(z0), math.ceil(z1)):
+            if (min(x1, x + 1) - max(x0, x) > threshold
+                    and min(z1, z + 1) - max(z0, z) > threshold):
+                yield x, z
+
+
+def blocks_a_way(tm, piece, cx: float, cz: float, rot: int,
+                 ways: frozenset) -> bool:
+    """Would this boundary piece stand in a street, lane, plaza or pier?
+
+    A wall across a road is an impassable line through the one thing the map
+    exists to let people walk down, so both boundary passes refuse the panel
+    rather than explain the exception, and `verify` measures that they did.
+    """
+    return any(tm.inside(x, z) and tm.surface[z][x] in ways
+               for x, z in covered_cells(piece, cx, cz, rot))
+
+
 def _lay_yards(b: Builder, tm, grade: float,
                taper: dict[tuple[int, int], float | None]) -> int:
     """Surface the worked ground round a building and fence it off.
@@ -2787,12 +3328,18 @@ def _lay_yards(b: Builder, tm, grade: float,
 
     Two things make it a place: a surface that is not lawn, and an edge.
 
-    **The fence here is laid on cell edges, and that is the opposite of what
+    **The edge follows cell edges, and that is the opposite of what
     `_lay_fences` does -- deliberately.** A field boundary is a surveyed line
     at an arbitrary bearing, and stroking one into cells stair-steps it
     (`docs/fencing.md` §2.2). A yard boundary is the outline of a rasterised
     region round a rectangular building: it *is* axis-aligned, so cell edges
     are its true shape rather than an approximation of one.
+
+    **What it does not do is step by the cell.** The boundary is chained into
+    straight runs (:func:`boundary_runs`) and each run is stepped at the
+    panel's own length (:func:`_run_panels`), which is the rule
+    `FENCE_MODULE` already states for field walls. One piece per cell edge
+    built every fence twice; §10.1.
 
     The edge onto a street or a lane is left open. That is the way in, and a
     yard sealed on all four sides is a courtyard nobody can enter.
@@ -2801,7 +3348,6 @@ def _lay_yards(b: Builder, tm, grade: float,
     """
     from . import raster as R
 
-    fence = b.palette.resolve("yard_fence")
     yards = yard_cells(tm)
     if not yards:
         return 0
@@ -2809,6 +3355,7 @@ def _lay_yards(b: Builder, tm, grade: float,
     all_yard = {c for cs in yards.values() for c in cs}
     ways = frozenset({R.STREET, R.PLAZA, R.LANE, R.PIER})
     laid = 0
+    pieces = 0
 
     # **A compound is already enclosed, so its yard is not fenced again.**
     # The barricade round a keep *is* the yard fence; putting a paling round
@@ -2816,7 +3363,7 @@ def _lay_yards(b: Builder, tm, grade: float,
     enclosed = set(R.compounds(tm).values())
 
     for bid, cells in sorted(yards.items()):
-        fence_this = fence if bid not in enclosed else None
+        fence_this = None if bid in enclosed else yard_boundary(b.palette, bid)
         # **The surface is laid by `_lay_terrain`, not here.** It used to be
         # laid here, over ground that pass had already sheeted -- two coplanar
         # tiles in every yard cell, which TaleSpire keeps and lets z-fight.
@@ -2828,24 +3375,94 @@ def _lay_yards(b: Builder, tm, grade: float,
         # it in `SlabChunk.buildings`, which is the number a missing structure
         # paste is diagnosed from.
         for x, z in sorted(cells):
-            drop = taper.get((x, z), 0.0)
-            if drop is None:
+            if taper.get((x, z), 0.0) is None:
                 continue
-            here = grade - drop
             laid += 1
 
-            if fence_this is None:
+        if fence_this is None:
+            continue
+        # The whole ring, frontage included -- then the frontage is opened
+        # again wherever it does not run straight. See `FRONTAGE_MIN_RUN`.
+        runs = boundary_runs(tm, cells, all_yard, ways, skip_ways=False)
+        keep, opened = [], False
+        for run in runs:
+            if _stub(run, runs):
+                opened = True
                 continue
-            for side, dx, dz in SIDE_OFFSETS:
-                nx, nz = x + dx, z + dz
-                if not tm.inside(nx, nz):
+            if (facing_a_way(tm, run, ways)
+                    and run[3] - run[2] + 1 < FRONTAGE_MIN_RUN):
+                opened = True
+                continue
+            keep.append(run)
+
+        # **Every yard gets a way in.** If nothing above opened one -- a plot
+        # ringed by its own straight boundary, or one that touches no way at
+        # all -- a gate is cut in the longest run, on the side facing the most
+        # paving. A yard sealed on four sides is a courtyard nobody can enter,
+        # which is what this pass has said since it was written and what 17 of
+        # East Tradebourne's 230 yards were.
+        gate = None
+        if not opened and keep:
+            gate = max(keep, key=lambda r: (facing_a_way(tm, r, ways),
+                                            r[3] - r[2]))
+
+        for run in keep:
+            panels = _run_panels(fence_this, run)
+            if run is gate and panels:
+                panels.pop(len(panels) // 2)
+            for cx, cz, rot in panels:
+                cell = (int(math.floor(cx)), int(math.floor(cz)))
+                drop = taper.get(cell, 0.0)
+                if drop is None:
                     continue
-                if (nx, nz) in all_yard or tm.building[nz][nx]:
-                    continue          # inside the yard, or against its building
-                if tm.surface[nz][nx] in ways:
-                    continue          # the way in
-                b.add(place_wall(fence_this, x, z, side, here), prop=True)
+                if blocks_a_way(tm, fence_this, cx, cz, rot, ways):
+                    continue
+                b.add(place_centered(fence_this, cx, cz, grade - drop, rot),
+                      prop=True)
+                pieces += 1
+    b.yard_pieces = pieces
     return laid
+
+
+#: What each tier's yard is bounded with.
+#:
+#: **The facade has dealt a kit per tier for a long time and the yard dealt one
+#: piece for everything**: 3.4 ft of `Wooden Fence` round a temple precinct, a
+#: smithy and a cottage alike. Read against the alternatives on one board, at
+#: the distance a party sees them from, the paling is the weakest of four --
+#: low and see-through, closer to decoration than to a boundary
+#: (`docs/fencing.md` §10.5). All four pieces were already pinned.
+#:
+#: The assignment is what each boundary IS, not a ranking:
+#:
+#: * **civic** -- a precinct wall. `Stone Wall 02`, 7 ft, and grand, which is
+#:   wrong on a cottage and right round a temple.
+#: * **trade** -- a working yard with stock and tools in it wants a real wall.
+#:   Drystone, 5 ft.
+#: * **common** -- a garden. The hedge is a living boundary and it breaks up a
+#:   town that would otherwise be masonry from end to end.
+#: * **utility** -- a paddock or a stock pen behind a shed, which is what
+#:   timber paling actually is. The weakest read, on the buildings that carry
+#:   the least.
+#:
+#: A compound is not here: it is enclosed already, and its barricade *is* its
+#: yard fence.
+YARD_BOUNDARY = {
+    "civic": "field_wall_tall",
+    "trade": "field_wall",
+    "common": "field_hedge",
+    "utility": "yard_fence",
+}
+
+#: When a tier's piece is missing from the installed packs. Every style falls
+#: back to the one every medieval catalog has.
+DEFAULT_YARD_BOUNDARY = "yard_fence"
+
+
+def yard_boundary(palette, bid: str):
+    """The piece this building's yard is bounded with, by tier."""
+    role = YARD_BOUNDARY.get(tier_of(bid), DEFAULT_YARD_BOUNDARY)
+    return palette.resolve(role) or palette.resolve(DEFAULT_YARD_BOUNDARY)
 
 
 #: What gathers in a yard, by trade, as palette prop categories. A yard with
@@ -3458,30 +4075,40 @@ def _lay_fences(b: Builder, tm, grade: float,
         if not panels:
             continue
 
-        # A panel is out if any part of it stands on paving or in a building.
-        # Sampled at the centre and both ends rather than the centre alone,
+        # A panel is out if any part of it stands on paving or in a building,
         # so the gap a road opens is as wide as the road.
-        half = FENCE_MODULE / 2.0
-        blocked = [False] * len(panels)
-        for i, (cx, cz, rot) in enumerate(panels):
-            theta = math.radians(-rot * 15.0)
-            ux, uz = math.cos(theta) * half, math.sin(theta) * half
-            for px, pz in ((cx, cz), (cx - ux, cz - uz), (cx + ux, cz + uz)):
-                x, z = int(math.floor(px)), int(math.floor(pz))
+        #
+        # **Measured on the panel's BODY, and it used to be three points on
+        # it** -- the centre and both ends, which was already a correction on
+        # sampling the centre alone. Three points still cannot see a panel that
+        # crosses the corner of a road cell between two of them, and on a
+        # surveyed line at an arbitrary bearing that is the common case rather
+        # than the rare one: 14 of Pelvesthollow's field-wall panels were
+        # standing in a lane, and it took a check that measured the box to
+        # find them. Third time this project has replaced a sample with an
+        # extent, and the general form is in `CLAUDE.md`: metrics must read
+        # the artifact.
+        #
+        # **Tested after the jitter, not before.** A hedgerow wanders up to
+        # 0.30 tiles off its line and takes a rotation step either way, and the
+        # old order tested the panel where it was *going* to be rather than
+        # where it ended up.
+        def obstructed(cx, cz, rot, piece=panel_asset):
+            for x, z in covered_cells(piece, cx, cz, rot):
                 if (not tm.inside(x, z) or tm.surface[z][x] in paved
                         or tm.building[z][x]):
-                    blocked[i] = True
-                    break
+                    return True
+            return False
 
         for i, (cx, cz, rot) in enumerate(panels):
-            if blocked[i]:
-                continue
             if spec.gap and rng.random() < spec.gap:
                 continue
             if spec.jitter:
                 cx += rng.uniform(-spec.jitter, spec.jitter)
                 cz += rng.uniform(-spec.jitter, spec.jitter)
                 rot = (rot + rng.choice((-1, 0, 0, 1))) % 24
+            if obstructed(cx, cz, rot):
+                continue
             here = _fence_ground(tm, taper, grade, cx, cz)
             if here is None:
                 continue
@@ -3606,7 +4233,8 @@ def _ridge_rotations(wing, rings, top_ring, chimney_at):
 
 
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
-               skip: set[tuple[int, int]] | None = None) -> None:
+               skip: set[tuple[int, int]] | None = None,
+               roof_override: dict[str, str] | None = None) -> None:
     """Roof each block as concentric rings, the way hand-builders do.
 
     The convention here is not inferred from screenshots -- it is read out of
@@ -3662,9 +4290,19 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
 
     def sets_for(bid: str):
         tier = tier_of(bid)
-        key = (tier, roof_suffix_for(tier, bid))
+        # **A derelict wall under a sound roof is worse than either.** The
+        # roof is dealt independently of the wall on purpose -- ROOF_MIX
+        # exists because a per-tier constant makes a whole quarter monochrome
+        # -- but a building clad in the `poor` fabric is authored damaged, and
+        # the pack ships the matching roof: `roof_side_slate` resolves to
+        # `Haunted roof 1x1`, the same Abandoned Village kit as the walls.
+        # This is the one case where the roof follows the fabric.
+        forced = (roof_override or {}).get(bid)
+        key = (tier, forced if forced is not None else roof_suffix_for(tier, bid))
         if key not in _cache:
-            _cache[key] = roof_set(b.palette, tier, bid)
+            _cache[key] = (roof_set_named(b.palette, key[1])
+                           if forced is not None
+                           else roof_set(b.palette, tier, bid))
         return _cache[key]
 
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
@@ -4429,6 +5067,22 @@ def roof_set(palette, tier: str, bid: str = ""):
     return tuple(out)
 
 
+def roof_set_named(palette, suffix: str):
+    """The roof pieces for one named material, whatever tier asked for it.
+
+    `roof_set` picks the suffix from the tier; this takes it. Same
+    piece-at-a-time fallback to the thatched set, for the same reason -- a
+    missing slope is invisible in the file and a hole on the board.
+    """
+    base = ("roof_side", "roof_corner", "roof_corner_inner", "roof",
+            "roof_chimney")
+    out = []
+    for role in base:
+        asset = palette.resolve(f"{role}_{suffix}") if suffix else None
+        out.append(asset if asset is not None else palette.resolve(role))
+    return tuple(out)
+
+
 def _roof_piece(fall: tuple[str, ...], side, corner, cap, inner=None,
                 reflex: bool = False, edge_off: int = 0, corner_off: int = 0):
     """The roof asset and rotation for a cell, given the sides it slopes to.
@@ -4772,8 +5426,16 @@ def build_from_tilemap(
         return role
 
     taper = edge_taper(tm)
+    # An NPC mark replaces the cell it stands on rather than covering it, so
+    # `_lay_npc_marks` clears the cell first -- and a 2x2 grass block cleared
+    # by one of its four cells takes the other three away with it. The terrain
+    # pass is told which cells that will happen to and lays them a tile at a
+    # time. See the note on `_lay_terrain`'s ``reserved``.
+    marks = ({(p.x, p.z) for p in npc_population.posts}
+             if npc_population is not None else set())
     with b.layer(LANDSCAPE):
-        _lay_terrain(b, tm, surface_role, grade=floor.size_y, taper=taper)
+        _lay_terrain(b, tm, surface_role, grade=floor.size_y, taper=taper,
+                     reserved=marks)
         _lay_yards(b, tm, grade=floor.size_y, taper=taper)
         _lay_quays(b, tm, grade=floor.size_y, taper=taper)
         _lay_bridges(b, tm, grade=floor.size_y, taper=taper)
@@ -4893,6 +5555,10 @@ def build_from_tilemap(
         util_corner = _usable_corner(palette.resolve("wall_corner_utility"),
                                      util_wall or ext_wall)
 
+        # Built once: the facade asks for a fabric per building and a town is
+        # 989 of them.
+        fabrics = wall_families(palette.catalog)
+
         plan = footprints(tm)
         corner_ok = {
             bid: _corners_affordable(cells) for bid, cells in plan.items()
@@ -4909,14 +5575,19 @@ def build_from_tilemap(
             # door branch below silently lays a solid wall across the doorway
             # -- a temple with no way in, while verify still reports it
             # enterable because verify reads the tilemap, not the placements.
+            glazes = True
             if tier == "civic":
                 face = civic_wall or ext_wall
                 glass, entry = civic_window or window, civic_door or door_asset
                 nook = civic_corner
             elif tier == "utility":
                 # No window in this kit, and none wanted: a barn with glass in
-                # it stops being a barn. `glass=None` skips the whole glazing
-                # branch below rather than dealing a window from another kit.
+                # it stops being a barn. This skips the whole glazing branch
+                # below rather than dealing a window from another kit -- and it
+                # is a flag now rather than `glass = None`, because a FABRIC
+                # can supply a window of its own and would otherwise put glass
+                # in every barn built from a kit that has one.
+                glazes = False
                 face = util_wall or ext_wall
                 glass, entry = None, door_asset
                 nook = util_corner if util_wall is not None else None
@@ -4932,6 +5603,79 @@ def build_from_tilemap(
             if not corner_ok.get(bid, True):
                 nook = None   # too small to spend cells on corners
 
+            # The family the tier is built from. **The palette picks the KIT
+            # and `walls.families` supplies the rest of it** -- both panel
+            # widths, the window at each, the corner and the base/mid/top
+            # course variants. Neither half can do the other's job: the
+            # palette's style queries are what decide that civic is dressed
+            # stone, and only the catalog knows what else that kit ships.
+            fvar = zlib.crc32(bid.encode())
+            # **The tier deals a FABRIC, not a kit.** A tier used to resolve
+            # exactly one kit, so 46 of Forest Church's 51 buildings were the
+            # same two panels -- and before the wide-panel work the common
+            # house at least dealt two, so across-building variety had gone
+            # 2 -> 1 while within-wall variety went up. `walls.TIER_FABRICS`
+            # gives each tier a weighted set and this deals one per building,
+            # stably, the way the wall variant used to be.
+            fabric = W.fabric_for(tier, fvar, fabrics)
+            fam = fabric or wall_family_of(b.palette.catalog, face)
+            if fabric is not None:
+                # A fabric is an explicit CROSS-KIT choice, so every piece the
+                # palette resolved for this tier is the wrong material by
+                # construction. Re-point the fallbacks at the fabric's own, and
+                # leave them None where it has none -- a facade that falls back
+                # to another kit's window is the mismatch this whole section
+                # exists to prevent.
+                face = fabric.piece("wall", 1, "mid", fvar) or face
+                nook = fabric.piece("corner", 1, "mid", fvar)
+                # Only ever the 1-CELL window here: `glass` is used as a
+                # single-segment fallback, and a 2-cell piece dropped into one
+                # cell overhangs its neighbour and drags the board off the grid.
+                glass = fabric.piece("window", 1, "mid", fvar)
+            # A tier that glazes still needs something to glaze with. The
+            # fabric's 2-cell window counts even when it has no 1-cell one --
+            # that is Abandoned Village, which has exactly that.
+            if glazes and fam is not None:
+                glazes = bool(glass is not None
+                              or fam.all("window", 1) or fam.all("window", 2))
+            else:
+                glazes = glazes and glass is not None
+
+            def _piece(role, span, course, fallback=None, _f=fam, _v=fvar):
+                got = _f.piece(role, span, course, _v) if _f else None
+                return got if got is not None else fallback
+
+            def _deal(role, span, course, key, _f=fam, _h=storey_h):
+                """One of the slot's interchangeable siblings, per PANEL.
+
+                `_piece` deals per *building*, which is right for a corner --
+                a facade that changes material at the corner reads as a
+                mistake -- and wrong for a run, where nothing distinguishes
+                the siblings and repeating one is just a repeated texture.
+                Keyed on the cell so a rebuild is identical; `zlib.crc32`
+                rather than `hash()`, because str hashes are salted per
+                process and would re-deal the whole town every build.
+                """
+                got = _f.deal(role, span, course, key) if _f else None
+                if got is None:
+                    return None
+                slop = W.WIDE_HEIGHT_SLOP if span == 2 else 1e-6
+                return got if abs(got.size_y - _h) <= slop else None
+
+            def _wide(role, course, _f=fam, _v=fvar, _h=storey_h):
+                """The 2-cell piece, only if it can share this course.
+
+                Height is checked here rather than trusted, for the reason
+                `_usable_wall` gives one width down: `Tavern Wall 01` is 2.03
+                against its own kit's 2.00, which is inside the slop and lands
+                as an invisible overlap -- but a piece further out would raise
+                a storey and take the roof up with it.
+                """
+                got = _f.piece(role, 2, course, _v) if _f else None
+                if got is None or abs(got.size_y - _h) > W.WIDE_HEIGHT_SLOP:
+                    return None
+                return got
+
             # Group the building's exposed edges by cell. A cell with two adjacent
             # sides exposed is an outside corner, and placing a wall along each of
             # them puts two wall ends in the same square -- the doubled geometry
@@ -4944,37 +5688,84 @@ def build_from_tilemap(
                 sides_at.setdefault((x, z), set()).add(side)
 
             own = plan.get(bid, set())
+            corner_at: dict[tuple[int, int], str] = {}
+            door_at: set[tuple[int, int]] = set()
             for (x, z), exposed in sides_at.items():
-                corner = CORNER_BY_SIDES.get(frozenset(exposed))
+                turn = CORNER_BY_SIDES.get(frozenset(exposed))
                 # Same reflex problem as the roof: at the elbow of an L the wall
                 # turns into the building, so a full-cell outside corner there
                 # looks wrong and eats a floor tile the plan needs.
-                if corner is not None and _is_reflex(
+                if turn is not None and not _is_reflex(
                         {c: 0 for c in own}, x, z, tuple(sorted(exposed))):
-                    corner = None
+                    corner_at[(x, z)] = turn
+                if any((x, z, s) in doors for s in exposed):
+                    door_at.add((x, z))
+
+            # **Built course by course, and each course packed as RUNS rather
+            # than cell by cell.** Three things follow from that, and none of
+            # them can be done in a per-cell loop:
+            #
+            #  * a run is covered by the kit's own 2-cell panel wherever one
+            #    fits, which is what the kit is authored for -- runs average
+            #    4.9 cells on these maps and not one is shorter than 2;
+            #  * the odd cell left over **moves between courses**
+            #    (`walls.pack`, rule `shift`), because a remainder in the same
+            #    slot on every storey draws a full-height column of a visibly
+            #    different panel;
+            #  * pieces come from the course the storey stands in, so a plinth
+            #    goes at the bottom and a cornice at the head instead of one
+            #    course repeated all the way up.
+            top_level = max((storeys_at(tm, bid, x, z, storeys)
+                             for (x, z) in sides_at), default=0)
+            for level in range(top_level):
+                y = top + level * storey_h
+                here = {c: sides for c, sides in sides_at.items()
+                        if storeys_at(tm, bid, c[0], c[1], storeys) > level}
+                if not here:
+                    continue
+
                 # A door has to keep a segment of its own, so a corner cell
-                # carrying one falls back to per-side walls for the ground course
-                # only; the storeys above it still get the corner piece.
-                door_cell = any((x, z, s) in doors for s in exposed)
-                # Per cell, not per building: a large footprint is built as two
-                # ranges (`building_ranges`), so its far end stands a storey
-                # lower and the roof pass floods it into its own block.
-                for level in range(storeys_at(tm, bid, x, z, storeys)):
-                    y = top + level * storey_h
-                    if corner is not None and nook is not None and not (level == 0 and door_cell):
-                        b.add(place_tile(nook, x, z, y, WALL_CORNER_ROT[corner]))
+                # carrying one falls back to per-side walls for the ground
+                # course only; the storeys above it still get the corner piece.
+                turned = {c: t for c, t in corner_at.items()
+                          if c in here and nook is not None
+                          and not (level == 0 and c in door_at)}
+                for (x, z), turn in sorted(turned.items()):
+                    course = W.course_at(
+                        level, storeys_at(tm, bid, x, z, storeys))
+                    b.add(place_tile(_piece("corner", 1, course, nook),
+                                     x, z, y, WALL_CORNER_ROT[turn]))
+
+                for (x, z), sides in here.items():
+                    if level:
                         continue
-                    for side in sorted(exposed):
-                        if level == 0 and (x, z, side) in doors and entry is not None:
+                    for side in sorted(sides):
+                        if (x, z, side) in doors and entry is not None:
                             b.add(place_wall(entry, x, z, side, y))
-                            continue
-                        # Windows break the blank masonry that made every facade
-                        # read as a fortification. Roughly every third segment,
-                        # chosen by a stable hash so rebuilds are identical; ground
-                        # floors get fewer (privacy, and doors already break those
-                        # runs). zlib.crc32, not hash(): str hashes are salted per
-                        # process, so hash() would re-deal windows every rebuild.
-                        key = zlib.crc32(f"{bid}:{x}:{z}:{level}:{side}".encode())
+
+                segs = [(x, z, side) for (x, z), sides in here.items()
+                        if (x, z) not in turned for side in sorted(sides)
+                        if not (level == 0 and (x, z, side) in doors)]
+                for side, rx, rz, length in W.runs_of(segs):
+                    course = W.course_at(
+                        level, storeys_at(tm, bid, rx, rz, storeys))
+                    narrow = _piece("wall", 1, course, face)
+                    wide = _wide("wall", course)
+                    rule = W.DEFAULT_PACK if wide is not None else "single"
+                    for off, span in W.pack(length, level, rule):
+                        cx = rx + off if side in ("n", "s") else rx
+                        cz = rz if side in ("n", "s") else rz + off
+                        # Windows break the blank masonry that made every
+                        # facade read as a fortification. Dealt by a stable
+                        # hash so rebuilds are identical -- zlib.crc32, not
+                        # hash(), because str hashes are salted per process.
+                        #
+                        # **The rate carries from cells to panels unchanged,
+                        # and that is arithmetic rather than an assumption.**
+                        # A run of six at one-in-three is two 1-cell windows or
+                        # one 2-cell window: the count halves and the glazed
+                        # *area* is identical. Fewer, wider openings is the
+                        # point rather than a side effect.
                         rate = glaze_rate(tier, side, fronts.get(bid),
                                           bid in on_main)
                         # Ground floors keep one fewer window than the storeys
@@ -4983,8 +5774,32 @@ def build_from_tilemap(
                         # cottage does not end up blank.
                         if rate and level == 0:
                             rate += 1
-                        seg = glass is not None and rate and key % rate == 0
-                        b.add(place_wall(glass if seg else face, x, z, side, y))
+                        key = zlib.crc32(
+                            f"{bid}:{cx}:{cz}:{level}:{side}".encode())
+                        lit = glazes and rate and key % rate == 0
+                        piece = None
+                        if lit:
+                            piece = _deal("window", span, course, key)
+                            if piece is None:
+                                piece = (_wide("window", course) if span == 2
+                                         else _piece("window", 1, course, glass))
+                        if piece is None and lit and span == 2:
+                            # The kit ships no 2-cell window. Rather than drop
+                            # the glazing, split the panel: one narrow window
+                            # beside one narrow wall, which is what this run
+                            # did before wide packing existed.
+                            small = _piece("window", 1, course, glass)
+                            if small is not None and narrow is not None:
+                                b.add(place_wall(small, cx, cz, side, y))
+                                nx = cx + 1 if side in ("n", "s") else cx
+                                nz = cz if side in ("n", "s") else cz + 1
+                                b.add(place_wall(narrow, nx, nz, side, y))
+                                continue
+                        if piece is None:
+                            piece = _deal("wall", span, course, key)
+                        if piece is None:
+                            piece = (wide if span == 2 else narrow) or face
+                        b.add(place_wall_span(piece, cx, cz, side, span, y))
 
         # Upper-storey floors. Without these a multi-storey building is a hollow
         # box, and now that facades carry windows you can see straight through one
@@ -5019,7 +5834,16 @@ def build_from_tilemap(
         _build_porches(b, tm, floor.size_y, taper, storey_h, storeys)
         towers = pick_towers(tm, storeys)
         if roof_asset is not None:
-            _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers))
+            # Which buildings the fabric deal put in a derelict kit, so the
+            # roof can follow. Recomputed rather than passed down because the
+            # facade pass owns its own loop and this is a different one.
+            poor = {bid: "slate" for bid in tm.perimeter
+                    if (lambda f: f is not None
+                        and W.KIT_ROLE.get(f.kit) == "poor")(
+                        W.fabric_for(tier_of(bid),
+                                     zlib.crc32(bid.encode()), fabrics))}
+            _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers),
+                       roof_override=poor)
         _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
         b.group = ""
         _lay_town_wall(b, tm, town_wall, top, wall_tiles)

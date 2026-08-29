@@ -170,10 +170,13 @@ def test_a_yard_is_surfaced_and_bounded_when_it_is_reported():
         r for r in feature_report(builder, tm, layout) if r[1] == "yards")
     assert level == "pass", detail
 
-    fence = builder.palette.resolve("yard_fence")
-    assert fence is not None
-    assert any(p.asset_id == fence.id for p in builder.placements), \
-        "a reported yard must actually be fenced"
+    # **Ask the pass, not an asset id.** This used to look for `yard_fence`,
+    # which was right while every yard on every board was paling. The boundary
+    # is dealt per tier now, so a town of houses builds hedges and no paling at
+    # all -- and the converse trap is live too, since `field_wall` and
+    # `field_hedge` are also what `_lay_fences` builds from. Same lesson as
+    # `_fences_built`, arriving one pass over.
+    assert builder.yard_pieces, "a reported yard must actually be bounded"
 
 
 def test_a_town_whose_trades_do_not_cluster_reports_no_quarters():

@@ -3,8 +3,9 @@
 A design pass over how tall buildings are, what shape they take, and what
 happens in the space around them. Measured on all four towns.
 
-Nothing here is built yet. The companion pass on surfaces is
-`docs/district-surfaces.md`; §5 is the finding they share.
+§§1-11 are the design pass; §12 is what was built and what building it taught.
+The companion pass on surfaces is `docs/district-surfaces.md`; §5 is the
+finding they share.
 
 ## 1. Every settlement is the same height, and that is a bug with a number
 
@@ -325,12 +326,30 @@ to accept it, to buy a pack, or to vary something that is not material.
 §4 designed these and three successive passes deferred them. Built now, and the
 gate took three attempts to get right -- which is the part worth recording.
 
-**What a yard is:** open ground within `YARD_REACH` (2 cells, 10 ft) of a
-building that stands far enough from its neighbours to own it. Surfaced by
-trade -- gravel for a smithy or a warehouse, trodden earth otherwise -- and
-bounded with `yard_fence` timber paling on every edge that does not face a
-street, a lane or its own building. The street edge is left open: that is the
-way in, and a yard sealed on four sides is a courtyard nobody can enter.
+**What a yard is:** open ground beside a building that stands far enough from
+its neighbours to own it, reaching as far on each side as that side's own open
+ground allows. Surfaced by trade -- gravel for a smithy or a warehouse, trodden
+earth otherwise -- and bounded per tier: an estate wall round a temple,
+drystone round a trade, a hedge round a house, timber paling round a shed
+(`YARD_BOUNDARY`). The boundary is chained into straight runs and stepped at
+the panel's own length; the street frontage is fenced where it runs straight
+and left open where it stair-steps, and every yard gets at least one way in.
+`docs/fencing.md` §11.
+
+**The reach is measured, not constant** (`yard_reach_by_side`, added
+2026-08-27; the whole argument is in `docs/fencing.md` §10.6). `YARD_REACH` was
+one number -- 2 cells, 10 ft -- for every building in every town, and on a
+board that is the wrong shape twice over: at two cells the boundary is an L
+round one corner of the house rather than an enclosure, and a farmstead in open
+country gets the same skirt as a house wedged between neighbours, so every yard
+in a town is the same yard. Each side now takes as much as it has, to
+`YARD_MAX_REACH` (4 cells, 20 ft), and **the door's side is capped at
+`YARD_FRONT_REACH`** -- which is the whole of the difference between a front
+yard and a back one. Measured on East Tradebourne: the ground behind is deeper
+than the ground in front on **205 of 228 yards (90%)**, door side mean reach
+1.25 against 3.50 opposite, and yard sizes now run 5 to 197 cells against a
+flat 49. `yard_form` names what comes out -- full, wrapped, corner, through,
+front, back, side.
 
 **The gate is the whole feature, and two plausible versions were wrong:**
 

@@ -57,6 +57,14 @@ ROLES: dict[str, dict] = {
     "window":       {"forms": ("wall", "window"), "shape": "panel", "height": 2.0,
                      "needs": ("window",)},
     "door":         {"forms": ("door",), "shape": "panel", "height": None},
+    # The same three roles at two cells. Every kit the generator builds from
+    # ships them and none of them can currently be resolved.
+    "wide_wall":    {"forms": ("wall",), "shape": "wide", "height": 2.0},
+    "wide_window":  {"forms": ("wall", "window"), "shape": "wide", "height": 2.0,
+                     "needs": ("window",)},
+    # The 0.5 piece that closes the notch two perpendicular panels leave at an
+    # outside corner. The kit's own answer to a corner, and unused here.
+    "filler":       {"forms": ("wall", "corner"), "shape": "sliver", "height": 2.0},
     # An outside corner: a full cell, the same height as the wall beside it.
     "corner":       {"forms": ("corner",), "shape": "cell", "height": 2.0},
     # A reflex corner: thin both ways, it only plugs the notch.
@@ -77,6 +85,15 @@ def shape_of(a) -> str:
     """A shape class, because a footprint is the thing assumptions get wrong."""
     sx, sz = a.size_x, a.size_z
     lo, hi = min(sx, sz), max(sx, sz)
+    # **A panel two cells long is a panel, not a "big" piece**, and calling it
+    # big is the same mistake `palette._WALLSZ` makes by pinning the wall role
+    # to a 1-cell footprint: it made every 2-cell wall in the library
+    # invisible to this index, which is most of the wall pieces in the pack.
+    # Kept as its own class rather than folded into "panel" so the existing
+    # 1-cell meaning of "panel" -- which `--complete` and docs/asset-index.md
+    # are written against -- does not shift underneath them.
+    if lo <= 0.5 and hi >= 1.5:
+        return "wide"
     if hi > 1.0:
         return "big"
     if (sx, sz) == (1.0, 1.0):
@@ -133,7 +150,10 @@ def matches(a, role: str) -> bool:
             return False
     if role == "corner" and "inner" in n:
         return False
-    if role == "wall" and any(w in n for w in ("window", "door", "corner")):
+    if role in ("wall", "wide_wall") and any(
+            w in n for w in ("window", "door", "corner")):
+        return False
+    if role == "filler" and "filler" not in n and "inner" not in n:
         return False
     return True
 
@@ -206,18 +226,71 @@ def render_markdown(kits: dict) -> str:
     return "\n".join(out) + "\n"
 
 
+#: What a wall family needs before a run can be packed with wide pieces and
+#: still be one material: the two widths, a window at one of them, and a
+#: corner. The filler is a bonus -- it is an alternative to the corner rather
+#: than an addition to it.
+FAMILY_ROLES = ("wall", "wide_wall", "window", "wide_window", "corner", "filler")
+
+
+def render_families(kits: dict) -> str:
+    """Every kit that could clad a building, and how complete its family is.
+
+    The question this answers is the one the wall-run work kept running into:
+    *which kits can build a wall out of 2-cell panels and still turn a corner
+    in their own material.* `--complete` answers the 1-cell version of it.
+
+    **Height is reported, not assumed.** A kit whose wide piece is a different
+    height from its 1-cell piece cannot mix the two in one course without
+    putting its own storeys out of line -- `Tavern Wall 01` is 2.03 against
+    the rest of its kit's 2.00 -- so the column is there to be read before a
+    kit is chosen, not discovered on a board afterwards.
+    """
+    rows = []
+    for kit, e in kits.items():
+        got = {r: e["roles"].get(r, []) for r in FAMILY_ROLES}
+        if not got["wall"] and not got["wide_wall"]:
+            continue
+        panels = [a for a in e["assets"]
+                  if matches(a, "wall") or matches(a, "wide_wall")]
+        hs = sorted({round(a.size_y, 2) for a in panels})
+        score = sum(1 for r in FAMILY_ROLES if got[r])
+        rows.append((score, len(panels), kit, e["pack"], got, hs))
+    rows.sort(key=lambda r: (-r[0], -r[1], r[2]))
+
+    out = ["kit                        pack                 "
+           + "".join(f"{r[:9]:>10s}" for r in FAMILY_ROLES) + "   heights",
+           "-" * 128]
+    for score, _, kit, pack, got, hs in rows:
+        cells = "".join(f"{(len(got[r]) or '--'):>10}" for r in FAMILY_ROLES)
+        flag = "" if len(hs) == 1 else "  MIXED"
+        out.append(f"{kit[:26]:26s} {pack[:20]:20s}{cells}   "
+                   + ",".join(f"{h:g}" for h in hs) + flag)
+    out += ["", f"{len(rows)} kits can supply a wall panel; "
+            f"{sum(1 for r in rows if r[0] == len(FAMILY_ROLES))} have the "
+            "whole family."]
+    return chr(10).join(out)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--kit")
     ap.add_argument("--role", choices=sorted(ROLES))
-    ap.add_argument("--shape", choices=("cell", "panel", "sliver", "big", "part"))
+    ap.add_argument("--shape",
+                    choices=("cell", "panel", "wide", "sliver", "big", "part"))
     ap.add_argument("--height", type=float)
     ap.add_argument("--complete", action="store_true")
+    ap.add_argument("--families", action="store_true",
+                    help="every kit that could clad a wall, 1-cell and 2-cell")
     ap.add_argument("--out", default="docs/asset-index.md")
     args = ap.parse_args()
 
     assets = [a for a in load_or_build().assets if not getattr(a, "deprecated", False)]
     kits = build(assets)
+
+    if args.families:
+        print(render_families(kits))
+        return
 
     if args.complete:
         for kit in sorted(kits):

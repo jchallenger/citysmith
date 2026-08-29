@@ -2,8 +2,9 @@
 
 A design pass over field walls, yard fences and hedgerows: what the data
 actually contains, why the grid is the wrong home for it, and the staged plan
-that follows. Nothing here is built yet. `docs/ftg-geojson-import.md` §5 stage 5
-is the backlog entry this closes out.
+that follows. `docs/ftg-geojson-import.md` §5 stage 5 is the backlog entry this closes
+out. §§1-8 are the field-wall design and are built; §10 is the design review
+of the *yard* boundary and §11 is what was done about it.
 
 Every number below is measured off the three imported layouts in
 `out/*/layout.json` (Pelvesthollow, Graybank, East Tradebourne) and off
@@ -583,3 +584,386 @@ tall" rather than by searching names. Its names are **width x HEIGHT, not
 footprint** -- `tall 1x2` is 1.00 x 2.00 x 1.00 -- which is one more entry for
 "asset names are inconsistent, the collider is the only thing that says the
 shape".
+
+## 10. The yard boundary, reviewed on a board (2026-08-27)
+
+Everything above is about `_lay_fences` -- the *field* boundary, run along its
+surveyed bearing. `_lay_yards` is the other boundary pass, and it had never
+been reviewed. `tools/yard_probe.py` builds it three ways -- structure, style,
+size -- one 34x34 crop of East Tradebourne per panel, one panel per board so
+every frame has the same camera.
+
+Two things about the method, before the findings, because both cost a pass:
+
+- **The camera cannot frame a row of panels, and this is measured.**
+  Ctrl+scroll height is capped: two 1920x1080 frames 45 and 200 ticks apart
+  differ by **0.59** on the mean-abs-diff metric, against the 2.0 noise floor
+  `CLAUDE.md` records. At the cap an oblique covers about 40 tiles and a
+  four-panel row is 151, so the row can only be read by flying -- and WASD
+  ramps, so 1.6 s of `a` moved most of a panel and 2.2 s went off the map
+  entirely. One panel per board, same commands in the same order, puts every
+  panel in the same pixels. `tools/panel_review.ps1`.
+- **The first crop contained the town wall and three-storey blocks**, which
+  dominated every frame and put the yards in shadow. It is chosen now for no
+  wall cells and one- and two-storey buildings. A probe that contains what it
+  is not testing is a probe that gets misread.
+
+### 10.1 The boundary is laid at double density, and it shows
+
+`_lay_yards` calls `place_wall` once per boundary **cell edge**. `place_wall`
+centres the piece on that edge, and `yard_fence` is `Wooden Fence` --
+**2.0 tiles long**. So every panel laps its neighbour by half its own length.
+
+| town | panels | with one lying on them lengthwise | stepped at the module |
+|---|---|---|---|
+| Pelvesthollow | 599 | **507 (85%)** | 321 |
+| Graybank | 2,330 | -- | 1,261 |
+| Forest Church | 472 | -- | 257 |
+
+On the board the lap is not invisible: **posts every 5 ft instead of every
+10, at irregular spacing, with the rails visibly doubled**, and a half-panel
+stub overhanging past every corner into open grass. Stepped at the module the
+same run reads as an ordinary post-and-rail fence.
+
+The overhang also lands where it should not -- panels whose box covers a way,
+or a building:
+
+| town | shipped: on a way / in a building | stepped: on a way / in a building |
+|---|---|---|
+| Pelvesthollow | 27 / 0 | 6 / 0 |
+| Graybank | 65 / 6 | 7 / 0 |
+| Forest Church | 17 / 9 | 2 / 7 |
+
+**The rule already exists one module away.** `build.FENCE_MODULE` is 2.0 and
+`FENCE_MIN_SEGMENT` is 1.0, with the comment "a full-length piece laid on a
+stub overhangs both its ends and reads as a fence pointing the wrong way".
+`_lay_fences` steps by it. `_lay_yards` predates it and steps by the cell.
+
+**`verify` cannot see any of this, and the reason is exact.** The minimum
+penetration of two collinear panels is the panel's own *thickness* (0.180),
+which is precisely the corner-join allowance `_prop_collisions` grants -- so
+all 577 flagged pairs on Pelvesthollow are counted as corners and the check
+passes. The allowance needs to test that the two boxes are *perpendicular*,
+not merely that they meet shallowly.
+
+### 10.2 Between two fifths and three fifths of every yard is laid as lawn
+
+The other half of what makes a yard a place is its surface, and it is missing.
+
+| town | yard cells | laid as `Grass - Lush` |
+|---|---|---|
+| Pelvesthollow | 1,195 | 556 (**47%**) |
+| Graybank | 4,742 | 1,940 (**41%**) |
+| Forest Church | 756 | 452 (**60%**) |
+| East Tradebourne | 11,225 | 5,064 (**45%**) |
+
+`_lay_terrain` pass 1 keys the 2x2 block on the surface **class** --
+`_BLOCK_SURFACES[R.GROUND]` is `ground_2x2`, which is grass -- after checking
+that the four cells agree on their **role**. A quad of four cells that all
+agree on `lane_earth` passes that check and is then sheeted in grass. The
+comment on the branch reads "Four cells have to agree on the role, not just
+the class"; they do agree, and the block laid is the class's anyway.
+
+On the board a yard is a chequer of dark mud patches and lawn, which reads as
+shadow rather than as worked ground. With the fence taken away entirely
+(panel 4 of the structure sweep) **the yard is invisible** -- so the edge is
+carrying the whole feature and the surface is contributing nothing.
+
+### 10.3 A quarter to a third of the runs are stubs
+
+Maximal straight runs of the boundary, and how many are one or two cells long:
+
+| town | runs | 1-2 cells |
+|---|---|---|
+| Pelvesthollow | 92 | 26 (28%) |
+| Graybank | 377 | 83 (22%) |
+| Forest Church | 83 | 30 (36%) |
+| East Tradebourne | 985 | 272 (28%) |
+
+That is the case `FENCE_MIN_SEGMENT` exists to refuse, and on the board it is
+the isolated two-panel run standing in open grass, attached to nothing.
+
+### 10.4 The way in is the whole frontage, and a yard with no frontage has none
+
+The opening rule is "leave open every edge onto a street, lane, plaza or
+pier". It fails at both ends of its range:
+
+- **27-29% of the yard perimeter is open** (Pelvesthollow 220 of 819,
+  Graybank 956 of 3,398, East Tradebourne 2,395 of 8,315). A plot fronting a
+  lane along its whole side has that whole side left out, and reads as a
+  three-sided pen.
+- **A yard that touches no way gets no opening at all**: 17 of East
+  Tradebourne's 230 and 5 of Forest Church's 15 are sealed rings -- the
+  courtyard nobody can enter that this pass's own docstring says it avoids.
+
+**Closing the ring and cutting one gate is NOT the fix, and the board is why.**
+Built that way (panel 3), the frontage against a diagonal lane becomes a
+stair-step of 2-tile panels laid at right angles to each other, which reads as
+a comb of crossed pieces lying over the paving -- §2.2's argument against
+stair-stepping a thin panel run, arriving in the yard pass. Straightening the
+frontage run has to come first.
+
+### 10.5 Style: the paling is the weakest of four, and one style is a coin flip
+
+The same boundary in four materials, in one frame:
+
+| style | piece | height | how it reads at play distance |
+|---|---|---|---|
+| paling (shipped) | `Wooden Fence` | 0.68 (3.4 ft) | **weakest** -- low and see-through, closer to decoration than boundary |
+| drystone | `Stone Wall 01` | 1.00 (5 ft) | strongest; clean butt joints and corners |
+| estate | `Stone Wall 02` | 1.39 (7 ft) | reads, and is grand -- a temple or a manor, not a cottage |
+| hedge | `hedge_piece_01` | 1.00 (5 ft) | reads well as a garden boundary; visible steps where two runs meet |
+
+The facade already deals a wall kit per tier (`tier_of`, four fabrics); the
+yard boundary deals one piece for everything. Three of these four are already
+pinned in the palette, so the axis costs a table rather than an asset hunt.
+
+**`field_wall_tall` is a coin flip.** Its query lists
+`("Stone Wall 02", "Stone Wall 01")` and `Palette.resolve` seeds a choice
+*inside* the first matching query, so `--fence-style drystone-tall` deals the
+ordinary wall on **five seeds in eight** -- the same board as `drystone`. A
+style you can select that silently is not the style.
+
+### 10.6 Size: `YARD_REACH = 2` is too small (BUILT)
+
+Two Pelvesthollow farmsteads with open country round them, at reach 1 to 4:
+
+- **1** -- almost nothing survives; no plot reads.
+- **2** (shipped) -- an L round one corner of the building. A corner, not an
+  enclosure.
+- **3** -- reads as a farmstead, and `_dress_yards` finally has room to put
+  the working life of the trade somewhere.
+- **4** -- the strongest read; two properties, plainly.
+
+The cost was expected to be the objection and is not, because `YARD_MIN_GAP`
+already gates *which* buildings qualify:
+
+| reach | share of open ground (all four towns) | median yard |
+|---|---|---|
+| 1 | 1-2% | 22-30 cells |
+| 2 | 3-5% | 49-61 |
+| 3 | 5-7% | 74-94 |
+| 4 | 7-10% | 98-132 |
+
+Even East Tradebourne at reach 4 is 23,307 of 232,465 open cells.
+
+#### Built, the same day: the reach is measured per side
+
+A uniform reach of 3 or 4 would fix the *scale* and leave the other half of the
+problem standing, which is that **every yard in a town is the same yard**. A
+farmstead in open country and a house wedged between two neighbours have
+different amounts of ground, and the yard should be the ground each one has.
+
+`yard_reach_by_side` measures it. Three inputs, in the order they decide:
+
+- **Clearance per side.** From every footprint cell with that face exposed,
+  walk outward over open ground and take the **median** of the runs -- not the
+  least, because on a rasterised footprint one clipped corner would otherwise
+  veto a whole side. The walk stops at a building, a road, a watercourse or the
+  map edge, so the number is "how much of its own ground is out this way".
+- **The door's side is capped** at `YARD_FRONT_REACH` (2 cells). A house
+  fronting a street keeps a shallow strip and puts its wood, its midden and its
+  work round the back. **That cap is the whole of the difference between a
+  front yard and a back one** -- everything else falls out of the clearance, so
+  a building with room only in front still gets a front yard, just a shallow
+  one.
+- **A side under `YARD_MIN_SIDE` gets nothing.** One cell of worked ground
+  against a wall is a verge, and fencing it produces a panel with a building on
+  both sides.
+
+`yard_cells` then dilates the footprint by those four numbers rather than by
+one, so the apron is a rectangle per side and the corners fill only where both
+adjacent sides are live. `yard_form` names what comes out.
+
+What it produces, over the four towns:
+
+| | before (flat 2) | after (measured) |
+|---|---|---|
+| East Tradebourne yard size | 49 cells, every yard | 5 to 197, quartiles 58 / 85 / 109 |
+| forms | one | full 119, wrapped 56, corner 34, side 10, back 6, through 3 |
+| reach per side | always 2 | 0 on 19%, 2 on 20%, 3 on 7%, 4 on 52% |
+| ground behind deeper than in front | never | **205 of 228 (90%)** |
+| share of open ground | 3-5% | 6-8% |
+
+**The variance is measured from the site, not dealt from a seed**, and that is
+deliberate: two farmsteads with the same room round them *should* get the same
+yard. §7 of this file makes the same argument about wards, and
+`docs/district-surfaces.md` makes it again -- an axis that does not
+discriminate is a knob dressed as a feature. The thing that ought to differ
+between a farmstead and a terrace house is the ground each actually has, and
+that is what is now read.
+
+Read on two boards against the flat apron on identical ground: on the
+Pelvesthollow farmsteads the plots grow enough to hold the clutter
+`_dress_yards` was already producing, and in the East Tradebourne crop the
+central house gains a long back yard running west with a cart and barrels in
+it, where the flat version had a box hugging the wall.
+
+`tests/test_yards.py` pins it, including the failure that would be silent --
+the sizing measured correctly and then thrown away by a square dilation, whose
+only symptom is that every yard is the same yard again.
+
+### 10.7 What to do, in order
+
+**All six are done -- §11 is what was built.** The order below held: nothing
+else could be decided about the boundary until it was chained into runs.
+
+1. **Step the yard boundary at `FENCE_MODULE` along maximal straight runs, and
+   refuse a run shorter than `FENCE_MIN_SEGMENT`.** Closes 10.1 and 10.3,
+   halves the props, and takes the overhang off the roads and out of the
+   walls. The run-chaining is `yard_probe.straight_runs` / `panels`.
+2. **Stop the 2x2 block pass laying the class's material over an agreed
+   non-default role** -- either lay the role's own block, or fall through to
+   1x1. Closes 10.2, which is the larger of the two defects.
+3. **Deal the yard boundary per tier**, as the facade is dealt. Closes 10.5.
+4. ~~**Scale `YARD_REACH` with the measured neighbour gap.**~~ **DONE**
+   2026-08-27, and per *side* rather than per building -- clearance out of each
+   face, capped in front of the door. `yard_reach_by_side`, `yard_form`,
+   `tests/test_yards.py`. Closes 10.6.
+5. **Then, and not before, revisit the frontage and the gate** (10.4) -- it
+   needs the straightened run from step 1.
+6. **Add the three checks §5 already specifies**, and teach the corner-join
+   allowance in `_prop_collisions` to require that the two boxes be
+   perpendicular. Without that, step 1 has nothing holding it in place.
+
+## 11. What was done about it (2026-08-27)
+
+All six findings are closed. The order in §10.7 held: the boundary had to be
+chained into runs before anything else could be decided about it, and the
+frontage could not be touched until it was.
+
+### 11.1 The boundary is a run of panels, not a piece per cell edge
+
+`boundary_runs` chains the yard's edge into maximal straight runs; `_run_panels`
+steps each one at **the panel's own length**, read off the collider rather than
+taken from `FENCE_MODULE`, so a per-tier boundary from another kit still steps
+correctly.
+
+**An odd run leaves a gap, it does not lap a panel.** Rounding the panel count
+up puts a half-panel lap in every odd run -- 70 pairs on Pelvesthollow, every
+one a genuine collinear overlap. Rounding down and butting outward from *both*
+ends puts the remainder in the middle, where a gate would be, and keeps both
+corners flush. The corner is the part that reads.
+
+Two thresholds decide whether a short run is built at all:
+
+- `FENCE_MIN_RUN` (2 cells) -- below this the panel overhangs both its own
+  ends, so it is built only where a real run meets it at a corner.
+- `FENCE_MIN_ISOLATED` (4 cells) -- with nothing at either end, one panel is a
+  panel lying in the grass. Chaining alone did not fix this: it removed the
+  one-cell stub and left the two-cell one, 11% of Graybank's kept runs.
+
+**A lone yard cell was the case that got through the first cut.** Its four
+sides all meet at itself, so a test that only asked whether *some*
+perpendicular run shared an endpoint kept all four -- a cross of 2-tile panels
+centred on one 5 ft square. Because such a cell is usually an island cut off by
+a road, the arms landed in the carriageway: 21 of them on Graybank. The
+neighbour has to be long enough itself.
+
+| town | panels before | after | collinear laps | in a road | in a wall |
+|---|---|---|---|---|---|
+| Pelvesthollow | 599 | **350** | 507 -> **0** | 27 -> **0** | 0 -> 0 |
+| Graybank | 2,330 | **1,253** | -- -> **0** | 65 -> **0** | 6 -> **0** |
+| Forest Church | 472 | **229** | -- -> **0** | 17 -> **0** | 9 -> **0** |
+
+Half the props, on yards that are now substantially bigger.
+
+### 11.2 A yard is surfaced in its own material, all of it
+
+`_block_role` looks the 2x2 up by the **role the four cells agreed on**, not by
+the surface class, and falls through to 1x1 where that role has no block of its
+own. Lawned yard cells: 41-60% on all four towns -> **0%**.
+
+This is the larger of the two defects and the one that shows most: with the
+boundary removed entirely the yard used to be invisible, because the surface
+was contributing nothing. It contributes now.
+
+### 11.3 Four tiers, four boundaries
+
+`YARD_BOUNDARY`, keyed on `tier_of` -- the same axis the facade has used for a
+long time:
+
+| tier | piece | height | what it is |
+|---|---|---|---|
+| civic | `Stone Wall 02` | 7 ft | a precinct wall |
+| trade | `Stone Wall 01` | 5 ft | a working yard with stock in it |
+| common | `hedge_piece_01` | 5 ft | a garden, and the one living boundary |
+| utility | `Wooden Fence` | 3.4 ft | a paddock behind a shed |
+
+The paling is the weakest read of the four and it is now on the buildings that
+carry the least. On East Tradebourne that deals 174 hedges, 39 drystone,
+8 estate walls and 7 palings.
+
+**`Builder.yard_pieces` records what the pass laid**, because `field_wall` and
+`field_hedge` are shared with `_lay_fences` and no asset id can name the pass
+that placed one. `feature_report` asks the pass -- the same rule
+`_fences_built` states, which the yards line walked straight into the moment
+the boundary stopped being paling: it named `yard_fence`, so a town of hedged
+cottages reported its yards as unbuilt.
+
+**Two palette roles were coin flips.** `resolve` seeds its choice *inside* the
+first matching query, so a single query listing two names picks one per seed.
+`field_wall_tall` dealt the ordinary wall on **five seeds in eight**, and
+`field_wall_post` -- whose fallback is a 1.98-long wall panel -- put a full
+panel across a vertex instead of a joint. Both are two queries now, which is
+what makes the second a fallback rather than a coin.
+
+### 11.4 The frontage is fenced where it runs straight
+
+The old rule left every edge onto a way open, which failed at both ends of its
+range (§10.4). Closing the ring outright builds a comb against a diagonal lane.
+So: the whole ring is built, then opened again on any way-facing run shorter
+than `FRONTAGE_MIN_RUN` (3 cells, 15 ft) -- which is exactly the stair-steps,
+and leaves the straight stretches fenced.
+
+**And every yard gets a way in.** Where nothing above opened one, a gate is cut
+by dropping the middle panel of the longest run, on the side facing the most
+paving.
+
+| | before | after |
+|---|---|---|
+| perimeter fenced | 71% | 70-94% |
+| yards with no way in | 17 of 230 (ETB), 5 of 15 (FC) | **0 on all four towns** |
+
+### 11.5 The checks that hold it
+
+- **`_prop_collisions` can tell a corner from a lap.** The allowance excused
+  any boundary overlap no deeper than a panel's own thickness, meaning to
+  excuse corners -- but two panels lying along the *same line* separate on
+  their thin axis first and measure exactly the same. That is how a doubled
+  fence stayed invisible on every board this project has built. A join now
+  requires the two pieces be non-parallel: `(rot_i - rot_j) % 12 != 0`, which
+  works at all 24 steps and so covers a surveyed field wall as well as an
+  axis-aligned yard. Pelvesthollow: 146 flagged props of 3,719 -> **6**.
+- **`_boundaries_do_not_block_a_way`** and **`_boundaries_stay_on_the_map`**,
+  the two of §5's three that can be measured on the artifact without knowing
+  the runs. The street check earned itself on its first run: **14 field-wall
+  panels standing in a Pelvesthollow lane**. `_lay_fences` sampled three points
+  along a panel -- centre and both ends -- and three points cannot see a panel
+  crossing the corner of a road cell between two of them. It measures the
+  panel's body now (`covered_cells`), and tests it *after* the jitter rather
+  than before, which the hedgerow style needed.
+
+**The third check, `fence_runs_are_continuous`, is deliberately not built.**
+On the artifact a deliberate gap and a dropped panel look identical -- the
+frontage openings, the gates and the odd-run remainders are all gaps by design
+now -- so the check would either fire on all of them or be tuned until it fired
+on nothing. What it was for is covered exactly by the lap rule above, which is
+the failure it was really guarding against.
+
+### 11.6 What it costs, and what is left
+
+East Tradebourne, `--by-region --chunk-tiles 112 --max-assets 6500`:
+**408,853 assets in 114 chunks, largest slab 24,354 bytes against the 30,720
+cap (79%)** -- no change to the byte headroom, and slightly fewer assets than
+before despite yards half again as large, because the boundary is no longer
+built twice.
+
+Two residuals, both small and both now visible rather than hidden:
+
+- **8 pairs of field-wall panels on Graybank still lap** (5 drystone, 3 hedge,
+  0.06% of its props). These come from `run_along_polyline` at a shallow
+  vertex, not from the yard pass, and they are reported rather than excused.
+- **`_prop_collisions` fails on any overlap at all**, so a build with 46
+  flagged props out of 39,799 reads as FAIL. That threshold is older than this
+  work and is left alone here.
