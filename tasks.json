@@ -376,10 +376,10 @@
     {
       "id": "floating-fringe",
       "what": "Four placements on East Tradebourne stand over nothing",
-      "state": "open",
+      "state": "done",
       "doc": "CLAUDE.md",
-      "evidence": "test:test_nothing_is_left_standing_over_the_map_edge",
-      "note": "Surfaced by the 2026-08-25 rebuild once the scatter stopped rejecting the wrong things: 4 of 408,244 placements -- one Village Roof Side at (284.0, 3.0, 281.0) and three Fern 01 at grade -- are flagged by the existing floating-geometry check. 0.001%% of the board and invisible, but it is a FAIL and the check is doing its job. Both shapes look like edge-fringe cases where the taper took the ground away under something already sited.",
+      "evidence": "test:test_an_npc_mark_does_not_take_the_ground_from_the_cells_around_it",
+      "note": "The same bug as `stairs-floating`, measured -- and the edge-fringe reading in this note was wrong: not one of the holes is anywhere near the border. `_lay_npc_marks` cleared a 2x2 terrain block by one of its four cells and took the other three with it. East Tradebourne on today's build: 625 posts left 54 cells with no ground in them, and the two that happened to have anything standing on them -- `sack_03` at (358.5, 0.5, 346.5) and `bush_berry_01` at (556.6, 0.5, 468.7) -- were the FAIL. With `_lay_terrain`'s `reserved` set: 54 holes -> 0, 2 floating -> 0, 397,317 placements. The four originally recorded here are not reproducible piece for piece -- that build was 408,244 placements against 397,145 for this one before the fix -- so what is closed is the FAIL and its cause, not those four object identities. 52 of the 54 holes carried nothing at all, which is why this survived so long: `floating_placements` can only fire when something happens to be standing on the missing ground, so the evidence test asks the ground question directly instead.",
       "tags": [
         "verify"
       ]
@@ -625,6 +625,674 @@
       "tags": [
         "talespire",
         "boards"
+      ]
+    },
+    {
+      "id": "yard-size-by-site",
+      "what": "Size a yard from the ground the building actually has, per side",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_two_buildings_with_different_room_get_different_yards",
+      "note": "YARD_REACH was one number for every building in every town. The reach is now measured per side from the open ground out that way, capped in front of the door, so a farmstead gets a full yard and a terrace house gets a back one. Yard sizes across East Tradebourne run 5-197 cells against a flat 49.",
+      "tags": [
+        "yards",
+        "fencing"
+      ]
+    },
+    {
+      "id": "yard-front-and-back",
+      "what": "Keep the frontage shallow and put the ground round the back",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_the_ground_in_front_of_the_door_is_shallower_than_the_ground_behind",
+      "note": "Back deeper than front on 205 of East Tradebourne's 228 yards (90%); door side mean reach 1.25 against 3.50 opposite.",
+      "tags": [
+        "yards"
+      ]
+    },
+    {
+      "id": "yard-boundary-module",
+      "what": "Step the yard boundary at FENCE_MODULE instead of at the cell",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_no_yard_fence_panel_laps_another_lengthwise",
+      "note": "Runs are chained and stepped at the panel's own length; an odd run leaves the remainder as a gap mid-run rather than lapping a panel. Pelvesthollow 599 panels -> 312 with bigger yards, collinear laps 507 -> 0, panels in a road 27 -> 0, inside a wall 0 -> 0.",
+      "tags": [
+        "yards",
+        "fencing"
+      ]
+    },
+    {
+      "id": "yard-surface-block",
+      "what": "Stop the 2x2 terrain block laying grass over an agreed yard role",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_a_yard_quad_is_not_sheeted_in_grass",
+      "note": "`_block_role` looks the 2x2 up by the ROLE the four cells agreed on, not by the surface class, and falls through to 1x1 where that role has no block. Lawned yard cells: 41-60% -> 0% on all four towns.",
+      "tags": [
+        "yards",
+        "surfaces"
+      ]
+    },
+    {
+      "id": "yard-boundary-tier",
+      "what": "Deal the yard boundary per tier, as the facade is dealt",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "citysmith.build.YARD_BOUNDARY",
+      "note": "YARD_BOUNDARY: estate wall for civic, drystone for trade, hedge for common, paling for utility. `Builder.yard_pieces` records what the pass laid, because field_wall and field_hedge are shared with _lay_fences and no asset id can name the pass that placed it.",
+      "tags": [
+        "yards",
+        "palette"
+      ]
+    },
+    {
+      "id": "fence-tall-seeded",
+      "what": "Stop --fence-style drystone-tall dealing the ordinary wall",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_the_tall_field_wall_is_always_the_tall_one",
+      "note": "Split into two queries. `resolve` seeds inside the first MATCHING query, so one query listing two names is a coin flip; two queries make the second a fallback. field_wall_post had the same shape and a worse payload -- its fallback was a 1.98-long wall panel standing in for a joint.",
+      "tags": [
+        "fencing",
+        "palette"
+      ]
+    },
+    {
+      "id": "prop-join-perpendicular",
+      "what": "Only excuse a boundary overlap when the two pieces are perpendicular",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_a_collinear_lap_is_not_excused_as_a_corner",
+      "note": "A join now requires the two pieces be non-parallel: (rot_i - rot_j) % 12 != 0. Two collinear panels separate on their thin axis first, so a half-length lap penetrates by exactly the thickness the corner allowance grants. Pelvesthollow prop overlaps 146 -> 6 of 3,719.",
+      "tags": [
+        "verify",
+        "fencing"
+      ]
+    },
+    {
+      "id": "yard-frontage",
+      "what": "Fence the street frontage where it runs straight, and gate every yard",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_every_yard_has_a_way_in",
+      "note": "The old rule left every edge onto a way open: 27-29% of perimeter, and a plot fronting a lane read as a three-sided pen. Closing the ring outright builds a comb against a diagonal lane, so the frontage is fenced on runs of FRONTAGE_MIN_RUN or more and left open where it steps. Perimeter fenced 71% -> 72-95%; yards with no way in 17 -> 0 on East Tradebourne.",
+      "tags": [
+        "yards",
+        "fencing"
+      ]
+    },
+    {
+      "id": "boundary-checks",
+      "what": "Check on the artifact that no boundary blocks a way or leaves the map",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_no_boundary_panel_stands_in_a_street",
+      "note": "docs/fencing.md 5, two of the three. The street check found 14 field-wall panels standing in a Pelvesthollow lane on its first run: _lay_fences sampled three points along a panel, and three points cannot see a panel crossing the corner of a road cell between two of them. It measures the body now.",
+      "tags": [
+        "verify",
+        "fencing"
+      ]
+    },
+    {
+      "id": "board-index",
+      "what": "Record what every board holds, not just the ones a scene owns",
+      "state": "done",
+      "doc": ".claude/skills/talespire-boards/SKILL.md",
+      "evidence": "test:test_reconcile_reports_the_three_states",
+      "note": "TaleSpire's campaign list is a column of names -- no contents, no size, no date -- so a finished town and last week's throwaway are the same row. `citysmith boards index` records what went on at PASTE time, which is the only moment anything knows, and reconciles against a transcribed listing three ways: matched, gone, unrecorded. Backfilling this campaign took `prune`'s go-and-look bucket from 10 boards to 2.",
+      "tags": [
+        "boards",
+        "campaign"
+      ]
+    },
+    {
+      "id": "board-disposable",
+      "what": "Give prune a bucket that is a record rather than the absence of one",
+      "state": "done",
+      "doc": ".claude/skills/talespire-boards/SKILL.md",
+      "evidence": "test:test_disposable_is_the_only_bucket_that_is_a_record",
+      "note": "prune's other three buckets all mean 'nothing was written down': unclaimed is ask-the-owner, unnamed is switch-and-look, prunable can only see boards a scene superseded. DISPOSABLE is somebody having said so when they pasted. A board a scene claims is never listed whatever its entry says.",
+      "tags": [
+        "boards",
+        "campaign"
+      ]
+    },
+    {
+      "id": "board-index-self-filling",
+      "what": "Have the paste drivers index the board they just pasted",
+      "state": "done",
+      "doc": ".claude/skills/talespire-boards/SKILL.md",
+      "evidence": "test:test_the_paste_drivers_record_the_board_they_pasted",
+      "note": "An index nobody fills is another thing to remember. `panel_review.ps1` records its probe board as disposable; `review.ps1 tiled -Board <name>` renames the board after the paste and records the town, which is also the skill's own advice (rename the moment a paste lands) turned into one command. tiled says NOT INDEXED when -Board is omitted rather than going quiet.",
+      "tags": [
+        "boards",
+        "tooling"
+      ]
+    },
+    {
+      "id": "board-delete-scripted",
+      "what": "Script the campaign-list delete loop, with a guard",
+      "state": "done",
+      "doc": ".claude/skills/talespire-boards/SKILL.md",
+      "evidence": "test:test_the_delete_loop_guards_on_the_dialog",
+      "note": "tools/delete_boards.ps1. Deletes the row at -RowY and repeats, which needs no re-reading because the successor rises into the same slot. Guards on the confirmation dialog's own orange banner: without it, a delete that does not open leaves the next two clicks landing on the board behind the panel. It fired for real on the 19th of a 20-board run.",
+      "tags": [
+        "boards",
+        "tooling"
+      ]
+    },
+    {
+      "id": "wall-run-wide-panels",
+      "what": "Cover a wall run with the kit's own 2-cell panel, not N 1-cell ones",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "citysmith.build.place_wall_span",
+      "note": "Every kit the generator builds from ships a 2-cell wall, a 2-cell window and a 0.5 filler, and palette._WALLSZ pinned the wall role to a 1-cell footprint so none of them could be resolved. Runs average 4.9 cells and 100% of segments sit in a run of 2+, so this was every facade on the board; hand-built community slabs are 29.3% wide panels against our nil. `citysmith/walls.py` is the family model, `build.place_wall_span` the geometry, and `build_from_tilemap` now builds a course as RUNS rather than cell by cell. Cuts wall placements ~46% per course.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "wall-glaze-per-panel",
+      "what": "State the glazing rate over panels once a panel can be two cells",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_glazing_is_dealt_per_panel_not_per_cell",
+      "note": "RESOLVED, and the earlier reading was wrong: the rate carries from cells to panels UNCHANGED. A run of six at one-in-three is two 1-cell windows or one 2-cell window -- the count halves and the glazed area is identical, so glaze_rate needed no re-tuning. Where a kit ships no 2-cell window the panel splits into a narrow window beside a narrow wall rather than losing its glazing.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "wall-wide-piece-height",
+      "what": "Reject or re-pitch a wide panel whose height differs from its 1-cell partner",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_a_wide_panel_matches_its_kits_storey_height",
+      "note": "walls.WIDE_HEIGHT_SLOP is 0.05 and the storey is always pitched at the 1-cell piece, so `Tavern Wall 01` at 2.03 lands as a 1.8-inch overlap into the course above rather than a gap -- invisible, where a gap would be daylight. A family is also pruned to one course height, which is what keeps the nineteen kits' 2.5-tall Wall/Floor pieces out: Tavern's 2.5 corner was being dealt for its 2.0 wall.",
+      "tags": [
+        "walls",
+        "assets"
+      ]
+    },
+    {
+      "id": "wall-remainder-not-stacked",
+      "what": "Move the narrow panel between courses so it never stacks into a column",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_the_narrow_panel_does_not_stack_between_courses",
+      "note": "walls.pack takes the level. `shift` is the default: the remainder walks the interior slots so it never stacks and never reaches a corner, falling back to every slot on a run of 5, which has only one interior slot and is the commonest length there is. `bondfull` is the only rule that also breaks an EVEN run -- no remainder to move -- and even runs are about a third of all segments.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "wall-tavern-family-for-the-common-house",
+      "what": "Build the common house from the Tavern wall family, not the Village roof panels",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_the_common_house_wall_family_is_complete",
+      "note": "The medieval `wall` role is `Tavern Wall - Small 01` now. Both it and the Village panels are folder='Tavern' -- one kit -- but they do not mix at panel granularity: a Village panel between two Tavern ones reads as a bare plaster patch. palette.segment_shape compares span and thickness rather than raw footprint, which is what had kept the common house off its own kit's wall (the two are authored on opposite axes). The Village panel keeps the 1-cell window, the only one in the pack.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "wall-courses",
+      "what": "Build the ground course, the middle and the head from different pieces",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_castle_puts_its_plinth_on_the_ground_course_only",
+      "note": "Castle Fortified ships `base` variants of its wall, window, corner and filler; Marble Palace ships the full base/mid/top set for every role. Nothing read them, so a three-storey building was one course repeated three times -- and our civic corner is `castle wall corner 1x1 base`, a plinth, which went on every floor. walls.course_at maps a storey to a course and WallFamily.all falls back through them, so a kit naming no course still answers its one piece everywhere.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "wall-decorated-not-dealt",
+      "what": "Never deal a kit's decorated piece as if it were its plain one",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_a_family_never_admits_a_roof_a_fence_or_an_archway",
+      "note": "Castle Fortified files `castle wall 2x2 base`, `... base w curtain` and `... base w shield` under one slot. Dealing across the whole slot by a hash put shields and hanging curtains on every civic building and `castle wall ARCH` on every upper course -- caught on a built temple, not on a board. WallFamily.all returns only the pieces tied for the lowest decor score; `decorated=True` asks for the rest. The same pass keeps a roof, a fence end and an archway out of the families that were dealing them as walls.",
+      "tags": [
+        "walls",
+        "assets"
+      ]
+    },
+    {
+      "id": "wall-plain-siblings",
+      "what": "Deal a kit's interchangeable panels at random along a long run",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_a_long_run_deals_its_kits_plain_siblings",
+      "note": "`WallFamily.siblings` / `.deal`, called per PANEL from the facade loop and keyed on the cell with crc32 so a rebuild is identical. **A sibling is a piece whose name differs only by a trailing index** -- rank alone is not enough, because Shogun Palace's plaster, paper, rock and dug earth all tie for the same rank in one folder and dealing across them builds a wall out of four things. `stem_of` keeps them apart. HONEST SCOPE: this changes no medieval board today. Tavern, Rural and Castle Fortified each ship exactly one plain panel per slot, which test_per_panel_dealing_is_inert_for_the_kits_a_town_uses_today states rather than leaves to be discovered. It is live for Desert Village, BellowGloom, Abandoned Village, MegaDungeon and Cavern Lava -- seen on `PROBE wall siblings` -- and for whichever of them becomes a tier.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "wall-feature-pieces",
+      "what": "Place a kit's feature panels by rule, never by rate",
+      "state": "open",
+      "doc": "tools/wallkit_board.py",
+      "evidence": "test:test_an_opening_piece_is_never_dealt_as_decoration",
+      "note": "Twenty-five feature panels exist beyond wall and window: 12 arch, 2 alcove, 2 breach, 5 ruin, 3 Ship decor, 2 porthole, 2 supported, 1 shield, 1 prison cage. **Most of them are OPENINGS, not decoration.** Read at 1-in-4 on `PROBE wall variance`: the Dungeon Cellar and MegaDungeon runs are see-through, with grass visible through the wall -- correct for a ruin, ruinous on a house. So a rate is the wrong control for this half. An arch belongs where the raster already says there is a way through (a gate, a passage under a building, a market arcade); a breach or a ruin belongs to a building the map has decided is ruined. Only the surface-relief pieces -- shield, Ship decor and supported, portholes -- take a rate safely. Moorgoth's alcoves are recesses rather than holes and its LIT alcove and LIT arches carry their own light, which is the one piece here that would light a street with no lamp props at all.",
+      "tags": [
+        "walls",
+        "style"
+      ]
+    },
+    {
+      "id": "camera-model",
+      "what": "Model the builder camera so a frame can be predicted, not flown",
+      "state": "done",
+      "doc": "docs/camera-model.md",
+      "evidence": "citysmith.camera.frame_rect",
+      "note": "Measured off the running game with a size-coded ground target and a homography fit, not inferred. Three of the constants that shipped as 'inferred from review.ps1' were half again too big. Two entries in CLAUDE.md were wrong and are corrected there: the camera does NOT reach a vertical pitch (it stops at 78.07 deg, so the paste anchor still slides 0.32 tiles under a 1.5-tile obstruction), and Ctrl+scroll SCALES the slant range rather than stepping it (x0.8721 per tick; as a step the same legs disagree by nearly a third). Verified end to end: three planned moves driven and read back, worst case 0.85 deg of yaw on a 215-degree turn.",
+      "tags": [
+        "camera",
+        "review"
+      ]
+    },
+    {
+      "id": "camera-read",
+      "what": "Recover a camera pose from one screenshot",
+      "state": "done",
+      "doc": "docs/camera-model.md 3",
+      "evidence": "citysmith.camerafit.solve_pose",
+      "note": "`ts.ps1 camerastate` photographs the compass and leaves a human to read a bearing off it; this returns bearing, pitch, eye height, slant range, focus cell and field of view, with two independent readings of the focal length held against each other. Needs the calibration target in frame, which a town board does not have -- see the limits section.",
+      "tags": [
+        "camera",
+        "verify"
+      ]
+    },
+    {
+      "id": "camera-screen",
+      "what": "A camera screen in the sidecar: frame it, see it, script it",
+      "state": "done",
+      "doc": "docs/camera-model.md 5",
+      "evidence": "citysmith.uiserver.plan_camera",
+      "note": "Draws the ground the frustum covers over the rectangle asked for, says whether it fits, emits the ts.ps1 calls, and lists every constant with whether it was measured or assumed. Pure arithmetic, so unlike the paste screen it works on any machine.",
+      "tags": [
+        "camera",
+        "ui"
+      ]
+    },
+    {
+      "id": "camera-pan-gain",
+      "what": "Measure the drag pan gain instead of inheriting 53%",
+      "state": "open",
+      "doc": "docs/camera-model.md 6",
+      "evidence": "test:test_pan_gain_is_measured",
+      "note": "`pan_gain` is CLAUDE.md's figure from a 462 px right-drag, carried over rather than re-measured with the target. It is the one control the sweep does not touch, and `plan` never emits a drag because of it -- so a planned move can only translate by flying, which ramps.",
+      "tags": [
+        "camera"
+      ]
+    },
+    {
+      "id": "camera-fly-ramp",
+      "what": "Measure the WASD ramp beyond a 0.14 s hold",
+      "state": "open",
+      "doc": "docs/camera-model.md 6",
+      "evidence": "citysmith.camera.Rig.fly_hold_for",
+      "note": "Measured at 21.4 tiles/s over 0.08-0.14 s, where the curve is still nearly straight. CLAUDE.md's '3 s crosses a 187-tile map' implies about 62 tiles/s averaged, so the ramp is real and this sweep is at the bottom of it. Longer holds carry a 12-tile target out of frame, so this needs a bigger target or a second one further off.",
+      "tags": [
+        "camera"
+      ]
+    },
+    {
+      "id": "kit-roster",
+      "what": "Make the kit roster something the palette READS, not a list",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_every_wall_kit_has_a_declared_role",
+      "note": "`walls.KIT_ROLE` maps all 22 families to a declared job, and it is load-bearing rather than a list: `fabric_for` resolves through it, so an entry is the only route a kit has to a building. Roles: common, utility, civic, poor, ruin, civic-large, civic-dark, docks, interior (5 kits with no window, which is a cellar not a house), and style:desert / style:shogun / style:cyberpunk for whole styles that do not exist yet. `walls.unmapped` REPORTS rather than raises and is scoped to the packs a style claims -- the same rule `Layout.unmapped` follows for an unknown FTG value -- so installing a DLC surfaces a decision instead of breaking a build.",
+      "tags": [
+        "walls",
+        "style",
+        "assets"
+      ]
+    },
+    {
+      "id": "civic-large-town",
+      "what": "Give a large town a richer civic kit than a hamlet gets",
+      "state": "open",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_a_large_town_civic_uses_a_course_system",
+      "note": "REFRAMED. This was 'a palace tier above civic', and that repeats a mistake CLAUDE.md already records: 'Ward is not a usable axis and it is worth saying why. 47 of Forest Church's 51 buildings fall in a single ward... a district-keyed style would be a no-op dressed as a feature.' A fifth tier catches one or two buildings per town, which is a special case wearing a tier's clothes. What is worth building instead: Marble Palace as the civic kit for a town big enough to carry the distinction. East Tradebourne has 989 buildings and 3 storeys mean; Pelvesthollow has 35 and 1.03, and a marble palace in a hamlet is a joke. Marble Palace is also the only kit in the library with a full base/mid/top wall system, which `walls.course_at` already drives -- so the civic fabric of a city would differ from a village's by having a plinth, a middle and a cornice rather than one course three times. Depends on `facade-fabric-variety`, which is the same mechanism one tier down.",
+      "tags": [
+        "walls",
+        "style",
+        "buildings"
+      ]
+    },
+    {
+      "id": "style-desert",
+      "what": "A desert fabric, and only then a desert style",
+      "state": "open",
+      "doc": "citysmith/palette.py",
+      "evidence": "test:test_the_desert_style_validates_and_builds",
+      "note": "DESCOPED and parked. Calling this 'the cheapest new style' and 'a Style is far more than walls' in consecutive sentences was having it both ways. Desert Village ships walls, floors and a five-piece roof border. It does NOT ship ground cover, street surface, water, props or doors, and `Palette.validate` is what says whether those resolve -- so a Style is a multi-session job and the wall family is about a fifth of it. Do it as a FABRIC inside medieval first, on the `facade-fabric-variety` mechanism, which is the same idea at a scale that can be checked in one pass. Promote it to a Style only once a fabric has proved the seam holds.",
+      "tags": [
+        "walls",
+        "style",
+        "palette",
+        "scope"
+      ]
+    },
+    {
+      "id": "stairs-floating",
+      "what": "Wall stairs on Forest Church stand over nothing",
+      "state": "done",
+      "doc": "CLAUDE.md",
+      "evidence": "test:test_a_wall_stair_is_filled_solid_underneath",
+      "note": "MEASURED, and it was neither hypothesis. The flight's own fill is correct, and the border taper is nowhere near it -- (80, 88) and (81, 88) sit in the middle of a 187x180 map. The cause is two correct passes disagreeing about what a placement covers. `_lay_terrain` sheets open country in 2x2 blocks; `_lay_npc_marks` runs last and *clears* the cell it marks, because a mark that covers the ground rather than replacing it is two coplanar surfaces and a person arriving inside a barrel. `Builder.clear_cells` identifies a placement by its collider centre, which for a 2x2 block is one of its four cells -- so a guard post at (81, 89) deleted the whole `Grass - Lush` block laid at (80, 88) and stripped the ground from three cells that had no post on them. Forest Church: 53 posts took up six blocks, orphaning eighteen cells of which fifteen were left with no ground at all, and the only two anyone could see were under the rampart stair. `_lay_terrain` now takes a `reserved` set and refuses to fuse a quad holding a cell a later pass will take back. 3 floating placements -> 0 and 15 ground holes -> 0, for 44 extra tiles in 28,586. The same trap is written up for yards in `build_from_tilemap` and was solved there by deciding the material once instead of clearing and re-laying; a mark cannot do that, because clearing is also how it takes the props out of the cell.",
+      "tags": [
+        "geometry",
+        "verify",
+        "walls"
+      ]
+    },
+    {
+      "id": "claudemd-entombed-stale",
+      "what": "Retire the stale OPEN entombed() section in CLAUDE.md",
+      "state": "done",
+      "doc": "tests/test_docs.py",
+      "evidence": "test:test_claude_md_has_no_stale_open_rampart_section",
+      "note": "The section now says CLOSED and explains what was wrong, why the optimisation was defensible and still wrong (a hollow core is a trap for whoever next cuts a postern, and `town_wall_gaps` samples a course so it cannot tell a sealed void from daylight), and that the note itself was STALE for an unknown number of sessions in the one file every session reads first. `tests/test_docs.py` is new and is the general answer: tasks.json has `tasks --check` and a test, CLAUDE.md had neither, so a claim there outlived its truth silently. It pins the pairings where a doc and the code can be made to disagree -- the rampart claim against `entombed()` in build.py, and the doc index against the files it names. It does not try to verify prose, which mostly cannot be.",
+      "tags": [
+        "cleanup",
+        "verify"
+      ]
+    },
+    {
+      "id": "review-camera-aim",
+      "what": "Frame probe boards with the camera model instead of blind fly holds",
+      "state": "done",
+      "doc": "docs/camera-model.md",
+      "evidence": "test:test_a_review_says_whether_the_slab_fits_the_frame",
+      "note": "`panel_review.ps1` asks `camera_aim.py --slab` before it pastes and prints whether the whole slab will be in shot. `camera_aim.py --slab` is new: it reads a slab's ground extent through `build.placed_bounds`, so a review is never told how big the thing it is looking at is. **It reports and does not drive**, deliberately: `camera-drive-open-loop` is open against a driven move landing 14 degrees off in yaw, so the model is trusted to say what a frame holds and not yet to steer. Open-loop needs no calibration target here because the script already drives into both measured stops -- 200 scroll ticks and 250 px of pitch each exceed the range -- so the pose before -Oblique is dist_max and pitch_max by construction. That was true by accident before this and is now the reason. WHAT IT FOUND IMMEDIATELY: none of the three wall probe boards can be photographed whole. 53x45 all-kits needs 95 tiles of slant range, 41x29 variance needs 62, 53x5 in-use needs 60, against a stop at 49.75. Four exchanges of flying in the session that prompted this were spent on boards that were never framable. CAUGHT IN PASSING, not fixed: `Framing.covered` is an overlap against `visible_bounds`, the axis-aligned box round the frustum, so on a wide shallow slab it reads 1.00 while `covers_all` puts 0 of 4 corners in shot. Both are right about different things, but a caller must not print it beside a 'too big' headline. Pinned by test_covered_is_a_bounds_overlap_and_not_a_corner_count.",
+      "tags": [
+        "tooling",
+        "camera",
+        "review",
+        "probe"
+      ]
+    },
+    {
+      "id": "camera-preview-3d",
+      "what": "Preview the frame in 3D, and drag it with the game's own controls",
+      "state": "done",
+      "doc": "docs/camera-model.md 5",
+      "evidence": "citysmith.preview.render",
+      "note": "The board projected through the SAME Camera that plans the move, returned as screen-space quads; the browser draws them and does no 3D. Dragging runs the rig server-side, so the sensitivities and the STOPS are the measured ones -- the preview cannot show a shot the camera cannot take, and it says so when it is against a stop. 93 ms a frame before the camera basis was hoisted out of the per-corner projection and boxes were rejected on their centre; 4-7 ms after, on a 991-building town.",
+      "tags": [
+        "camera",
+        "ui"
+      ]
+    },
+    {
+      "id": "camera-drive-open-loop",
+      "what": "Explain why a driven move landed 14 degrees off in yaw",
+      "state": "open",
+      "doc": "docs/camera-model.md 6",
+      "evidence": "test:test_a_driven_move_lands_where_the_plan_said",
+      "note": "`/api/camera/drive` ran its four moves and the camera moved, but it landed at yaw 164.25 against a planned 150.06 and pitch 41.41 against 44.94. NOT a gain error: re-measured immediately afterwards on the same board, a DX=100 drag gave 0.1858 deg/px and DX=400 gave 0.1879, both matching the calibrated 0.18761, so the sensitivity is right at both magnitudes. Yaw came up short and pitch overshot, which rules out a single scale factor. Two candidates, neither tested: the plan's `fly d 0.37` is well outside the 0.08-0.14 s the WASD ramp was measured over, and the final pose sits at a 37-tile range where the reader's own envelope note says a near mark can outrank a far one. Four earlier moves driven through camera_aim.ps1 landed within 0.9 deg, so this is a real regression in a specific case and not the general behaviour.",
+      "tags": [
+        "camera",
+        "verify"
+      ]
+    },
+    {
+      "id": "facade-fabric-variety",
+      "what": "Deal a whole wall FABRIC per building, not one kit per tier",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_a_town_builds_its_common_houses_from_more_than_one_fabric",
+      "note": "`walls.TIER_FABRICS` gives each tier a weighted set of roles and `walls.fabric_for` deals one per building, stably, the way the wall variant used to be. Wired into `build_from_tilemap`. A/B on Forest Church with TIER_FABRICS emptied: Abandoned Village walls 0 -> 72, Tavern 521 -> 464, Rural 79 -> 63, 6 of 51 buildings changed fabric, total placements 28,540 -> 28,539. TWO THINGS THE WIRING FORCED. `glazes` is a flag now rather than `glass = None`: utility was kept blind by having no window, and a fabric can bring its own (Rural has one), so dealing fabrics would have glazed every barn -- test_a_barn_gets_no_glass_however_glazed_its_fabric_is. And where a fabric is chosen the palette's pieces are the WRONG kit by construction, so the fallbacks re-point at the fabric's own and stay None where it has none; `glass` takes only the 1-cell window, because it is used as a single-segment fallback and a 2-cell piece in one cell overhangs. THE ROOF FOLLOWS, in one case only. Roofs are dealt independently on purpose (ROOF_MIX exists so a quarter is not monochrome), but a building clad in the `poor` fabric is authored damaged and the pack ships the match: `roof_side_slate` is `Haunted roof 1x1`, the same Abandoned Village kit. Abandoned Village roofs 70 -> 240 on Forest Church. Golden reports moved: tile seams 274 -> 280 and largest tiled slab 804 -> 798 bytes, both from the different kit's geometry, both proportionate.",
+      "tags": [
+        "walls",
+        "style",
+        "buildings"
+      ]
+    },
+    {
+      "id": "camera-sensitivity-settings",
+      "what": "Check the rig against a changed Rotation Sensitivity",
+      "state": "open",
+      "doc": "CLAUDE.md",
+      "evidence": "test:test_the_rig_scales_with_rotation_sensitivity",
+      "note": "F9 opens Cutscene Mode's camera editor, which shows Camera Speed and Rotation Sensitivity -- both 1.0 when config/camera.json was calibrated, and both user settings. Every deg/px and tiles/second constant presumably scales with them, and nothing has tested that. One sweep at 2.0 would either confirm a clean scaling (in which case the rig can read the setting and correct) or find that it is not linear, which matters more. The panel also reports a field of view of 35.0 against the 30.03 measured on the play camera; treat them as two cameras until shown otherwise.",
+      "tags": [
+        "camera"
+      ]
+    },
+    {
+      "id": "probe-size-to-one-frame",
+      "what": "Size a probe board to what the camera can actually photograph",
+      "state": "open",
+      "doc": "docs/camera-model.md",
+      "evidence": "test:test_a_probe_board_fits_one_frame",
+      "note": "Every probe tool here picks its grid by eye -- `wallkit_board.py` defaults to 4 columns, `wallrun_probe.py` to 3 -- and none of them knows the camera stops pulling back at 49.75 tiles of slant range, which is about 50x27 tiles in one shot. Measured: the all-kits board at 53x45 needs 95. The tools already compute their own extent and `camera.frame_rect` already answers the question, so a probe should either choose its column count to fit or emit a shot list and say how many frames it will take. This is the other half of `review-camera-aim`: that one reports the problem, this one stops creating it.",
+      "tags": [
+        "probe",
+        "camera",
+        "tooling"
+      ]
+    },
+    {
+      "id": "camera-click-to-centre",
+      "what": "Move the focus by double-right-clicking, not by flying",
+      "state": "open",
+      "doc": "CLAUDE.md",
+      "evidence": "citysmith.camera.plan_click_to",
+      "note": "Measured: a double RIGHT click centres the camera on the clicked point (frame moved 39.06 against a 0.42 noise floor; a double LEFT click at the same pixel does nothing). `plan` currently translates the focus with WASD `fly` legs, and the ramp is only measured over 0.08-0.14 s -- the one driven move that landed 14 degrees out used a 0.37 s leg. Replacing the fly legs with project-then-click removes the ramp from the plan entirely and is self-correcting: you click where the model believes the point is, so a model error shows up as a landing error you can measure.",
+      "tags": [
+        "camera"
+      ]
+    },
+    {
+      "id": "verify-ground-holes",
+      "what": "Report a hole in the ground, not just something standing over one",
+      "state": "open",
+      "doc": "citysmith/verify.py",
+      "evidence": "test:test_a_missing_ground_tile_is_reported_on_its_own",
+      "note": "`floating_placements` only fires when something happens to be standing on a missing tile. Measured while fixing `stairs-floating`: Forest Church had 15 cells the tilemap gives ground to and the placements do not, and 13 of them were INVISIBLE to the build report; East Tradebourne had 54, of which 52 were invisible. The FAIL that found the bug fired only because a rampart stair happened to stand on one of the two. That is the 'metrics must read the artifact' family exactly -- the check reads the consequence rather than the condition. A pass comparing placements against the tilemap for missing ground catches the class directly, and it returns 0 on both towns now, so it can be added clean rather than as a new failing check.",
+      "tags": [
+        "verify",
+        "geometry"
+      ]
+    },
+    {
+      "id": "uiserver-seam-flake",
+      "what": "Chase the order-dependent tile-seam count between the UI and the CLI",
+      "state": "open",
+      "doc": "citysmith/uiserver.py",
+      "evidence": "test:test_the_seam_count_does_not_depend_on_test_order",
+      "note": "`test_the_build_endpoint_returns_the_same_findings_as_the_cli` has failed in a full run for two independent observers on 2026-08-28, with `tile seams: 123` from the UI against `274` from the CLI. It passes in isolation, passes with test_pipeline.py alongside, and passes on re-run. **I first attributed this to two sessions writing the tree at once and that explanation is probably wrong**: a subagent saw it in its own run with a stable tree, and concurrent writes would not produce two self-consistent but different seam counts. Order-dependent state somewhere -- a module-level cache is the obvious suspect, and `build._WALL_FAMILIES` is keyed on `id(catalog)`, which CPython reuses after a catalog is garbage collected. That is a specific, checkable hypothesis and it has not been tested. || 2026-08-28: the suspected cause was found and FIXED, but the flake is not confirmed closed because it was never reproduced on demand. `build.wall_families` cached `id(catalog) -> families` and held no reference to the catalog, so a collected catalog could hand its address to the next one and the second would be served the first's families. Now keyed with a `weakref.finalize` that drops the entry when the catalog dies (`Catalog` is an unhashable dataclass, so WeakKeyDictionary is not available), pinned by test_the_family_cache_cannot_serve_a_dead_catalogs_families. Leave this OPEN until the uiserver test has run green in full suites for a while: the aliasing was real and mine, but nothing has shown it was THIS flake's cause.",
+      "tags": [
+        "ui",
+        "verify",
+        "tooling"
+      ]
+    },
+    {
+      "id": "great-buildings-population",
+      "what": "Define the great-building population by size, not by a fifth tier",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.1",
+      "evidence": "citysmith.build.GREAT_MIN_TILES",
+      "note": "45 raster cells and a kind in {warehouse, temple, guildhall, barracks, manor, tavern} selects 0/2/4/16 across Pelvesthollow, Graybank, Forest Church and East Tradebourne. Pelvesthollow's zero is the check, not a miss.",
+      "tags": [
+        "buildings",
+        "great"
+      ]
+    },
+    {
+      "id": "great-volume-not-floors",
+      "what": "Take a great building's eaves from a course count, not a floor count",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build.great_courses",
+      "note": "A warehouse is the second largest footprint in East Tradebourne (mean 58 cells, max 129) and the shortest thing on the map: 10 ft eaves against a house's 20 ft, 19 ft ridge against 28. FLAT_KINDS forces one storey and eaves = storeys * 2.0. A tithe barn's eaves are 20-25 ft. Smallest honest version is two 2.0 courses for utility at 45+ cells, with no new asset.",
+      "tags": [
+        "buildings",
+        "great"
+      ]
+    },
+    {
+      "id": "gable-ends",
+      "what": "Gable the ends of a great building instead of hipping them",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build.gable_axis",
+      "note": "PROBED 2026-08-28 and the design changed. `tools/gable_probe.py` built four end treatments; every gabled end came back as an open trough. Cause: Tavern and Rural each ship their roof at TWO SCALES -- a single-course family (1x1x1, rise 1.0) and a double-course family (1x2x2 and 2x2x2, rise 2.0) -- and **both `end` pieces are in the double-course family** while `_lay_roofs` builds every tier at the single-course scale. **No single-course end piece exists anywhere in the 3,200-asset catalog.** So 'the pieces are already resolved' was false. Two routes: roof great buildings from the double-course family (complete, and proportionate to a 15-cell nave), or crow-step the gable out of `Village Roof Side Wall` panels -- an authentic northern form, and the only gable a one-cell ring scale can express. Blocked on roofrot-wide-scale.",
+      "tags": [
+        "buildings",
+        "roofs",
+        "great"
+      ]
+    },
+    {
+      "id": "church-one-volume",
+      "what": "Build a nave as one volume: glaze once, and put no floors in it",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "test:test_a_great_civic_building_has_no_upper_deck",
+      "note": "A temple is three courses of Castle Fortified glazed one-in-2 at the front on EVERY course, with upper decks on the interior cells. That is a tenement in dressed stone. A nave has a floor at the bottom and a roof at the top and nothing between.",
+      "tags": [
+        "buildings",
+        "great"
+      ]
+    },
+    {
+      "id": "tower-compact-plan",
+      "what": "Let a compact aisled church have a tower",
+      "state": "open",
+      "doc": "docs/great-buildings.md 1.3",
+      "evidence": "test:test_a_large_compact_civic_building_gets_a_tower",
+      "note": "pick_towers gates on TOWER_MIN_ASPECT 2.5, so East Tradebourne's two largest temples (88 cells at 8x12, aspect 1.50; 81 cells at 10x9, aspect 1.11) are towerless while a 65-cell one is the landmark. A compact plan at 88 cells is a nave WITH aisles, which is the church that has a tower -- the gate is inverted with respect to its own docstring.",
+      "tags": [
+        "buildings",
+        "great"
+      ]
+    },
+    {
+      "id": "wall-course-height",
+      "what": "Let a caller ask walls.families for a course height other than 2.0",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.2",
+      "evidence": "test:test_a_family_can_be_pruned_to_a_four_tile_course",
+      "note": "_prune_to_one_course returns all 22 families at 2.0, which is right for a house and hides Moorgoth LargeWall 01/02 (1 x 4.0 x 2 and 1 x 4.0 x 1) from every caller. A 4.0 wall is a 20 ft eaves in one course, which is exactly what the barn and the hall want. Loosening the pruning is the wrong fix; asking for a height is the right one.",
+      "tags": [
+        "walls",
+        "great"
+      ]
+    },
+    {
+      "id": "market-cross",
+      "what": "Stand a market cross at the centre of the square",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build._lay_market_cross",
+      "note": "NO CANDIDATE PIECE EXISTS and none has been probed. Nearest by shape: Castle Ruins Pillar Base/Mid/Top, Moorgoth Buttress Spire, Palace Marble pillar base/mid. Shortlist by render with tools/asset_shots.py, then probe -- a render shortlists and a probe decides.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "market-stalls",
+      "what": "Range stalls along the square from the Merchant kit",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.4",
+      "evidence": "citysmith.build.STALL_FAMILY",
+      "note": "The Merchant kit is 24 pieces -- Tent Wall, Tent Wall Corner, Tent Wall Inner Corner, Tent Roof A/B at 1x1 1x2 and 2x2, Tent Overhang, Tent Roof Hanging, and six stall counters -- a complete building family in the same shape as a wall family, and the string 'Merchant' appears nowhere in palette.py or build.py. Today a market is market_goods (six loose props) scattered at 0.16 per plaza cell over 49 cells in Graybank and 631 in East Tradebourne.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "market-hall",
+      "what": "Build the tolbooth: an open arcade below, a gabled chamber above",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build._lay_market_hall",
+      "note": "The one genuinely new geometry in the great-buildings design: a small building with a hole in the bottom. A compact burgh tolbooth is about 6-7 m by 10-13 m. It is also the first real caller for wall-feature-pieces -- an arch belongs where the raster says there is a way through, and on an arcade that is every bay of one wall.",
+      "tags": [
+        "market",
+        "buildings"
+      ]
+    },
+    {
+      "id": "barn-aisle-posts",
+      "what": "Stand aisle posts down the length of a great barn",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.5",
+      "evidence": "citysmith.build._lay_aisle_posts",
+      "note": "An aisled barn's post rows are what let the span be wide, and the aisle is a room a party fights in -- it is the first interior anyone sees through an open cart door. Candidates: Harbor Beam 01/02 (0.5 x 2 x 0.5) for timber, Dungeon Pillar / Desert Pillar / Moorgoth Fancy Pillar (1 x 2 x 1) for full-cell columns. Unprobed.",
+      "tags": [
+        "buildings",
+        "great"
+      ]
+    },
+    {
+      "id": "facade-fabric-weighting",
+      "what": "Read the fabric weighting on a board before trusting it",
+      "state": "open",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_the_fabric_weighting_has_been_looked_at",
+      "note": "`TIER_FABRICS` deals common 6:1 and utility 4:1 against the `poor` role, which puts 6 of Forest Church's 51 buildings in Abandoned Village. **That number is a conservative guess and has never been seen.** Six derelict houses scattered at random through a town may read as damage rather than as a poor quarter -- in which case the fabric wants to correlate with something the map already knows (storey count, distance from the centre, `quarters.py`) rather than with a hash of the building id. This project's own rule is that a look is not optional, and the mechanism was landed on the strength of an A/B of counts, not a board. Needs a small probe -- 20x14 tiles or so, since a 53-tile board cannot be photographed whole (see `probe-size-to-one-frame`).",
+      "tags": [
+        "walls",
+        "style",
+        "review",
+        "probe"
+      ]
+    },
+    {
+      "id": "roofrot-wide-scale",
+      "what": "Measure the double-course roof family's rotations",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.1",
+      "evidence": "test:test_the_double_course_roof_family_closes_a_hip",
+      "note": "roofrot_probe.py filtered to (1.0, 1.0) footprints, so the tool built to answer 'which quarter turn closes a hip' -- after this project got the hip rotations wrong once and wrote them up -- was blind to the entire double-course family, which is the only one with an end piece. It takes --footprint 1x1|1x2|2x2|wide|all now. Its board does not frame at the wide scale (needs 101 tiles of slant range against a stop at 50) because the run band runs off the ground sheet. Nothing should be built on these rotations until they are measured.",
+      "tags": [
+        "roofs",
+        "great",
+        "probe"
+      ]
+    },
+    {
+      "id": "barn-wall-relief",
+      "what": "Give a great barn's tall wall something to break it",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.4b",
+      "evidence": "citysmith.build.BARN_WALL_RELIEF",
+      "note": "FOUND BY ACCIDENT on `PROBE barn aisle`, and it is the finding nobody was looking for. Two courses of `Rural Wall 01` with no openings -- the 20 ft eaves this design asks for -- reads as a windowless fortress, not a barn. §2's 'no upper floor, no windows' is right about the windows and wrong about what that leaves. Raising the eaves without relief trades one wrong silhouette for another. Wants boarding lines, a cart door, a vent, or a lean-to.",
+      "tags": [
+        "buildings",
+        "great"
+      ]
+    },
+    {
+      "id": "aisle-post-piece",
+      "what": "Find a timber aisle post that reads as one",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.4b",
+      "evidence": "citysmith.palette.AISLE_POST",
+      "note": "PROBED 2026-08-28, and neither candidate survived. `Harbor Beam 01` reads as a thin dark stick at 0.5 thick and is nearly invisible at 0.2 -- and it is TWO assets sharing one name, at those two thicknesses, which is why the probe pins by id. `Dungeon Pillar` reads as a substantial pier, but it is stone inside a timber barn and eats a whole cell of a five-cell floor. The answer is a third piece nobody has looked at yet.",
+      "tags": [
+        "buildings",
+        "great",
+        "probe"
       ]
     }
   ]
