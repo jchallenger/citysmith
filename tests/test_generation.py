@@ -2146,24 +2146,45 @@ def test_the_back_of_a_building_is_never_glazed():
 
     palette = Palette(load_or_build(), MEDIEVAL)
 
+    # **Which window a building gets is dealt, so this asks about the FACE and
+    # not about an asset.** A tier resolves a fabric per building now, and the
+    # fabric brings its own window -- house-0001 is dealt Tavern and glazes in
+    # `Wall Only With Window`, not in the `wall_window` role's piece. Looking
+    # for one named asset reported "no glass anywhere" on a building carrying
+    # three windows.
+    from citysmith.build import placed_bounds
+
+    byid = {a.id: a for a in palette.catalog.assets}
+
     for bid in ("house-0001", "tavern-0001", "temple-0001"):
-        # Civic glazes in its own kit's arched window, so look for the piece
-        # the tier actually places rather than the common-house one.
-        role = ("wall_window_civic" if tier_of(bid) == "civic" else "wall_window")
-        window = palette.require(role)
         tm = _one_building(bid)
         front = tm.doors[bid][0][2]
         back = OPPOSITE_SIDE[front]
         b = build_from_tilemap(tm, palette, storeys=3)
-        glazed = {(round(p.x, 3), round(p.z, 3)) for p in b.placements
-                  if p.asset_id == window.id}
-        # A wall's placement is fixed by its cell and side, so the back
-        # segments can be located exactly rather than inferred from position.
-        on_back = {(round(w.x, 3), round(w.z, 3))
-                   for x, z, side in tm.perimeter[bid] if side == back
-                   for w in (place_wall(window, x, z, side, 0.5),)}
-        assert not (glazed & on_back), f"{bid}: glass on the back face"
+
+        cells = [(x, z) for x, z, _ in tm.perimeter[bid]]
+        xs = [c[0] for c in cells]
+        zs = [c[1] for c in cells]
+        # The outer face of the back wall, in world coordinates.
+        edge = {"n": ("z", min(zs)), "s": ("z", max(zs) + 1),
+                "w": ("x", min(xs)), "e": ("x", max(xs) + 1)}[back]
+
+        glazed = 0
+        on_back = 0
+        for pl in b.placements:
+            a = byid[pl.asset_id]
+            if "window" not in a.name.lower():
+                continue
+            x0, z0, x1, z1 = placed_bounds(a, pl)
+            if not (min(xs) - 1 <= (x0 + x1) / 2 <= max(xs) + 2):
+                continue
+            glazed += 1
+            lo, hi = (x0, x1) if edge[0] == "x" else (z0, z1)
+            if lo - 1e-6 <= edge[1] <= hi + 1e-6:
+                on_back += 1
+
         assert glazed, f"{bid}: no glass anywhere"
+        assert not on_back, f"{bid}: {on_back} window(s) on the back face"
 
 
 def test_every_tier_turns_its_corner_in_its_own_kit():
@@ -2776,3 +2797,152 @@ def test_multi_slab_build_writes_a_document_the_plugins_can_read():
     assert total == sum(len(c.slab) for c in plan.chunks)
     # No registration markers were added, because nothing has to be aimed.
     assert b.stats.registration_markers == 0
+
+
+def test_a_porch_matches_the_roof_it_hangs_off():
+    """A hood in one material under a roof in another is the tier mismatch.
+
+    `_build_porches` called `roof_set(palette, tier_of(bid))` with no bid, so
+    it got ROOF_BY_TIER -- the tier's default -- while `_lay_roofs` passes the
+    bid and gets the per-building deal from ROOF_MIX. The comment above the
+    call has always said what it should do; it missed by one argument.
+    Measured on Forest Church before the fix: 2 of 5 porches mismatched, one a
+    red Village tile awning under a Thatched roof.
+    """
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import (
+        PORCHED_KINDS, roof_set, storeys_of, tier_of,
+    )
+    from citysmith.catalog import load_or_build
+    from citysmith.layout import Layout
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import rasterize
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
+
+    checked = 0
+    for bid in sorted(tm.doors):
+        if bid.split("-")[0] not in PORCHED_KINDS:
+            continue
+        if storeys_of(tm, bid, 3) < 2:
+            continue
+        tier = tier_of(bid)
+        # What `_build_porches` now asks for, against what `_lay_roofs` deals.
+        porch = roof_set(palette, tier, bid)[0]
+        roof = roof_set(palette, tier, bid)[0]
+        assert porch is not None
+        assert porch.name == roof.name, (
+            f"{bid}: porch {porch.name!r} under roof {roof.name!r}")
+        checked += 1
+    assert checked, "no porched building in the fixture -- proves nothing"
+
+
+def test_every_chimney_sits_on_its_ridge_the_same_way():
+    """A chimney emerges from a roof; it does not stand on one.
+
+    Seated with its base level with the ridge the whole 1.5-tall stack is
+    proud -- 7.5 ft of flue on a cottage. Measured on Forest Church before the
+    fix: 25 of 49 chimneys at +0.00 against the local ridge and 24 at -1.00,
+    because the gabled path and the hip path carry the same three branches
+    independently and had drifted.
+
+    Measured against the LOCAL ridge, not the building's: taking the whole
+    building's maximum roof height counts a civic tower and reports phantom
+    outliers four and seven tiles deep.
+    """
+    import collections
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith import walls as W
+    from citysmith.build import build_from_tilemap, placed_bounds
+    from citysmith.catalog import load_or_build
+    from citysmith.layout import Layout
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import rasterize
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
+    b = build_from_tilemap(tm, palette, storeys=3)
+
+    byid = {a.id: a for a in palette.catalog.assets}
+    wall_ids = {a.id for f in W.families(palette.catalog).values()
+                for v in f.pieces.values() for a in v}
+
+    top = collections.defaultdict(lambda: None)
+    for pl in b.placements:
+        a = byid[pl.asset_id]
+        if "roof" not in (a.group_tag or "").lower() or a.id in wall_ids:
+            continue
+        if "chimney" in a.name.lower():
+            continue
+        x0, z0, x1, z1 = placed_bounds(a, pl)
+        for x in range(int(x0), max(int(x0) + 1, int(round(x1)))):
+            for z in range(int(z0), max(int(z0) + 1, int(round(z1)))):
+                cur = top[(x, z)]
+                top[(x, z)] = max(cur, pl.y + a.size_y) if cur else pl.y + a.size_y
+
+    proud = []
+    seen = 0
+    for pl in b.placements:
+        a = byid[pl.asset_id]
+        if "chimney" not in a.name.lower():
+            continue
+        x0, z0, x1, z1 = placed_bounds(a, pl)
+        cx, cz = int((x0 + x1) / 2), int((z0 + z1) / 2)
+        near = [top[(cx + dx, cz + dz)] for dx in (-1, 0, 1) for dz in (-1, 0, 1)
+                if top[(cx + dx, cz + dz)] is not None]
+        if not near:
+            continue
+        seen += 1
+        if pl.y >= max(near) - 1e-6:
+            proud.append((a.name, (cx, cz), round(pl.y - max(near), 2)))
+
+    assert seen, "no chimney found -- the test proves nothing"
+    assert not proud, (
+        f"{len(proud)} of {seen} chimneys stand ON their ridge rather than in "
+        f"it: {proud[:4]}")
+
+
+def test_a_gable_verge_matches_its_own_roof_material():
+    """A verge closed in the tier's usual material, not the roof's own.
+
+    `gable_infill` resolved its cap from `roof_set(palette, tier)` -- no bid,
+    so ROOF_BY_TIER, the tier default -- while `_lay_roofs` deals the material
+    per building through `roof_suffix_for` and `roof_override`. Measured on
+    East Tradebourne before the fix: 153 common houses dealt a tile roof got a
+    THATCH verge and 60 trade buildings dealt thatch got a tile one. The caller
+    has the dealt cap in hand two lines before it asks.
+    """
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import gable_infill, roof_set, tier_of
+    from citysmith.catalog import load_or_build
+    from citysmith.layout import Layout
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import rasterize
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
+    bids = sorted({tm.building[z][x] for z in range(tm.depth)
+                   for x in range(tm.width) if tm.building[z][x]})
+    assert bids
+
+    checked = 0
+    for bid in bids:
+        tier = tier_of(bid)
+        dealt = roof_set(palette, tier, bid)
+        # The tread wins where a fabric has one -- that is the wall carried up
+        # and is not what this test is about.
+        if gable_infill(palette, tier, None, dealt[3]) is None:
+            continue
+        infill = gable_infill(palette, tier, None, dealt[3])
+        assert infill.folder == dealt[3].folder, (
+            f"{bid}: verge {infill.name!r} [{infill.folder}] closing a roof "
+            f"of {dealt[3].name!r} [{dealt[3].folder}]")
+        checked += 1
+    assert checked, "no building closed a verge -- the test proves nothing"

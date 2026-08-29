@@ -4302,6 +4302,17 @@ WALL_STAIR_REACH = 4
 #: proud of it and still leave no joint to see.
 CHIMNEY_LAP = 0.25
 
+#: How far a free-standing stack's base sits BELOW the ridge top.
+#:
+#: **A chimney emerges from a roof; it does not stand on one.** Seated with its
+#: base level with the ridge the whole 1.5-tall stack is proud -- 7.5 ft of
+#: flue on a cottage, which is what reads as a chimney on a stick. Measured on
+#: Forest Church before this: 25 of 49 chimneys sat at +0.00 against the local
+#: ridge and 24 at -1.00, because the gabled path and the hip path carry the
+#: same three branches independently and had drifted apart. The number matters
+#: less than the fact that there is now one of it.
+CHIMNEY_SEAT = 0.5
+
 
 def _ridge_rotations(wing, rings, top_ring, chimney_at):
     """Which way each ridge cap faces, mirrored about the chimney.
@@ -4386,7 +4397,7 @@ def _tread_for(palette, tier: str, cache: dict):
     return cache[tier]
 
 
-def gable_infill(palette, tier: str, tread=None):
+def gable_infill(palette, tier: str, tread=None, cap=None):
     """What closes the triangle between a gable's wall head and its roof.
 
     **A gable always needs one.** The hole is not an oversight in the geometry:
@@ -4415,7 +4426,17 @@ def gable_infill(palette, tier: str, tread=None):
     """
     if tread is not None:
         return tread
-    cap = roof_set(palette, tier)[3]
+    # **The cap the ROOF was dealt, not the one the tier usually wears.**
+    # `roof_set(palette, tier)` with no bid resolves ROOF_BY_TIER, the tier
+    # default, while `_lay_roofs` deals the material per BUILDING through
+    # `roof_suffix_for` and `roof_override` -- so a verge was finished in
+    # whatever the tier usually wears rather than in the roof above it.
+    # Measured on East Tradebourne: 153 common houses dealt a tile roof got a
+    # THATCH verge and 60 trade buildings dealt thatch got a tile one. The
+    # caller has the dealt cap in hand two lines before it asks, so it passes
+    # it; the lookup here is only the fallback for a caller that does not.
+    if cap is None:
+        cap = roof_set(palette, tier)[3]
     if cap is not None and (cap.size_x, cap.size_z) == (1.0, 1.0):
         return cap
     return None
@@ -4639,7 +4660,10 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                 if cap is not None:
                     b.add(place_tile(cap, chimney_at[0], chimney_at[1],
                                      y - cap.size_y))
-                b.add(place_tile(stack, chimney_at[0], chimney_at[1], y))
+                # Sunk by CHIMNEY_SEAT, not stood on the cap -- see the
+                # constant. The buried part is inside the roof and invisible.
+                b.add(place_tile(stack, chimney_at[0], chimney_at[1],
+                                 y - CHIMNEY_SEAT))
             else:
                 b.add(place_tile(chimney, chimney_at[0], chimney_at[1],
                                  y - CHIMNEY_LAP))
@@ -4799,7 +4823,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         # boarded barn cannot end up with a dressed-stone parapet. Resolved
         # per block and cached, because a town is 989 buildings.
         tread = _tread_for(b.palette, tier_of(b.group), _tread_cache)
-        infill = gable_infill(b.palette, tier_of(b.group), tread)
+        infill = gable_infill(b.palette, tier_of(b.group), tread, cap)
         # The double-course end comes from the ROOF's kit, not the tier's, so
         # it follows the material this block was actually dealt. That is the
         # bug `gable-infill-follows-the-tier-not-the-roof` records against
@@ -4898,10 +4922,14 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                         b.add(place_tile(chimney, x, z, y,
                                          (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24))
                     elif stack is not None:
-                        # A cap seats by its top; the stack stands on it.
+                        # A cap seats by its top; the stack is sunk into it by
+                        # CHIMNEY_SEAT rather than standing on it, which is the
+                        # same rule the gabled path uses. These two branches are
+                        # the same three cases written twice and that is how
+                        # they drifted -- see `chimney-seating` in tasks.json.
                         b.add(place_tile(cap, x, z, y - cap.size_y,
                                          ridge_rot.get((x, z), 0)))
-                        b.add(place_tile(stack, x, z, y))
+                        b.add(place_tile(stack, x, z, y - CHIMNEY_SEAT))
                     else:
                         b.add(place_tile(chimney, x, z, y - CHIMNEY_LAP))
                         b.add(place_tile(chimney, x, z, y))
@@ -7116,7 +7144,16 @@ def _build_porches(b: Builder, tm, grade: float,
         # The porch is a slope off the building's own roof, so it takes that
         # building's material and that kit's turn -- a thatched hood on a
         # slate hall is exactly the mismatch the tiers exist to remove.
-        piece = roof_set(b.palette, tier_of(bid))[0]
+        #
+        # **The bid is the whole fix.** Without it `roof_set` falls back to
+        # ROOF_BY_TIER, the per-tier constant, while `_lay_roofs` passes the
+        # bid and gets the per-building deal from ROOF_MIX -- so the porch was
+        # dealt the tier default and the roof it hangs off was dealt something
+        # else. The comment above has always said what this should do; it
+        # missed by one argument. Measured on Forest Church: 2 of 5 porches
+        # mismatched, one of them a red Village tile awning under a Thatched
+        # roof.
+        piece = roof_set(b.palette, tier_of(bid), bid)[0]
         if piece is None:
             continue
         edge_off, _ = roof_offsets(piece)

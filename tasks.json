@@ -165,7 +165,7 @@
       "state": "done",
       "doc": "docs/building-massing.md 11",
       "evidence": "citysmith.build.storeys_by_frontage",
-      "note": "BUILT as `storeys_by_frontage`, applied inside `storeys_of` beside the utility cap and for the same reason -- three passes read it (shell, upper floors, roof) and a roof that disagrees with the walls floats or buries itself. The note said `storeys_for` cannot do this because it runs in the importer where there is no raster; that is still true, so the decision moved to build time rather than the importer getting a proxy. **THE MEASUREMENT THAT MATTERED: `street_class` alone is the wrong test and hides most of the town.** It is only set for main and cart roads; a back lane is paved (`surface == 'lane'`) and carries an EMPTY class. Ranking on the class found 10 lane-fronted buildings on East Tradebourne; ranking on class AND surface finds 463. `_main_street_frontage` reads the class alone and is right to, because it only ever asks about main roads. **A WEIGHTED DEAL, NOT A SUBTRACTION**, because the complaint in docs/building-massing.md §11 was variety and not height: dropping every back-lane building a storey trades one monotone skyline for another, one course lower. East Tradebourne before -> after: main 2.55 -> 2.73, cart 2.33 -> 2.33, lane 1.94 -> 1.52, open 1.94 -> 1.35, and single-storey buildings 137 -> 399. Lane is 255/175/33 across one/two/three storeys, which is the mix the task asked for. Pelvesthollow is unchanged at 1.03 (already all single storey, and the deal never goes below 1).",
+      "note": "BUILT as `storeys_by_frontage`, applied inside `storeys_of` beside the utility cap and for the same reason -- three passes read it (shell, upper floors, roof) and a roof that disagrees with the walls floats or buries itself. The note said `storeys_for` cannot do this because it runs in the importer where there is no raster; that is still true, so the decision moved to build time rather than the importer getting a proxy. **THE MEASUREMENT THAT MATTERED: `street_class` alone is the wrong test and hides most of the town.** It is only set for main and cart roads; a back lane is paved (`surface == 'lane'`) and carries an EMPTY class. Ranking on the class found 10 lane-fronted buildings on East Tradebourne; ranking on class AND surface finds 463. `_main_street_frontage` reads the class alone and is right to, because it only ever asks about main roads. **A WEIGHTED DEAL, NOT A SUBTRACTION**, because the complaint in docs/building-massing.md \u00a711 was variety and not height: dropping every back-lane building a storey trades one monotone skyline for another, one course lower. East Tradebourne before -> after: main 2.55 -> 2.73, cart 2.33 -> 2.33, lane 1.94 -> 1.52, open 1.94 -> 1.35, and single-storey buildings 137 -> 399. Lane is 255/175/33 across one/two/three storeys, which is the mix the task asked for. Pelvesthollow is unchanged at 1.03 (already all single storey, and the deal never goes below 1).",
       "tags": [
         "buildings"
       ]
@@ -1276,7 +1276,7 @@
       "state": "open",
       "doc": "docs/great-buildings.md 3.4b",
       "evidence": "citysmith.build.BARN_WALL_RELIEF",
-      "note": "FOUND BY ACCIDENT on `PROBE barn aisle`, and it is the finding nobody was looking for. Two courses of `Rural Wall 01` with no openings -- the 20 ft eaves this design asks for -- reads as a windowless fortress, not a barn. §2's 'no upper floor, no windows' is right about the windows and wrong about what that leaves. Raising the eaves without relief trades one wrong silhouette for another. Wants boarding lines, a cart door, a vent, or a lean-to.",
+      "note": "FOUND BY ACCIDENT on `PROBE barn aisle`, and it is the finding nobody was looking for. Two courses of `Rural Wall 01` with no openings -- the 20 ft eaves this design asks for -- reads as a windowless fortress, not a barn. \u00a72's 'no upper floor, no windows' is right about the windows and wrong about what that leaves. Raising the eaves without relief trades one wrong silhouette for another. Wants boarding lines, a cart door, a vent, or a lean-to.",
       "tags": [
         "buildings",
         "great"
@@ -1602,10 +1602,10 @@
     {
       "id": "gable-infill-follows-the-tier-not-the-roof",
       "what": "Close a verge in the roof material the building was actually dealt",
-      "state": "open",
+      "state": "done",
       "doc": "docs/roofscape.md 9.1",
       "evidence": "test:test_a_gable_verge_matches_its_own_roof_material",
-      "note": "MEASURED 2026-08-29, found while wiring `tools/roofmix_probe.py` through the shipped `_lay_gabled_wing`: the probe's TILE roof came back with a THATCH verge. `gable_infill(palette, tier, tread)` resolves its cap from `roof_set(palette, tier)`, which uses `ROOF_BY_TIER[tier]` -- the tier's DEFAULT material. `_lay_roofs` deals the material per BUILDING through `roof_suffix_for` and `roof_override`, and `sets_for` has the dealt cap in hand two lines earlier. So the verge is finished in whatever the tier usually wears rather than in the roof above it. On East Tradebourne: 153 common houses dealt the tile roof get a thatch verge, 60 trade buildings dealt thatch get a tile one, 14 trade dealt slate get tile -- **227 of 989 non-civic buildings, 23%**. The two civic rows (12 buildings) are CORRECT by design and must stay: `castle wall 1x1 half` is the masonry gable wall carried up, which is what a stone gable is, and `gable_infill` documents that as its first branch. Fix is to pass the dealt cap rather than the tier, so the wall-kit branch is unchanged and only the roof-kit fallback follows the deal. Bites only where a wing gables, which today is the civic quarter -- but `gable_end_for` deals by quarter and another seed reaches the residential one.",
+      "note": "MEASURED 2026-08-29, found while wiring `tools/roofmix_probe.py` through the shipped `_lay_gabled_wing`: the probe's TILE roof came back with a THATCH verge. `gable_infill(palette, tier, tread)` resolves its cap from `roof_set(palette, tier)`, which uses `ROOF_BY_TIER[tier]` -- the tier's DEFAULT material. `_lay_roofs` deals the material per BUILDING through `roof_suffix_for` and `roof_override`, and `sets_for` has the dealt cap in hand two lines earlier. So the verge is finished in whatever the tier usually wears rather than in the roof above it. On East Tradebourne: 153 common houses dealt the tile roof get a thatch verge, 60 trade buildings dealt thatch get a tile one, 14 trade dealt slate get tile -- **227 of 989 non-civic buildings, 23%**. The two civic rows (12 buildings) are CORRECT by design and must stay: `castle wall 1x1 half` is the masonry gable wall carried up, which is what a stone gable is, and `gable_infill` documents that as its first branch. Fix is to pass the dealt cap rather than the tier, so the wall-kit branch is unchanged and only the roof-kit fallback follows the deal. Bites only where a wing gables, which today is the civic quarter -- but `gable_end_for` deals by quarter and another seed reaches the residential one. || FIXED: `gable_infill` takes the dealt cap, which `sets_for` already had in hand two lines earlier; the tier lookup remains only as the fallback for a caller that does not pass one. Forest Church: 13 of 51 buildings get a corrected verge material.",
       "tags": [
         "roofs",
         "great"
@@ -1677,7 +1677,7 @@
       "state": "open",
       "doc": "docs/roofscape.md 8.3",
       "evidence": "citysmith.build.DECK_RAISE",
-      "note": "Measured off the hand-build: building A seats its rear flat deck flush with the wall head (top 2.00), building B seats its a quarter tile PROUD (top 2.25). The user called this out -- 'note the raised flat roof' -- so the raise is deliberate rather than a hand-placement slip. What it buys is an EDGE: a flat roof seated flush reads as a hole in the building, and a quarter tile of upstand gives it a lip that catches light. This is the cheapest version of the parapet question `terrace-probe` has to settle, and it is worth trying FIRST, because it costs nothing and needs no new asset -- where a masonry parapet only exists in Castle Fortified and Marble Palace (docs/roofscape.md §4.4) and a railing is a prop. NOT SEEN AT CLOSE RANGE yet: the hand-build was read from a medium oblique, and whether a quarter tile is enough lip to register is exactly the kind of thing that needs the square-on look terrace-probe is for.",
+      "note": "Measured off the hand-build: building A seats its rear flat deck flush with the wall head (top 2.00), building B seats its a quarter tile PROUD (top 2.25). The user called this out -- 'note the raised flat roof' -- so the raise is deliberate rather than a hand-placement slip. What it buys is an EDGE: a flat roof seated flush reads as a hole in the building, and a quarter tile of upstand gives it a lip that catches light. This is the cheapest version of the parapet question `terrace-probe` has to settle, and it is worth trying FIRST, because it costs nothing and needs no new asset -- where a masonry parapet only exists in Castle Fortified and Marble Palace (docs/roofscape.md \u00a74.4) and a railing is a prop. NOT SEEN AT CLOSE RANGE yet: the hand-build was read from a medium oblique, and whether a quarter tile is enough lip to register is exactly the kind of thing that needs the square-on look terrace-probe is for.",
       "tags": [
         "roofs",
         "terrace"
@@ -1693,6 +1693,69 @@
       "tags": [
         "roofs",
         "chimneys"
+      ]
+    },
+    {
+      "id": "roof-2x2-pieces",
+      "what": "Roof with the kit's 2x2 pieces, not 1x1 alone",
+      "state": "open",
+      "doc": "citysmith/build.py",
+      "evidence": "test:test_a_roof_uses_its_kits_larger_pieces",
+      "note": "MEASURED on Forest Church: 1,661 roof pieces placed and EVERY ONE is 1x1, while every kit we roof with ships a full 2x2 set -- Rural 5 (incl. Thatched Roof 03, roof flat 02, corner 02, inner corner 02), Tavern 7, Abandoned Village 8, Castle Fortified 12. This is the wall-run defect one surface up: the kit is authored at two sizes and we place only the small one, so a roof reads as a grid of tiles rather than as a roof. `walls.pack` is the shape of the answer -- cover a course with the larger piece where one fits -- but a roof is not a run: it steps in and up per ring, so a 2x2 has to align to the ring AND to the rise, and the hip rotations are per kit (build.ROOF_ROT_OFFSET). Probe before building.",
+      "tags": [
+        "roofs",
+        "assets",
+        "style"
+      ]
+    },
+    {
+      "id": "porch-follows-its-own-roof",
+      "what": "The porch takes its building's roof material, not its tier's",
+      "state": "done",
+      "doc": "citysmith/build.py",
+      "evidence": "test:test_a_porch_matches_the_roof_it_hangs_off",
+      "note": "`_build_porches` calls `roof_set(b.palette, tier_of(bid))` with NO bid. `roof_set` falls back to the per-tier constant ROOF_BY_TIER when the bid is absent, while `_lay_roofs` passes it and gets the per-BUILDING deal from ROOF_MIX -- so the porch is dealt the tier default and the roof it hangs off is dealt something else. The comment two lines above states the intent exactly ('a slope off the building's own roof, so it takes that building's material') and the code misses it by one argument. Measured on Forest Church: 2 of 5 porches mismatched -- tavern-0033 has a red Village tile awning under a Thatched roof, which is the defect in the screenshot. Scales with town size. The `poor` roof override compounds it, since the porch cannot see that either. || FIXED: `roof_set(b.palette, tier_of(bid), bid)`. Forest Church 2 of 5 mismatched -> 0 of 5.",
+      "tags": [
+        "roofs",
+        "buildings"
+      ]
+    },
+    {
+      "id": "chimney-seating",
+      "what": "Seat a chimney on the ridge the same way every time",
+      "state": "done",
+      "doc": "citysmith/build.py",
+      "evidence": "test:test_every_chimney_sits_on_its_ridge_the_same_way",
+      "note": "MEASURED on Forest Church, 49 chimneys, base against the top of their own building's roof: 24 at +0.00 (base flush with the ridge, so the whole 1.5-tall stack stands proud -- these are the ones that read as too high), 23 at -1.00, and 2 at -4.00 and -7.00, buried. Three different relationships and no rule. A chimney wants its base INSIDE the roof and a consistent height proud of the ridge, which is one subtraction once the ridge height is known per block -- and `_lay_roofs` already knows it. || FIXED with `CHIMNEY_SEAT = 0.5`, applied in BOTH the gabled and hip paths -- they carry the same three branches independently, which is how they drifted. Measured against the LOCAL ridge (the per-building measurement was conflating a civic tower's walls, and gave phantom -4 and -7 outliers): was 24 at -1.00 and 25 at +0.00, now -1.5/-1.0/-0.5 and nothing at 0. No chimney stands with its base level with the ridge any more, which was the 'too high' look. The remaining spread is the three piece types and is legitimate -- a combination piece IS the roof at its cell. THE DUPLICATION IS NOT FIXED: both paths still carry their own copy of the branch logic and will drift again.",
+      "tags": [
+        "roofs",
+        "buildings"
+      ]
+    },
+    {
+      "id": "deprecate-layered-paste",
+      "what": "Retire layer-then-region pasting for full chunk pasting",
+      "state": "open",
+      "doc": "CLAUDE.md",
+      "evidence": "test:test_the_default_build_is_by_region",
+      "note": "The landscape/structure layer split solved terrain seams and created a worse problem: the second layer is pasted onto the first, so it inherits its height and, on a tilted camera, its sideways slide. CLAUDE.md already records the measurement -- a structure layer landed +1.5 in y and a tile out in z -- and already names the answer: `--by-region`, where every chunk carries all layers and no chunk is ever pasted over another. The user reports buildings still reading as floating on a real board, which is that inheritance. What is left is to make by-region the DEFAULT and deprecate the layered path rather than keep both: two paste strategies means every board review has to establish which one produced it before it can say anything.",
+      "tags": [
+        "chunking",
+        "talespire",
+        "paste"
+      ]
+    },
+    {
+      "id": "fabric-village",
+      "what": "Give the common house a second fabric from the same folder",
+      "state": "done",
+      "doc": "citysmith/walls.py",
+      "evidence": "test:test_one_folder_can_hold_two_fabrics",
+      "note": "`walls.SPLIT_KITS` lets one folder hold more than one fabric, and Tavern is the case it was built for. `Village Roof Side Wall 01/02` and `Tavern Wall 01` are one folder and must not mix panel by panel -- a Village panel between two Tavern ones reads as a bare plaster patch -- but as a WHOLE BUILDING's fabric the Village panels are coherent, and they carry the pack's only 1-cell window. Splitting gives them back as a fabric while keeping them out of the panel deal. Forest Church A/B: Village Roof Side Wall 01 0->72 and 02 0->94, Tavern still the plurality. TWO THINGS FELL OUT. The Village family has no corner piece -- `Tavern no floor (1x1 a)` is group='corner' and stays with the parent -- so it MITRES, which the corner probe already settled reads clean for that panel. And it has two plain siblings, so the per-panel sibling deal is finally LIVE: it was inert for every kit a town used until now. TIER_FABRICS entries now name a KIT or a role, because two fabrics sharing a role each took the role's whole weight and the secondary became the primary by arriving -- 29 Village against 19 Tavern. Named, it is 6:3:1. Seen on `PROBE fabric street`, which is the first probe board this week that fits one frame (37x17 at 45.8 tiles of range).",
+      "tags": [
+        "walls",
+        "style",
+        "buildings"
       ]
     }
   ]

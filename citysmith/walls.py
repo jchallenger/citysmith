@@ -338,15 +338,54 @@ def _plainness(a) -> tuple:
     return _rank(a) + (len(a.name), a.name)
 
 
+#: Folders that hold more than one fabric, and how to tell them apart.
+#:
+#: **The kit is the folder, except where one folder holds two.** `Village Roof
+#: Side Wall 01/02` and `Tavern Wall 01` are both ``folder='Tavern'`` -- one
+#: kit by every rule this project has -- and they still do not mix at panel
+#: granularity: a Village panel between two Tavern ones carries no timber frame
+#: of its own and reads as a bare plaster patch, which is why `_rank` puts
+#: ``group='wall'`` above ``group='roof'`` and the Village panels lost the deal.
+#:
+#: But losing the *panel* deal is not the same as having no job. As a WHOLE
+#: BUILDING's fabric the Village panels are perfectly coherent -- that is what
+#: every common house looked like before the wide-panel work -- and they carry
+#: the only 1-cell window in the Medieval Fantasy pack. Splitting the folder
+#: gives them back as a fabric while keeping them out of the panel deal, and
+#: adds a rhythm difference for free: Village ships no 2-cell piece, so a
+#: Village house is 1-cell throughout and visibly unlike Tavern's 2-cell bays.
+#:
+#: A split is ``parent -> {suffix: predicate}``. Anything the predicates do not
+#: claim stays with the parent.
+SPLIT_KITS: dict[str, dict[str, "callable"]] = {
+    "Tavern": {
+        "Village": lambda a: "roof" in (a.group_tag or "").lower(),
+    },
+}
+
+
+def fabric_of(asset) -> str:
+    """Which fabric an asset belongs to: its folder, or a split of it."""
+    kit = asset.folder or "(none)"
+    for suffix, claims in SPLIT_KITS.get(kit, {}).items():
+        if claims(asset):
+            return f"{kit}/{suffix}"
+    return kit
+
+
 def families(catalog, *, kits: set[str] | None = None) -> dict[str, WallFamily]:
-    """Every kit in the catalog that can clad a wall, keyed on ``folder``."""
+    """Every kit in the catalog that can clad a wall, keyed on ``folder``.
+
+    A folder in :data:`SPLIT_KITS` yields more than one entry -- see there for
+    why one folder can hold two fabrics that must not be mixed panel by panel.
+    """
     out: dict[str, WallFamily] = {}
     for a in catalog.assets:
         if getattr(a, "kind", "tile") != "tile":
             continue
         if getattr(a, "deprecated", False):
             continue
-        kit = a.folder or "(none)"
+        kit = fabric_of(a)
         if kits is not None and kit not in kits:
             continue
         slot = _role_of(a)
@@ -532,6 +571,10 @@ def runs_of(segments) -> list[tuple[str, int, int, int]]:
 KIT_ROLE: dict[str, str] = {
     # -- medieval, in a town ---------------------------------------------
     "Tavern": "common",
+    # The same folder's roof-set panels, as a whole-building fabric. See
+    # SPLIT_KITS: they are excluded from the PANEL deal and belong in the
+    # building deal, and they carry the pack's only 1-cell window.
+    "Tavern/Village": "common",
     "Rural": "utility",
     "Castle Fortified": "civic",
     "Abandoned Village": "poor",
@@ -571,11 +614,19 @@ KIT_ROLE: dict[str, str] = {
 #: dealt two panels per building, so across-building variety had gone 2 -> 1
 #: while within-wall variety went up.
 TIER_FABRICS: dict[str, tuple[tuple[str, int], ...]] = {
-    "common": (("common", 6), ("poor", 1)),
+    # **An entry names a KIT or a ROLE, and naming the kit is how a split is
+    # controlled.** Two fabrics sharing a role each take the role's whole
+    # weight, so `("common", 6)` alone dealt 29 Village against 19 Tavern --
+    # the secondary fabric became the primary by arriving. Named directly,
+    # the intent is on the page: Tavern is the house, Village is the older
+    # house next door, and the poor fabric is the edge of town.
+    "common": (("Tavern", 6), ("Tavern/Village", 3), ("poor", 1)),
     "utility": (("utility", 4), ("poor", 1)),
     # Trade shares the house's fabric and is told apart by its door and its
-    # glazing -- the reason CLAUDE.md already gives, unchanged.
-    "trade": (("common", 1),),
+    # glazing -- the reason CLAUDE.md already gives, unchanged. Named rather
+    # than left as the role, for the reason above: the role resolves to both
+    # fabrics at equal weight, which made a show facade a coin toss.
+    "trade": (("Tavern", 3), ("Tavern/Village", 1)),
     "civic": (("civic", 1),),
 }
 
@@ -621,8 +672,10 @@ def fabric_for(tier: str, key: int, families: "dict[str, WallFamily]"):
     if not weighted:
         return None
     pool: list[str] = []
-    for role, weight in weighted:
-        for kit in kits_for_role(role, families):
+    for name, weight in weighted:
+        # A kit by name where one exists, otherwise every kit with that role.
+        named = [name] if name in families else kits_for_role(name, families)
+        for kit in named:
             pool.extend([kit] * max(1, int(weight)))
     if not pool:
         return None

@@ -521,3 +521,63 @@ def test_a_barn_gets_no_glass_however_glazed_its_fabric_is():
     glazed = [byid[p.asset_id].name for p in b.placements
               if "window" in byid[p.asset_id].name.lower()]
     assert not glazed, f"a barn was glazed: {sorted(set(glazed))}"
+
+
+# -- the Village fabric --------------------------------------------------------
+
+def test_one_folder_can_hold_two_fabrics(families):
+    """`Tavern` splits, and the split is the point.
+
+    `Village Roof Side Wall 01/02` and `Tavern Wall 01` are one folder and must
+    not mix panel by panel -- a Village panel between two Tavern ones carries
+    no timber frame of its own and reads as a bare plaster patch. But as a
+    WHOLE BUILDING's fabric the Village panels are coherent; that is what every
+    common house looked like before the wide-panel work.
+    """
+    assert "Tavern" in families and "Tavern/Village" in families
+    tav, vil = families["Tavern"], families["Tavern/Village"]
+
+    assert [a.name for a in vil.all("wall", 1)] == [
+        "Village Roof Side Wall 01", "Village Roof Side Wall 02"]
+    assert not vil.all("wall", 2), "Village ships no 2-cell piece"
+    assert tav.wide is not None and tav.wide.name == "Tavern Wall 01"
+
+    # No piece belongs to both, or the split has not actually split anything.
+    a = {x.id for v in tav.pieces.values() for x in v}
+    b = {x.id for v in vil.pieces.values() for x in v}
+    assert not (a & b)
+
+
+def test_the_village_fabric_mitres_its_corners(families):
+    """It has no corner piece, and that is correct rather than missing.
+
+    `Tavern no floor (1x1 a)` is `group='corner'` so it stays with the parent.
+    CLAUDE.md's corner probe settled that the Village panel mitres cleanly --
+    its own edge timber meets its neighbour as a corner post -- which is why
+    `_usable_corner` drops a mismatched corner rather than swapping one in.
+    """
+    assert not families["Tavern/Village"].all("corner", 1)
+
+
+def test_a_street_gets_both_house_fabrics_with_tavern_in_front(families):
+    """Two fabrics, and the secondary must not become the primary by arriving.
+
+    Weighted by ROLE alone both kits took the role's whole weight and the deal
+    came out 29 Village against 19 Tavern. Named as kits it is 6:3:1.
+    """
+    import collections
+    import zlib
+
+    got = collections.Counter()
+    for i in range(200):
+        f = W.fabric_for("common", zlib.crc32(f"house-{i:04d}".encode()),
+                         families)
+        got[f.kit] += 1
+    assert set(got) == {"Tavern", "Tavern/Village", "Abandoned Village"}
+    assert got["Tavern"] > got["Tavern/Village"] > got["Abandoned Village"]
+
+
+def test_a_named_kit_beats_a_role_of_the_same_name(families):
+    """`fabric_for` resolves a kit name first, then falls back to a role."""
+    assert W.fabric_for("common", 0, families) is not None
+    assert W.kits_for_role("common", families) == ["Tavern", "Tavern/Village"]

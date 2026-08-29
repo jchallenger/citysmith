@@ -167,7 +167,7 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
 [WARN] storeys: 1:4, mean 1.00  -- every building the same height
-[WARN] tile seams: 176 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
+[WARN] tile seams: 184 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
 [ok  ] connectivity: one connected town covering 100% of walkable space
 [ok  ] building access: 4 of 4 buildings (100.0%) can be entered from the street network
 [ok  ] street width: 0 of 141 street tiles (0.0%) are under 2 tiles (10 ft) wide -- a creature fills one tile, so two cannot pass abreast there
@@ -227,7 +227,7 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
 [WARN] storeys: 1:4, mean 1.00  -- every building the same height
-[WARN] tile seams: 176 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
+[WARN] tile seams: 184 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
 [ok  ] connectivity: one connected town covering 100% of walkable space
 [ok  ] building access: 4 of 4 buildings (100.0%) can be entered from the street network
 [ok  ] street width: 0 of 141 street tiles (0.0%) are under 2 tiles (10 ft) wide -- a creature fills one tile, so two cannot pass abreast there
