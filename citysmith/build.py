@@ -4219,11 +4219,25 @@ def _lay_fences(b: Builder, tm, grade: float,
             here = _fence_ground(tm, taper, grade, jx, jz)
             if here is None:
                 continue
-            x, z = int(math.floor(jx)), int(math.floor(jz))
-            if not tm.inside(x, z) or tm.surface[z][x] in paved or tm.building[z][x]:
+            # **The joint is measured like the panel: its body, not the cell
+            # its centre lands in.** The panel path replaced a sample with an
+            # extent and the joint path was left behind, which is only
+            # harmless while every joint is small -- `field_wall_post` is
+            # 0.51 square and cannot reach past its own cell, but
+            # `yard_fence_corner` is 1.64 and spans four of them, so a
+            # `paling` corner could sit a foot from a lane and test clean.
+            # Same helper as the panel, so the two cannot drift apart.
+            #
+            # The rotation is drawn *before* the test for the same reason the
+            # panel's jitter is applied before its: a piece has to be measured
+            # where it ends up. Both joint pieces happen to be square, so
+            # today the draw cannot change the answer -- which is exactly the
+            # kind of accident that stops being true when somebody pins a
+            # different post.
+            rot = rng.randrange(24)
+            if obstructed(jx, jz, rot, post_asset):
                 continue
-            b.add(place_centered(post_asset, jx, jz, here, rng.randrange(24)),
-                  prop=True)
+            b.add(place_centered(post_asset, jx, jz, here, rot), prop=True)
             laid += 1
             if scatter is not None:
                 scatter.reserve(post_asset, jx, jz, here, 0)

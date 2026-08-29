@@ -141,14 +141,26 @@ def _expected(template: str, out_dir: pathlib.Path) -> str:
 
 #: What ``citysmith build`` prints for the hamlet above, to the character.
 #:
-#: TWO THINGS BEFORE ANYONE "FIXES" THE FAILURES IN HERE. They are the stub
+#: THREE THINGS BEFORE ANYONE "FIXES" THE FAILURES IN HERE. They are the stub
 #: talking, not the map: every role the stub does not name resolves to one
 #: full-cell block, so the scatter plants blocks at fractional coordinates
 #: (off the grid) and the edge fringe lays them under ground that is not there
-#: (floating). A real palette answers those roles with props and soil and
-#: reports neither. They are kept because a golden that only ever shows
-#: ``[ok  ]`` never proves the FAIL branch renders, and because they are
-#: stable: identical under PYTHONHASHSEED 1, 7 and 12345.
+#: (floating). The third is the same collapse read from the other end --
+#: `verify._boundary_ids` gathers boundary pieces by asset id, and with every
+#: unnamed role answering with the *same* block that set is most of the board,
+#: so a plaza tile is counted as a wall standing on a plaza. A real palette
+#: answers those roles with props and soil and reports none of the three.
+#: They are kept because a golden that only ever shows ``[ok  ]`` never proves
+#: the FAIL branch renders, and because they are stable: identical under
+#: PYTHONHASHSEED 1, 7 and 12345.
+#:
+#: **The boundary counts moved when the checks learned to read a stored
+#: coordinate.** A placement holds the asset's origin, and these checks used to
+#: read it as the collider centre -- right for a prop, half a footprint out for
+#: a tile, and the stub's block is a tile. So the boxes were measured half a
+#: cell low on both axes: a different 72 pieces were named, and two pieces
+#: whose min corner is inside the map read as hanging off it. Both counts here
+#: are now the piece where the piece is.
 #:
 #: The grid row below ends in a space. Do not strip trailing whitespace here.
 DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
@@ -161,8 +173,7 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 1,014 assets in 2 chunk(s)
 
 [FAIL] placements: 94 tile placements are off the half-tile grid (first at x=9.66, z=9.32) -- minis with grid snap will not line up with the floors
-[FAIL] placements: 2 boundary piece(s) lie outside the 30x30 map (first at x=-0.28, z=9.98) -- an off-map prop drags the bounding box every registration check is measured against
-[FAIL] placements: 72 boundary piece(s) stand in a street or lane (first at x=10.00, z=10.00) -- a wall across a way is an obstacle on the one thing the map is for
+[FAIL] placements: 64 boundary piece(s) stand in a street or lane (first at x=10.50, z=10.50) -- a wall across a way is an obstacle on the one thing the map is for
 [FAIL] floating geometry: 499 placement(s) stand over nothing (md_stairblock_01 at (0.0, -1.0, 0.0), md_stairblock_01 at (28.0, -1.0, 0.0), md_stairblock_01 at (2.0, -0.5, 2.0)) -- left hanging where the edge fringe took the ground away, or beyond where ground was ever laid
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
@@ -222,8 +233,7 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 1,002 assets in 7 chunk(s)
 
 [FAIL] placements: 95 tile placements are off the half-tile grid (first at x=9.66, z=9.32) -- minis with grid snap will not line up with the floors
-[FAIL] placements: 2 boundary piece(s) lie outside the 30x30 map (first at x=-0.28, z=9.98) -- an off-map prop drags the bounding box every registration check is measured against
-[FAIL] placements: 67 boundary piece(s) stand in a street or lane (first at x=10.00, z=10.00) -- a wall across a way is an obstacle on the one thing the map is for
+[FAIL] placements: 59 boundary piece(s) stand in a street or lane (first at x=10.50, z=10.50) -- a wall across a way is an obstacle on the one thing the map is for
 [FAIL] floating geometry: 491 placement(s) stand over nothing (md_stairblock_01 at (0.0, -1.0, 0.0), md_stairblock_01 at (28.0, -1.0, 0.0), md_stairblock_01 at (2.0, -0.5, 2.0)) -- left hanging where the edge fringe took the ground away, or beyond where ground was ever laid
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1

@@ -687,7 +687,29 @@ def _boundary_ids(builder) -> set[str]:
 
 
 def _boundary_boxes(builder):
-    """``(placement, asset)`` for every boundary piece on the board."""
+    """``(placement, asset, cx, cz)`` for every boundary piece on the board.
+
+    **The centre is handed out here because a stored coordinate is not one.**
+    A placement holds the asset's *origin*, and where that sits inside the
+    collider depends on how the piece was authored: a prop is centred on its
+    origin, a tile stands with its collider's min corner there
+    (:func:`build.place_centered` is the long version). Both boundary checks
+    below want a centre, and both used to read ``p.x`` as one -- right for the
+    props, and half a footprint out for every tile.
+
+    On Sedgewater that was the whole of a standing ``[FAIL]``. The palisade
+    pieces are the only boundary assets in the medieval palette that are
+    ``kind="tile"`` (``off=(0.5, 0.5)``), and the enclosure ring is built from
+    them whatever ``--fence-style`` asks for -- so a box measured half a tile
+    low on both axes straddled the four cells meeting at the tile's own min
+    corner instead of the one cell it fills, and caught a street two of them
+    away. Nine styles, the same two pieces, the same coordinate.
+
+    Same rule as :func:`build.placed_bounds`, which every other placement check
+    in this module already goes through.
+    """
+    from .build import collider_offset
+
     catalog = builder.palette.catalog
     ids = _boundary_ids(builder)
     for p in builder.placements:
@@ -695,7 +717,8 @@ def _boundary_boxes(builder):
             continue
         asset = catalog.by_id(p.asset_id)
         if asset is not None:
-            yield p, asset
+            ox, oz = collider_offset(asset, p.rot)
+            yield p, asset, p.x + ox, p.z + oz
 
 
 def _boundaries_stay_on_the_map(builder, tm) -> list[str]:
@@ -712,20 +735,20 @@ def _boundaries_stay_on_the_map(builder, tm) -> list[str]:
     `anchor_on_a_whole_tile` check is measured against, so one prop off the map
     moves all of them.
     """
-    from .build import rotated_footprint
+    from .build import placed_bounds
 
     out = []
-    for p, asset in _boundary_boxes(builder):
-        sx, sz = rotated_footprint(asset, p.rot)
-        if (p.x - sx / 2 < -0.5 or p.x + sx / 2 > tm.width + 0.5
-                or p.z - sz / 2 < -0.5 or p.z + sz / 2 > tm.depth + 0.5):
-            out.append(p)
+    for p, asset, cx, cz in _boundary_boxes(builder):
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        if (x0 < -0.5 or x1 > tm.width + 0.5
+                or z0 < -0.5 or z1 > tm.depth + 0.5):
+            out.append((cx, cz))
     if not out:
         return []
-    first = out[0]
+    fx, fz = out[0]
     return [f"{len(out)} boundary piece(s) lie outside the {tm.width}x{tm.depth} "
-            f"map (first at x={first.x:.2f}, z={first.z:.2f}) -- an off-map prop "
-            "drags the bounding box every registration check is measured against"]
+            f"map (first at x={fx:.2f}, z={fz:.2f}) -- an off-map prop drags the "
+            "bounding box every registration check is measured against"]
 
 
 def _boundaries_do_not_block_a_way(builder, tm) -> list[str]:
@@ -737,17 +760,21 @@ def _boundaries_do_not_block_a_way(builder, tm) -> list[str]:
     construction -- `_lay_fences` opens the run where the paving is,
     `_lay_yards` refuses a panel whose overhang would land in one -- so this is
     the artifact-side proof that they did.
+
+    **It measures the piece where the piece actually is**, which is what
+    :func:`_boundary_boxes` hands it and what it did not do for the first nine
+    fence styles it was run against; the correction is written up there.
     """
     from .build import blocks_a_way
 
     ways = frozenset({STREET, PLAZA, LANE, PIER})
-    out = [p for p, asset in _boundary_boxes(builder)
-           if blocks_a_way(tm, asset, p.x, p.z, p.rot, ways)]
+    out = [(cx, cz) for p, asset, cx, cz in _boundary_boxes(builder)
+           if blocks_a_way(tm, asset, cx, cz, p.rot, ways)]
     if not out:
         return []
-    first = out[0]
+    fx, fz = out[0]
     return [f"{len(out)} boundary piece(s) stand in a street or lane "
-            f"(first at x={first.x:.2f}, z={first.z:.2f}) -- a wall across a "
+            f"(first at x={fx:.2f}, z={fz:.2f}) -- a wall across a "
             "way is an obstacle on the one thing the map is for"]
 
 

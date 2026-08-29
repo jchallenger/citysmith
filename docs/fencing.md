@@ -290,6 +290,37 @@ Three checks, all on emitted boxes:
 `fences` also wants a line in `Layout.summary()` and in the build's chunk report,
 so a board that came out unfenced is diagnosable from the terminal.
 
+### 5.1 A box is not where the coordinate is (2026-08-29)
+
+Both checks above were reading a placement's stored coordinate as the collider
+centre. It is the asset's **origin**, and where that sits inside the collider
+is a property of how the piece was authored: a prop is centred on its origin, a
+tile stands with its collider's min corner there. `build.placed_bounds` is the
+one place that knows the difference and every other placement check in `verify`
+goes through it; these two did not.
+
+It only ever showed on a tile, and there is exactly one boundary family in the
+medieval palette that is `kind="tile"` -- the palisade, `off=(0.5, 0.5)`. Which
+would have made it rare, except that a *closed* run is built as a barricade
+whatever `--fence-style` asks for (§8.1), so every style laid some. The box came
+out half a cell low on both axes, straddling the four cells that meet at the
+tile's own min corner rather than the one cell it fills, and picked up a street
+two cells away.
+
+Sedgewater reported `2 boundary piece(s) stand in a street or lane` at
+x=145.00, z=134.00 under eight styles and 7 pieces under `palisade`, with
+nothing standing in a street. **The identical count from `drystone` and `hedge`
+was the diagnosis and it was read as the opposite of what it meant**: two
+styles that share no piece cannot fail the same way about their own pieces, so
+the pieces were never theirs. Corrected, 0 pieces intrude on any of the nine
+styles, and no piece moved -- `fence_pieces` is identical across all of them.
+
+The joint path was tightened at the same time, for the reason the panel path
+was: `_lay_fences` tested a panel against its body and a joint against the one
+cell its centre landed in. `field_wall_post` is 0.51 square and cannot reach
+past that cell, but `paling`'s corner is 1.64 and spans four, so a joint could
+sit a foot inside a lane and test clean. Both go through `blocks_a_way` now.
+
 ## 6. Review
 
 Per `CLAUDE.md`: a probe read from one angle is a probe that lies, and this has

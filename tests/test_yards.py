@@ -185,9 +185,9 @@ import math
 
 from citysmith.build import (FENCE_MIN_RUN, FRONTAGE_MIN_RUN, YARD_BOUNDARY,
                              blocks_a_way, boundary_runs, build_from_tilemap,
-                             covered_cells, edge_taper, rotated_footprint,
-                             tier_of, yard_boundary, Builder, _lay_yards,
-                             _run_panels, _stub)
+                             collider_offset, covered_cells, edge_taper,
+                             rotated_footprint, tier_of, yard_boundary,
+                             Builder, _lay_yards, _run_panels, _stub)
 from citysmith.catalog import load_or_build
 from citysmith.layout import Layout, LayoutBuilding
 from citysmith.palette import MEDIEVAL, Palette
@@ -287,15 +287,23 @@ def test_a_lone_yard_cell_is_not_fenced_on_all_four_sides():
 
 def test_no_boundary_panel_stands_in_a_street():
     """The playability check: a wall across a way is an obstacle on the one
-    thing the map is for."""
+    thing the map is for.
+
+    **The centre comes from `_boundary_boxes`, and this test used to compute
+    it wrongly in the same way the check did.** A placement stores the asset's
+    origin; on a prop that is the collider centre, on a tile it is the min
+    corner. Every yard boundary in the medieval palette is a prop, so reading
+    `p.x` as a centre was right here by luck -- and the palisade the enclosure
+    ring is built from is a tile, which is how a false ``[FAIL]`` stood on
+    Sedgewater under all nine fence styles.
+    """
     layout = _town()
     tm = R.rasterize(layout)
     palette = _real()
     b = build_from_tilemap(tm, palette, storeys=1, seed=0, layout=layout)
-    catalog = palette.catalog
-    for p, asset in V._boundary_boxes(b):
-        assert not blocks_a_way(tm, asset, p.x, p.z, p.rot, WAYS), (
-            f"{asset.name} at ({p.x:.2f}, {p.z:.2f}) stands in a way")
+    for p, asset, cx, cz in V._boundary_boxes(b):
+        assert not blocks_a_way(tm, asset, cx, cz, p.rot, WAYS), (
+            f"{asset.name} at ({cx:.2f}, {cz:.2f}) stands in a way")
 
 
 def test_every_yard_has_a_way_in():
@@ -310,7 +318,10 @@ def test_every_yard_has_a_way_in():
     covered = set()
     for p in b.placements:
         asset = palette.catalog.by_id(p.asset_id)
-        covered |= set(covered_cells(asset, p.x, p.z, p.rot, 0.3))
+        # The stored coordinate is the origin, not the centre -- see
+        # `test_no_boundary_panel_stands_in_a_street`.
+        ox, oz = collider_offset(asset, p.rot)
+        covered |= set(covered_cells(asset, p.x + ox, p.z + oz, p.rot, 0.3))
 
     from citysmith.build import yard_cells
     yards = yard_cells(tm)

@@ -1747,6 +1747,22 @@ fine while the board was visibly broken:
    far registration marker hugged a pine canopy's fractional overhang at
    x=187.51. It is rounded out to the half-tile lattice; the canary prints 0
    on every chunk again, and it should be run on every chunk, every build.
+8. **The two boundary checks read a placement's stored coordinate as the
+   collider CENTRE.** It is the asset's *origin*, and where that sits inside
+   the collider depends on how the piece was authored -- a prop is centred on
+   it, a tile stands with its min corner there. That is the distinction
+   `build.placed_bounds` exists to hold, and both checks were the only
+   placement checks in `verify` not going through it. Every boundary asset in
+   the medieval palette is a prop *except* the two palisade pieces, and the
+   enclosure ring is built from those whatever `--fence-style` asks for -- so
+   their boxes came out half a cell low on both axes, straddled the four cells
+   meeting at the tile's own corner, and caught a street two cells away.
+   Sedgewater printed `2 boundary piece(s) stand in a street or lane` under
+   every one of the nine styles, at one coordinate, with nothing standing in a
+   street. **The identical count from drystone and hedge was the tell and was
+   read as one**: two styles that share no piece cannot fail the same way about
+   their own pieces. Corrected, 0 pieces intrude on any style, and the map
+   check's off-map pair on the Pinfold golden were inside it all along.
 
 `verify.check_placements` and `verify.enclosed_voids` measure emitted boxes and
 the written chunk plan respectively. **New checks go there, not into the

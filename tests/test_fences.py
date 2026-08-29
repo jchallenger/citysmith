@@ -8,11 +8,13 @@ a rigid panel never straddles a corner.
 from __future__ import annotations
 
 import math
+import pathlib
 
 import pytest
 
 from citysmith.build import (
     FENCE_MODULE,
+    FENCE_STYLES,
     ROOF_EDGE_ROT,
     bearing_rot,
     run_along_polyline,
@@ -135,3 +137,119 @@ def test_cropping_a_map_reclips_its_fences():
     xs = [x for run in cropped.fences for x, _ in run]
     assert min(xs) == pytest.approx(0.0)
     assert max(xs) == pytest.approx(12.0)
+
+
+# -- where a boundary is allowed to stand --------------------------------------
+#
+# `verify` reported ``2 boundary piece(s) stand in a street or lane`` on the
+# Sedgewater sample under every fence style, at one coordinate, and nothing was
+# standing in a street. The pieces were the palisade the enclosure ring is
+# always built from -- the only boundary assets in the medieval palette that
+# are ``kind="tile"`` -- and the check was reading their stored coordinate as a
+# collider centre. On a prop that is what it is; on a tile it is the min
+# corner, so the box came out half a cell low on both axes and straddled the
+# four cells meeting at the tile's own corner instead of the one it fills.
+#
+# That is the failure `build.placed_bounds` was written to name and every other
+# placement check in `verify` already goes through. The two boundary checks did
+# not, so the tests below pin both halves: the arithmetic, cheaply, and the
+# finding itself on the map it was reported from.
+
+SEDGEWATER = pathlib.Path(__file__).resolve().parents[1] / "samples" / "sedgewater.geojson"
+
+
+def _sedgewater():
+    """The sample as `citysmith import --whole-canvas --margin-ft 200` makes it.
+
+    Imported from the committed GeoJSON rather than from `out/`, so the test
+    does not depend on a build somebody happened to leave behind. `CLAUDE.md`
+    records an hour lost to a stale artifact in `out/` once already.
+    """
+    from citysmith import importers
+
+    return importers.import_layout(SEDGEWATER, core_only=False,
+                                   margin_feet=200.0, name="Sedgewater")
+
+
+def _ring(cx, cz, rx, rz, n=16):
+    """A closed polygon -- the repeated first point is what marks it closed."""
+    pts = [(cx + rx * math.cos(2 * math.pi * i / n),
+            cz + rz * math.sin(2 * math.pi * i / n)) for i in range(n)]
+    return pts + [pts[0]]
+
+
+@pytest.fixture(scope="module")
+def sedgewater_tilemap():
+    from citysmith.raster import rasterize
+
+    return rasterize(_sedgewater(), bridges=True)
+
+
+@pytest.fixture(scope="module")
+def real_catalog():
+    from citysmith.catalog import load_or_build
+
+    return load_or_build()
+
+
+def test_a_tile_boundary_piece_covers_exactly_the_cell_it_fills(real_catalog):
+    """The arithmetic, on a map small enough to run every time.
+
+    A palisade piece is laid with `place_tile`, so it fills one cell and its
+    collider covers that cell and no other. Read with the stored coordinate
+    mistaken for the centre it covers *four* -- which is how a wall two cells
+    from a street was reported as standing in it.
+    """
+    from citysmith import verify as V
+    from citysmith.build import build_from_tilemap, covered_cells
+    from citysmith.layout import Layout, LayoutBuilding, LayoutRoad
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import rasterize
+
+    layout = Layout(name="pen")
+    layout.width = layout.depth = 70.0
+    layout.buildings.append(LayoutBuilding(
+        id="barracks-0001", ring=[(28.0, 40.0), (38.0, 40.0), (38.0, 49.0),
+                                  (28.0, 49.0)], kind="barracks", floors=2))
+    layout.roads.append(LayoutRoad(points=[(0.0, 14.0), (70.0, 14.0)], width=4.0))
+    layout.fences = [_ring(33, 35, 18, 20)]
+
+    tm = rasterize(layout)
+    builder = build_from_tilemap(tm, Palette(real_catalog, MEDIEVAL, 33),
+                                 storeys=2, layout=layout)
+
+    tiles = 0
+    for p, asset, cx, cz in V._boundary_boxes(builder):
+        if asset.kind != "tile":
+            continue
+        tiles += 1
+        assert set(covered_cells(asset, cx, cz, p.rot)) == {
+            (math.floor(cx), math.floor(cz))
+        }, (f"{asset.name} at ({cx:.2f}, {cz:.2f}) is measured across cells it "
+            "does not fill")
+    assert tiles, "no tile boundary piece was built, so nothing was tested"
+
+
+@pytest.mark.parametrize("style", sorted(FENCE_STYLES))
+def test_no_boundary_stands_in_a_way_on_sedgewater(style, sedgewater_tilemap,
+                                                   real_catalog):
+    """The finding itself, on the map that reported it, for every style.
+
+    Parametrised rather than looped because the styles failed differently --
+    seven pieces under `palisade`, two under the eight that only use it for
+    the enclosure ring -- and a loop reports the first and hides the rest.
+
+    This calls the reporting function, not a reimplementation of it: what has
+    to stay empty is the sentence a person reads in the build report.
+    """
+    from citysmith import verify as V
+    from citysmith.build import build_from_tilemap
+    from citysmith.palette import Palette
+
+    builder = build_from_tilemap(
+        sedgewater_tilemap, Palette.named(real_catalog, "medieval", 0),
+        storeys=3, seed=0, fence_style=style, quarters=True,
+    )
+    assert builder.fence_pieces, f"--fence-style {style} laid no boundary at all"
+    assert V._boundaries_do_not_block_a_way(builder, sedgewater_tilemap) == []
+    assert V._boundaries_stay_on_the_map(builder, sedgewater_tilemap) == []

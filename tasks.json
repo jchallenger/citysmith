@@ -735,6 +735,18 @@
       ]
     },
     {
+      "id": "boundary-centre",
+      "what": "Measure a boundary piece where it stands, not where its coordinate is",
+      "state": "done",
+      "doc": "docs/fencing.md",
+      "evidence": "test:test_no_boundary_stands_in_a_way_on_sedgewater",
+      "note": "A standing [FAIL] on Sedgewater under EVERY fence style -- 2 pieces at x=145.00, z=134.00 for eight of them, 7 for palisade -- and nothing was standing in a street. Both boundary checks read the placement's stored coordinate as the collider CENTRE. It is the asset's ORIGIN: on a prop that is the centre, on a tile it is the collider's min corner, which is the distinction `build.placed_bounds` exists to hold and every other placement check in verify already goes through. Every boundary asset in the medieval palette is a prop except the two palisade pieces (off=(0.5,0.5)), and the enclosure ring is built from those whatever --fence-style asks for -- so the box came out half a cell low on both axes, straddled the four cells meeting at the tile's own corner, and caught a street two cells away. That is why drystone and hedge, which share no piece, reported the identical count at the identical coordinate; it was never the fence kit. MEASURED: with the offset applied, 0 intruding pieces on all 9 styles, and the map check's 2 off-map pieces on the Pinfold golden were inside it all along. The laying passes were right; only the reading was wrong. Caught in passing and fixed with it: _lay_fences tested a JOINT against the one cell its centre landed in while testing a PANEL against its body -- harmless for the 0.51 stone post, not for the 1.64 `paling` corner, which spans four cells. No piece moved on Sedgewater (fence_pieces identical across all 8 styles).",
+      "tags": [
+        "verify",
+        "fencing"
+      ]
+    },
+    {
       "id": "board-index",
       "what": "Record what every board holds, not just the ones a scene owns",
       "state": "done",
