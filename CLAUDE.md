@@ -13,7 +13,11 @@ This file is the internal engineering notes. User-facing docs:
 `docs/district-surfaces.md` (what a town is paved with, and whether
   "district" is a thing we can key on),
 `docs/building-massing.md` (storeys, footprints and yards by settlement size),
+`docs/great-buildings.md` (markets, warehouses, churches and the halls --
+  designed, not built),
 `docs/fencing.md` (field walls, and why they are not on the grid),
+`docs/camera-model.md` (the builder camera, measured, and the moves that
+  drive it),
 `tasks.json` (what is designed, what is built, and `citysmith tasks --check`),
 `docs/board-strategy.md` (interior vs exterior boards, and moving a party
   between them -- what the community recommends, and what we do instead),
@@ -28,6 +32,9 @@ This file is the internal engineering notes. User-facing docs:
 | `slab.py` | TaleSpire slab format V2 codec. Verified against real slabs. |
 | `catalog.py` | Loads assets from the user's TaleSpire install; query API. |
 | `palette.py` | Maps semantic roles (floor/wall/door) to catalog queries per style. |
+| `walls.py` | Wall families and fabrics: widths, courses, packing, kit roster. |
+| `camera.py` | The builder camera, measured: pose, frustum, framing, move plans. |
+| `camerafit.py` | One screenshot -> one camera pose. PNG, blobs, homography. |
 | `importers.py` | Sniffs which generator a GeoJSON came from and dispatches. |
 | `mfcg.py` | Imports Watabou MFCG GeoJSON -> `Layout`. The primary path. |
 | `ftg.py` | Imports Fantasy Town Generator GeoJSON -> `Layout`. |
@@ -39,11 +46,13 @@ This file is the internal engineering notes. User-facing docs:
 | `floorplan.py` | Interior rooms, doors, stairs for one building. |
 | `interior.py` | One imported building -> a plan, a door side, its occupants. |
 | `scene.py` | A scene: interior + apron + party marks + manifest + brief. |
-| `boards.py` | Which TaleSpire board holds which scene. The only record. |
+| `boards.py` | Which board holds what -- scenes, towns, probes. The only record. |
 | `quarters.py` | Derived town quarters, and the test for whether any exist. |
 | `tasks.py` | Designed vs built. Every claim carries checkable evidence. |
 | `config.py` | `config/scene.json`: defaults in code, the file overlays. |
 | `build.py` | Geometry -> `Placement`s -> slabs. All offsets derived from bounds. |
+| `camera.py` | A pinhole camera over the tile grid, fitted to the game. |
+| `camerafit.py` | Recovers a real camera pose from a screenshot. |
 | `render.py` | Hand-written SVG for city and floorplan reference maps. |
 | `ai.py` | Claude translation layer. Optional; never emits geometry. |
 | `slabchat.py` | One small slab from a sentence: spec in, geometry in Python. |
@@ -475,6 +484,14 @@ actually matters, all confirmed in-game:
   `(X+490, Y+660)` -- correct on 1600x900, open board on 1920x1080 -- so it is
   derived from the rect now too. Check it before concluding something is missing
   from the board.
+  **It is no longer the only way, and it was never a measurement.**
+  `citysmith/camera.py` is a measured model of this camera and
+  `tools/camera_read.py` recovers a full pose -- bearing, pitch, eye height,
+  slant range, focus cell, field of view -- from one screenshot of a known
+  target, by fitting a homography. `tools/camera_aim.py` inverts it: give it a
+  board rectangle and it emits the `ts.ps1` calls that frame it, or says the
+  frame cannot hold it. See `docs/camera-model.md`. The compass crop is still
+  the right tool when there is no target on the board.
 - **Derive screen coordinates from the window, never hardcode them.** The
   window gets moved and resized between sessions, and a stale rectangle does
   not fail loudly -- it silently aims a click or a pixel probe at the wrong
@@ -567,6 +584,114 @@ measured -- that needs a scratch board to paste onto -- so `Press`'s 250 ms hold
 is untouched and the 200 ms rule stands. A missed Ctrl+V is the most expensive
 failure this tool has; `Send-Chord` is set to 120 ms (three frames) rather than
 the 40 the measurement allows, deliberately.
+
+## F9 opens the camera editor, and there is no camera reset
+
+**Searched for, and not found: a button that resets the camera.** It would have
+been worth a lot -- the calibration target is how a pose is read, a town board
+does not have one, and an absolute reference would have made a driven move
+verifiable on any board. Tested, each by pressing it from two very different
+poses and diffing the frames (noise floor 0.49, "the frame changed" 2.0):
+
+| candidate | frames apart | verdict |
+|---|---|---|
+| `F2`, which the binding table calls *recentre* | 51.41 | not a reset |
+| clicking the compass rose | 55.84 | not a reset |
+| `F8` | **0.43** | did nothing at all |
+| `F3`-`F7`, `F10`-`F12`, Home, End, Insert, PgUp, PgDn | 0.38-0.68 | nothing |
+
+**The control passes**, which is what makes those readings mean anything:
+`Space` through the same `ts.ps1 key` path moves the frame by 2.42 and moves it
+back. So the keystrokes arrive and the keys genuinely do nothing. The hint bar
+-- the one authority on bindings -- lists only WASD, `Q`/`E`, `Ctrl`+mouse and
+the wheel for the camera. `ts.ps1`'s chord map now knows the whole function row
+and the navigation keys; it only had `f1` and `f2`, and an unmapped name throws
+rather than falling back.
+
+**`F9` is the find.** It opens Cutscene Mode's camera editor -- a timeline with
+Camera and Atmosphere tracks, and a panel that reads:
+
+    Depth of Field  ON      Focus Distance 5.2    Aperture (f-stop) 1.4
+    Exposure 1.0            Field of view 35.0 (greyed)
+    Vignette 0.0            Chromatic Aberration 0.1
+    Camera Speed 1.0        Rotation Sensitivity 1.0
+
+Three things follow, and the first is the important one:
+
+- **Every measured constant is conditional on Camera Speed and Rotation
+  Sensitivity**, and both are user settings. At 1.0/1.0, `yaw_deg_per_px` is
+  0.18761; at 2.0 it would presumably be twice that. `config/camera.json`
+  records what it was measured under in a `measured_under` block, because a
+  constant that silently depends on a slider somebody can drag is exactly the
+  kind of number this file exists to stop us trusting.
+- **The panel says field of view 35.0** and the play camera measures 30.03.
+  Do not reconcile them by assuming one is wrong: the field is greyed out and
+  belongs to the *cutscene* camera, which need not be the camera that frames a
+  board. Two cameras until shown otherwise.
+- **This is the mechanism behind the screenshot blur** that "Taking screenshots
+  off a board" describes at length. It is not merely a graphics toggle: the
+  focus distance is 5.2 and the aperture is **f/1.4**, which is why a camera
+  forty tiles up renders the entire frame as mush. Both are adjustable here.
+  Still the user's setting, so still ask -- but the advice "fly horizontally
+  rather than change height" now has a named cause and a second remedy.
+
+## The camera is measured now, and two things here were wrong
+
+`citysmith/camera.py` models this camera and `config/camera.json` holds the
+constants, each with the evidence for it. `docs/camera-model.md` is the full
+account; what belongs here is the corrections and the numbers that bite.
+
+**It is an ORBIT camera.** A focus point on the board, a slant range back, two
+angles. Measured: across a pitch change and a yaw change the focus stayed at
+the target's centre to within 0.03 tiles while the eye moved 7 tiles. Every
+`orbit -DX` in `review.ps1 360` has depended on this without saying so.
+
+| | measured | this file used to imply |
+|---|---|---|
+| vertical field of view | **30.03 deg** | (nothing; 60 was assumed) |
+| middle-drag yaw | **0.1876 deg/px** | 0.28, off `review.ps1`'s four-face turn |
+| middle-drag pitch | **0.1689 deg/px** | 0.28, same inference |
+| pitch top stop | **78.07 deg** | 90 -- "pastes are made looking straight down" |
+| Ctrl+scroll | **x0.8721 per tick** | a step in tiles |
+| Ctrl+scroll top stop | **49.75 tiles** of slant range | ~60 tiles of eye height |
+
+**`review.ps1`'s `-DX 320` is not a quarter turn.** It is about 60 degrees. The
+360 recipe works anyway -- four 60-degree steps still show four different sides
+-- but "a full circle is 1280 px" was an inference off our own script, and
+inferring a game constant from a script we wrote is the trap this whole file
+exists to warn about.
+
+**The camera does not reach vertical, so the anchor slide is not zero.** The
+pitch stops at 78.07 degrees -- walked into, three consecutive shots agreeing
+to 0.01, and confirmed at 78.25/78.26 in a separate sweep. At 78 degrees
+`cot(pitch)` is 0.21, so a 1.5-tile obstruction under the cursor still slides a
+paste **0.32 tiles**. That is a third of a cell against the one-to-two-cell
+error the "paste looking straight down" rule was written to prevent, so the
+rule stands and every paste should still be made at the top of the pitch range.
+What does not stand is the claim that the slide is zero there.
+
+**Ctrl+scroll scales the range, it does not step it.** Read as a step, the same
+control measures -4.38, -4.59 and -5.65 tiles per tick at different ranges --
+29% apart, which reads as a noisy constant. Read as a ratio the identical legs
+give 0.8666, 0.8773 and 0.8696 and agree to 1.2%. The additive version survived
+a whole calibration and was caught only by driving a planned move and measuring
+where the camera actually landed.
+
+**Positive ticks zoom IN.** `nudge -Mode vertical -Ticks 1` shortens the slant
+range. The first levelling loop written against this had the sign the other way
+and spent fourteen iterations climbing away from the target it was framing.
+
+**A frame holds about 24 tiles near plan, not 40.** CLAUDE.md's measured "about
+40 tiles at the top of Ctrl+scroll" is an *oblique* figure -- the far half of a
+tilted frame covers a lot of ground. Looking down, which is the view a paste
+cannot slide, it is 24. And what has to fit is the **diagonal**: a 16-tile
+square is 22.6 tiles corner to corner and swings onto the frame's short axis as
+the camera turns, which is why one yaw framed it and the next did not.
+
+**Three planned moves were driven and measured**: worst case 0.85 deg of yaw
+and 1.15 of pitch on a 215-degree turn, and 0.33 tiles of range.
+`tools/camera_aim.ps1` runs a plan and then reads the pose back off the result,
+so "the camera is now at 45 degrees looking east" is a measurement.
 
 ## Creatures: picked up and carried, and the motion has to be REAL
 
@@ -711,6 +836,18 @@ diagnostic is one drag in the opposite direction, and it costs seconds --
 
 Wheel zoom is a no-op at town distances, which is the cap this file already
 records; `Ctrl`+scroll is the only height control that responds.
+
+**`Ctrl`+scroll height is capped too, and the frame it caps at is ~40 tiles
+(MEASURED 2026-08-27).** On a 1920x1080 client, two frames taken 45 and 200
+ticks apart are the same picture -- 0.59 on the mean-abs-diff metric against
+the 2.0 noise floor above. So there is a hard limit on how much board fits in
+one shot, and a comparison wider than about 40 tiles at an oblique cannot be
+framed at all. `newboard` resets the height, which is what makes the limit
+usable: **a side-by-side of N treatments goes on N boards, not in a row on
+one**, pasted at the same cursor cell after the same camera commands, and
+every frame then lands in the same pixels. `tools/panel_review.ps1`. The row
+alternative is flying, and WASD ramps -- on a 151-tile row, 1.6 s of `a` moved
+most of a panel and 2.2 s went off the map.
 
 **The haze is board state, not the camera.** The left tool column's third icon
 is **Atmosphere Settings**: Day Cycle with a sun dial, **Fog Multiplier**,
@@ -1199,6 +1336,212 @@ shape instead of reading it. The rules that fall out:
 The general form: **an asset's `ColliderBoundsBound` is data, and shape
 assumptions are bugs waiting for a big enough map to become visible.**
 
+## A wall is a RUN in a COURSE, not a cell (2026-08-28)
+
+Every facade was one 1-cell panel per cell per side, on every storey. That was
+never a style decision -- it was a query. `palette._WALLSZ` pinned the `wall`
+role to `size=(1.0, 0.5)`, so a wider piece could not be resolved even where
+the kit ships one, and every kit we build from ships one.
+
+Three measurements, taken before any code moved:
+
+- **A run is 4.9 cells long and nothing is shorter than 2.** Rasterised from
+  the real layouts: Pelvesthollow 190 runs mean 4.78, Graybank 726 mean 4.89,
+  Forest Church 244 mean 4.90, and in all three **100% of wall segments sit in
+  a run of 2 or more**, 87-93% in a run of 4 or more. Not an edge case -- every
+  facade on the board.
+- **Hand-builders use the wide pieces and we used none.** Decoding `library/`
+  for panels in the medieval kits: 256 one-cell, **106 two-cell (29.3%)**, 21
+  half-cell fillers. Two of the five slabs are majority wide.
+- **22 kits in the installed packs can clad a building; the palette resolves
+  three.** Seven ship the whole family. `tools/kit_index.py --families` is the
+  lookup; `docs/asset-index.md`'s shape classifier could not even see the wide
+  pieces, because `shape_of` called anything over one cell "big" -- the same
+  blindness as `_WALLSZ`, in the tool built to catch exactly that.
+
+`citysmith/walls.py` is the model and `build.place_wall_span` the geometry.
+**The palette picks the KIT and `walls.families` supplies the rest of it** --
+both widths, the window at each, the corner, the fillers, the course variants.
+Neither half can do the other's job: only the palette's style queries know that
+civic means dressed stone, and only the catalog knows what else that kit ships.
+
+Measured A/B on Pelvesthollow with the feature switched off in-process:
+**wall panels 549 -> 345, down 37.2%, and zero non-wall assets moved.**
+
+What the boards settled, and each of these was a defect first:
+
+- **The remainder must not stack.** A packer that ignores the level puts the
+  odd cell in the same slot on every storey, which draws a full-height column
+  of a visibly different panel -- on a Rural run of 7, a dark stripe of
+  boarding up the whole wall. `walls.pack` takes the level and `shift` is the
+  default: the remainder walks the interior slots so it never stacks and never
+  reaches a corner, falling back to every slot on a run of 5, which has one
+  interior slot and is the commonest length there is. **Only `bondfull` breaks
+  an EVEN run** -- no remainder to move -- and runs of 4, 6 and 8 are about a
+  third of all segments.
+- **The common house is built from the Tavern kit's own wall now.** `Village
+  Roof Side Wall 01/02` and `Tavern Wall 01` are both `folder='Tavern'`, so
+  they were always one kit -- `group='roof'` names a form, not a family. They
+  still **do not mix at panel granularity**: a Village panel between two Tavern
+  ones carries no timber frame of its own and reads as a bare plaster patch,
+  and stacked it is a pale column. `Tavern Wall - Small 01` is the wide panel's
+  own partner and blends invisibly. The Village panel keeps one job -- it is
+  the only 1-cell window in the Medieval Fantasy pack.
+  What had kept the house off its own kit's wall was `validate` comparing raw
+  footprints: the two are authored on opposite axes (0.5x2x1 against 1x2x0.5),
+  which `place_wall` has always handled. `palette.segment_shape` compares span
+  and thickness instead.
+- **A course is not the piece above it.** Castle Fortified ships `base`
+  variants of its wall, window, corner and filler; Marble Palace ships the full
+  `base`/`mid`/`top` set for every role. Nothing read them, so a three-storey
+  building was one course repeated three times -- and our civic corner is
+  `castle wall corner 1x1 base`, a **plinth**, which went on every floor.
+  `walls.course_at` maps a storey to a course and `WallFamily.all` falls back
+  through them, so a kit naming no course still answers its one piece
+  everywhere, which is correct rather than a gap.
+- **Never deal a kit's decorated piece as its plain one.** Castle Fortified
+  files `castle wall 2x2 base`, `... base w curtain` and `... base w shield`
+  under one slot. Dealing across the slot by a hash put shields and hanging
+  curtains on every civic building and `castle wall ARCH` on every upper
+  course. Sorting plainest-first was not enough, because the deal indexes the
+  whole list: `WallFamily.all` returns only the pieces tied for the best rank.
+- **The group is the first rank term, and the collider cannot replace it.**
+  `Moorgoth Large Roof`, `Ship fence end port` and `Desert Arch top` each
+  measure exactly like a wall -- a thin panel about two tiles tall -- and each
+  was dealt as its kit's default wall. A piece that says "wall" in neither its
+  group nor its name is not one, whatever it measures.
+- **A folder is not automatically one storey system.** Nineteen kits ship a
+  2.5-tall Wall/Floor combination beside their 2.0 pieces, and Tavern's 2.5
+  corner was being dealt for its 2.0 wall. A family is pruned to one course
+  height. The wide panel keeps `WIDE_HEIGHT_SLOP` (0.05) because `Tavern Wall
+  01` is 2.03 against its kit's 2.00; the storey is always pitched at the
+  **1-cell** piece, so that lands as a 1.8-inch overlap into the course above
+  rather than a gap -- invisible, where a gap would be daylight.
+- **Interchangeable panels are dealt per PANEL, and "interchangeable" is a
+  narrower thing than "ties for the same rank".** Twenty spare panels across
+  the medieval kits differ only by a trailing index -- `bg_wall_1x1_01` and
+  `_02`, `Desert wall 02` and `03`, `Lava wall 1x1 hot v1`/`v2` -- and nothing
+  distinguishes them, so a long run has no reason to repeat one.
+  `WallFamily.deal` hands one out per panel, keyed on the cell with crc32 so a
+  rebuild is identical. **Rank alone would have been wrong**: Shogun Palace
+  files plaster, paper screens, rock and dug earth in one folder, all tying at
+  the same rank, and dealing across those builds a wall out of four things.
+  `walls.stem_of` is the test. **This changes no medieval board today** --
+  Tavern, Rural and Castle Fortified each ship exactly one plain panel per
+  slot, which a test states rather than leaving to be found out. It is live on
+  `PROBE wall siblings` for Desert Village, BellowGloom and Abandoned Village.
+- **Feature pieces are NOT wired in, and the reason is that most of them are
+  openings.** Twenty-five panels exist beyond wall and window -- 12 arch, 5
+  ruin, 2 alcove, 2 breach, 2 porthole, 3 Ship decor, 2 supported, 1 shield,
+  1 prison cage. Read at one-in-four on `PROBE wall variance`
+  (`wallkit_board.py --variance N`), the Dungeon Cellar and MegaDungeon runs
+  are **see-through** -- grass visible through the wall. Correct for a ruin,
+  ruinous on a house. So a *rate* is the wrong control: an arch belongs where
+  the raster already says there is a way through, and a breach belongs to a
+  building the map has decided is ruined. Only the surface-relief pieces take
+  a rate safely. Moorgoth's **lit** alcove and arches carry their own light,
+  which would light a street with no lamp props at all.
+- **The glazing rate carried over unchanged, and the first reading of that was
+  wrong.** It looked like "same rate, half the glass". It is not: a run of six
+  at one-in-three is two 1-cell windows or one 2-cell window -- the count
+  halves and the glazed *area* is identical. Fewer, wider openings is the point.
+  Where a kit ships no 2-cell window the panel splits into a narrow window
+  beside a narrow wall rather than losing its glazing.
+
+`tools/wallkit_board.py` builds every kit on one board **through
+`citysmith.walls` itself**, not through a copy of it -- a probe that
+reimplements what it is probing can only tell you about the probe.
+`tools/wallrun_probe.py` is the design-space sweep that chose the rules.
+Boards: `PROBE all wall kits`, `PROBE wall kits in use`, `PROBE wall bond
+stagger`, `PROBE wall mix village tavern`, `PROBE wall swatch kits`.
+
+## A tier deals a FABRIC, and every kit has a declared job (2026-08-28)
+
+The wall work above built families, courses, siblings and wide packing, and for
+a while **nothing used any of it beyond the three kits we already had**. A tier
+resolved exactly one kit, so measured on Forest Church, 46 of 51 buildings were
+`Tavern Wall 01` + `Tavern Wall - Small 01` -- one material, 16 pieces across 3
+kits on the whole board. Worse: before the wide-panel work the common house
+dealt `Village Roof Side Wall 01` *and* `02` per building, so within a wall
+variety went up and **across buildings it went 2 -> 1**. That is the axis
+`tools/facade_probe.py` was written to complain about.
+
+`walls.KIT_ROLE` maps all 22 families to a declared job -- common, utility,
+civic, poor, ruin, civic-large, civic-dark, docks, `interior` for the five kits
+with no window (a windowless house is a cellar), and `style:` for whole styles
+that do not exist yet. **It is load-bearing, not a list**: `walls.fabric_for`
+resolves through it, so an entry is the only route a kit has to a building. A
+roster nothing reads is documentation pretending to be code, and this was
+nearly not built for that reason.
+
+`walls.unmapped` **reports rather than raises**, scoped to the packs a style
+claims -- the same rule `Layout.unmapped` follows for an unknown FTG value. A
+test that fails on any unmapped family is a cost paid by whoever installs a DLC
+for our bookkeeping.
+
+`walls.TIER_FABRICS` gives each tier a weighted set and `fabric_for` deals one
+per building, stably. A/B on Forest Church with it emptied: Abandoned Village
+walls 0 -> 72, Tavern 521 -> 464, Rural 79 -> 63, **6 of 51 buildings changed
+fabric**, total placements 28,540 -> 28,539.
+
+Three things the wiring forced, each of which would have been a defect:
+
+- **`glazes` is a flag, not `glass = None`.** Utility was kept blind by having
+  no window in its kit. A fabric brings its own -- Rural has `Rural Wall
+  Window` -- so dealing fabrics would have put glass in every barn in the town.
+- **Where a fabric is chosen, the palette's pieces are the wrong kit by
+  construction.** The fallbacks re-point at the fabric's own and stay `None`
+  where it has none; a facade falling back to another kit's window is the
+  mismatch the tier system exists to prevent. And `glass` takes only the
+  **1-cell** window, because it is a single-segment fallback and a 2-cell piece
+  dropped into one cell overhangs its neighbour.
+- **The roof follows the fabric in exactly one case.** Roofs are dealt
+  independently *on purpose* -- `ROOF_MIX` exists because a per-tier constant
+  makes a whole quarter monochrome -- so "the roof must match the wall kit" is
+  not a rule here and claiming it was an over-correction. The narrow case is
+  real: a building in the `poor` fabric is authored damaged, and
+  `roof_side_slate` resolves to `Haunted roof 1x1`, the same Abandoned Village
+  kit as its walls. Abandoned Village roofs 70 -> 240.
+
+**NOT SEEN ON A BOARD.** The 6:1 weighting was landed on an A/B of counts. Six
+derelict houses scattered by a hash may read as damage rather than as a poor
+quarter, in which case the fabric wants to correlate with something the map
+already knows -- storey count, distance from centre, `quarters.py`.
+`facade-fabric-weighting` is open and this project's rule is that a look is not
+optional.
+
+## Framing a probe is arithmetic now, and most probes do not fit
+
+`citysmith/camera.py` fits a pinhole camera to the game and `camera_aim.py
+--slab` reads a slab's own ground extent through `placed_bounds`, so
+`panel_review.ps1` says whether a board will be in shot **before** it pastes.
+The first thing it reported:
+
+| board | needs | stop |
+|---|---|---|
+| all wall kits, 53x45 | 95 tiles of slant range | 49.75 |
+| variance, 41x29 | 62 | 49.75 |
+| kits in use, 53x5 | 60 | 49.75 |
+
+**None of the three probe boards built that day could ever be photographed
+whole**, and four exchanges were spent flying around them finding that out by
+hand. One shot holds about 50x27 tiles. Size a probe to that, or expect a shot
+list -- `probe-size-to-one-frame` is open against the tools, which all pick
+their grid by eye.
+
+Two details worth keeping. Open-loop framing needs no calibration target here
+because `panel_review.ps1` already drives into both measured stops (200 scroll
+ticks and 250 px of pitch each exceed the range), so the pose is `dist_max` /
+`pitch_max` by construction -- that was true by accident and is now the reason.
+And it **reports rather than drives**: `camera-drive-open-loop` is open against
+a driven move landing 14 degrees off in yaw.
+
+**`Framing.covered` is not a corner count.** It is an overlap against
+`visible_bounds`, the axis-aligned box round the frustum, so on a wide shallow
+slab it reads 1.00 while `covers_all` puts 0 of 4 corners in shot. Both are
+right about different things; a caller must not print it beside a "too big"
+headline.
+
 ## Building style: four tiers, and what each axis is allowed to carry
 
 Style used to be one binary -- `kind in CIVIC_KINDS` -- plus a three-way wall
@@ -1273,6 +1616,52 @@ is listed as planned).
 **The vanilla path stays the default**, because the plugin needs BepInEx and
 breaks on game updates, and a colleague cloning this should not have to mod
 their game to see a town. None of the registration machinery is deleted.
+
+### The camera work was checked against the community, and stands (2026-08-28)
+
+This file's own rule says spend twenty minutes on the modding community before
+reverse-engineering the host, because the paste-anchoring work should never
+have happened. So before trusting `citysmith/camera.py`, the same search was
+run for the camera. **The verdict this time is the opposite: there is nothing
+to reuse.**
+
+- **No TaleSpire plugin exposes the camera's position and rotation as numbers
+  that can be read or written from outside the game.** `RemoteControlPlugin`
+  moves and rotates the camera from its own remote, with configurable amounts
+  and JSON movement styles; `CameraSyncPlugin` copies the GM's camera to the
+  players; `CameraToolsPlugin` widens the tilt range. All three *control* the
+  camera. None of them *reports* it. So the measured model is not duplicated
+  work.
+- **`CameraToolsPlugin` widens the tilt range**, which means the measured
+  `pitch_max_deg` of 78.07 is a **vanilla** limit, not a property of the
+  engine. A board driven with that plugin installed invalidates it.
+- **Double RIGHT click centres the camera on the point clicked.** The button
+  is the whole finding: a double *left* click at the same pixel moved the frame
+  by **0.42**, below the noise floor, while a double *right* click moved it by
+  **39.06** and brought the pines and tree stump that had been up and right of
+  centre into the middle of the frame. The community guide said "double-click a
+  spot" without saying which button, and the left one does nothing.
+
+  **This is the primitive the planner was missing.** `plan` translates the
+  focus by flying, and WASD ramps -- the one driven move that landed badly used
+  `fly d 0.37`, well outside the 0.08-0.14 s the ramp was measured over. A
+  click is not a ramp. The model already knows where a board point falls on
+  screen, so "go to (x, z)" becomes: project it, double-right-click there, and
+  the camera centres on it. Any error is self-correcting, because you are
+  clicking where the model believes the point is.
+- **Two community claims about resetting the camera did not survive testing**,
+  and both were checked the same way -- perform it from two different poses and
+  diff the frames, against a 0.49 noise floor and a 2.0 "changed" threshold.
+  A player guide says `F2` centres you back at the board start: two presses
+  from different poses left the frames **51.41** apart. The same guide says
+  double-clicking a spot centres the camera there: a double-click at
+  (1400, 350) moved the frame by **0.42**, below the noise floor, on a board
+  full of geometry. Neither is a reset in this build.
+- **The search says the default field of view is 60 degrees.** The game's own
+  Cutscene camera panel says **35.0**, and the play camera measures **30.03**.
+  Three numbers, and only the last has a method behind it -- 60 is the Unity
+  default, which is exactly the assumption this project shipped and then
+  measured away. Do not let a search result overwrite a measurement.
 
 ### The asset archive is now wired in (2026-08-24)
 
@@ -1358,33 +1747,31 @@ the written chunk plan respectively. **New checks go there, not into the
 TileMap pass.** `verify._Occupancy` reconstructs solid geometry from the
 placements and is the tool for "is there actually anything here".
 
-**OPEN: `entombed()` hollows the rampart and the masonry check catches it.**
-Bisected on Forest Church, which is an MFCG map, so this has nothing to do with
-the second import format:
+**CLOSED 2026-08-28: `entombed()` hollowed the rampart, and it is gone.** The
+section that stood here described a live regression -- `_lay_city_wall`'s
+`entombed()` laid only the top course in a wall cell walled in on all four
+sides, 111 of Forest Church's 300 body cells, and `check_placements` samples
+mid-height of the second course, so every entombed cell read as a hole. 85 of
+300 holed on Forest Church, 732 of 2367 on East Tradebourne.
 
-| commit | `entombed()` | masonry check | Forest Church |
-|---|---|---|---|
-| `93ccba6` cap the ridge | absent | present | **clean** |
-| `8412ce9` square the gate, stairs on the wall | **added** | present | 85 of 300 holed |
+It is fixed. `entombed()` no longer exists in `build.py`, `rampart-solid` is
+marked done in `tasks.json`, and a Forest Church build on 2026-08-28 laid 300
+wall cells with no masonry failure in the report.
 
-`_lay_city_wall`'s `entombed()` lays **only the top course** in a wall cell
-walled in on all four sides, because nothing can ever see the rest -- 111 of
-Forest Church's 300 body cells. `check_placements` samples **mid-height of the
-second course**, so every entombed cell reads as a hole; the first one it
-reports, (82, 85), is entombed. East Tradebourne is 732 of 2367, and the count
-scales with wall thickness because a thicker band entombs more cells.
+**Why the note stays rather than being deleted.** Two things worth keeping.
+The optimisation was defensible -- 38% of body cells have no face anyone can
+see -- and it was still wrong, because a hollow core is a trap for whoever next
+cuts a postern and because the one check that could tell a sealed void from
+daylight straight through the circuit cannot: `town_wall_gaps` samples a
+course, so it reads both the same way. That is why
+`test_the_rampart_is_built_solid_all_the_way_through` exists.
 
-**The check is the older thing and it is doing its job.** It passed before the
-optimisation landed, so this is a regression rather than two defensible rules
-disagreeing -- the resolution is on the `entombed()` side, most simply by
-keeping the course the check samples as well as the one the walk rests on.
-Cost is small: 111 cells x 4 courses on Forest Church, and about 3,900 blocks
-on a 387,381-asset East Tradebourne.
-
-Until then a walled town still builds and pastes, and the void is invisible:
-the rampart was read from a low oblique outside, from plan and at eye level on
-`Probe - East Tradebourne rampart`, and it is unbroken coursed stone from
-ground to parapet.
+And this section was itself **stale for an unknown number of sessions**, found
+by accident while planning something else: it said OPEN about closed work, in
+the one file every session reads first and nothing checks. `tasks.json` has
+`citysmith tasks --check` and a test in the suite; this file has neither, so a
+claim here outlives its truth silently. When a section here says OPEN, verify
+it before believing it -- and when you close something, come back and say so.
 
 Corollary that cost an hour: **when a measurement looks wrong, check for stale
 artifacts before debugging the code.** A tree-species count read 80/15/5
@@ -1489,7 +1876,14 @@ were capped at 2 while 352 of 1,176 buildings have three.
 
 **`campaign/boards.json` is the only record of which board holds what**, and
 there cannot be another: the campaign list has no size, no date, no contents
-and no API. Four states -- NEW pastes, READY switches, STALE *still reuses*
+and no API. It carries two things. The **scene records** are the older half --
+four states, below. The **index** beside them is every board, scene or not
+(`citysmith boards index`), written at paste time by the drivers themselves
+because that is the only moment anything knows; `--seen-file` holds it against
+a transcribed campaign listing and reports what is *unrecorded*, which is
+exactly the set of boards nobody can decide anything about without opening
+them. It gives `prune` its one bucket that is a record rather than the absence
+of one. Four states -- NEW pastes, READY switches, STALE *still reuses*
 (a board is where something happened, and there is no erase, so `-Rebuild`
 makes a second board and leaves the first), MOVED reports that a re-import may
 have renumbered the building underneath the id. Nothing in this deletes a
