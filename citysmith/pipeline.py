@@ -389,7 +389,7 @@ def build_town(
     # What each designed feature had available here, and what it built from it.
     # A feature can be perfectly correct and simply absent from the region you
     # cropped -- which is not a defect, but it must not be silent either.
-    for level, name, detail in feature_report(builder, tm, layout):
+    for level, name, detail in feature_report(builder, tm, layout, seed):
         report.add(level, name, detail)
     # Registration, datum and anchor all exist to make a *cursor-anchored*
     # paste land right: they check that every chunk presents the same bounding

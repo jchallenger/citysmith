@@ -66,7 +66,8 @@ sys.path.insert(0, ".")
 
 from citysmith.build import (
     ROOF_CORNER_ROT, ROOF_EDGE_ROT, SIDE_OFFSETS, _normalized_whole_tiles,
-    _roof_rings, place_tile, place_wall, roof_offsets,
+    _roof_rings, place_centered, place_tile, place_wall, roof_course_anchors,
+    roof_course_cells, roof_courses, roof_offsets,
 )
 from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
@@ -120,155 +121,121 @@ CORNER_OF = {
     frozenset(("s", "w")): "sw", frozenset(("s", "e")): "se",
 }
 
+#: The quarter-step offsets swept at ``--scale 2``. Exactly one of these
+#: should close the roof; the other three are the rank of fins this project
+#: has photographed before. **A sweep, not a guess** -- the double-course
+#: family's convention has never been measured, and one tried offset reported
+#: as a finding is the mistake `roofrot_probe.py` was written to stop.
+ROT_OFFSETS = (0, 6, 12, 18)
 
-def gable_rings(cells: set[tuple[int, int]], gable_axis: str | None,
-                half_hip: bool = False) -> dict[tuple[int, int], int]:
-    """Ring depth, with the two ends of ``gable_axis`` excluded from the flood.
+#: Pieces of the DOUBLE-COURSE family, which is the only one with an end.
+#: `Village Roof Side 02` and `Village Roof Side End 01` are 1 x 2 x 2 -- one
+#: cell along the run, **two cells down the slope**, two tiles of rise -- so
+#: one piece spans two of `_roof_rings`' courses and has to be placed on the
+#: PAIR of cells, not on one of them.
+WIDE_SETS = {
+    "Tavern": {"slope": "Village Roof Side 02",
+               "end": "Village Roof Side End 01",
+               # **`flat 01`, the ONE-CELL cap, not `flat 02`.** The ridge
+               # band is capped per cell, and `Tavern Roof flat 02` is
+               # 2 x 0.5 x 2 -- laid with `place_tile` it puts its min corner
+               # on the cell and reaches a cell past it, so the roof came out
+               # one unit too big to the north and east. Caught on a copy-out
+               # the user took off the board: the cap ran to x=15 on a
+               # building whose walls stop at x=14. Same class as
+               # CLAUDE.md's "place_tile needs an asset that fills the cell",
+               # and the probe bypasses the palette so `CELL_ROLES` could not
+               # catch it.
+               "cap": "Tavern Roof flat 01",
+               # The panel that fills the TRIANGLE under the gable. Dropping
+               # it built a barn you could see straight through: the end
+               # piece closes the roof's own edge and nothing closes the wall
+               # below it, so the gable was an open triangle with the far
+               # slope's underside visible through it. §3.1's table said what
+               # this piece was for and the wide set left it out anyway.
+               "infill": "Village Roof Side Wall 01",
+               "wall": "Tavern Wall - Small 01"},
+}
 
-    This is the whole proposal in eleven lines, and it is deliberately a
-    *separate* function from `build._roof_rings` rather than a flag on it: the
-    probe has to be able to lay the unmodified hip beside it as a control, and
-    a probe that reimplements what it is probing can only tell you about the
-    probe. If the board says yes, this moves into `build.py` as an argument
-    and the control disappears.
+#: Cells a double-course piece spans down the slope.
+WIDE_DEPTH = 2
 
-    ``gable_axis`` is the axis the RIDGE runs along -- ``"x"`` for a ridge
-    running east-west, whose gables are therefore the east and west walls.
-    ``None`` reproduces `_roof_rings` exactly.
+#: Span across a double-course bay. See `lay_bay_wide` -- 4 is the only span
+#: a 1-cell ring flood and a 2-cell piece both agree on.
+WIDE_ACROSS = 4
 
-    ``half_hip`` keeps one hipped course at each end: the flood starts from
-    the end walls too, but one cell in, so the ridge runs out to within a cell
-    of the gable and then stops.
+#: Which way is "inward" from a cell whose roof falls toward ``side``.
+_INWARD = {"n": (0, 1), "s": (0, -1), "e": (-1, 0), "w": (1, 0)}
+
+
+def lay_bay_wide(out, pieces, ox: int, oz: int, offset: int,
+                 wall, wall_courses: int, across: int,
+                 long_: int = BAY_LONG) -> None:
+    """A gabled double-course roof over one bay, at one rotation offset.
+
+    **The course arithmetic is `build.roof_courses`, not a copy of it.** The
+    first version of this probe carried its own `gable_rings`, and a probe that
+    reimplements what it is probing can only tell you about the probe -- which
+    is exactly what happened: three placement bugs in that copy were read as
+    findings about the kit before they were read as bugs. The builder owns the
+    flood now and this calls it, the same way `wallkit_board.py` builds through
+    `citysmith.walls` rather than beside it.
     """
-    if gable_axis is None:
-        return _roof_rings(cells)
-
-    xs = [c[0] for c in cells]
-    zs = [c[1] for c in cells]
-    lo, hi = (min(xs), max(xs)) if gable_axis == "x" else (min(zs), max(zs))
-    pick = (lambda c: c[0]) if gable_axis == "x" else (lambda c: c[1])
-    inset = 1 if half_hip else 0
-
-    def is_end(c) -> bool:
-        return pick(c) <= lo + inset or pick(c) >= hi - inset
-
-    rings: dict[tuple[int, int], int] = {}
-    # The frontier is the eaves ONLY -- a boundary cell on an end wall is not
-    # a place the roof falls away, which is what makes the ridge run out.
-    frontier = [c for c in cells
-                if not is_end(c)
-                and any((c[0] + dx, c[1] + dz) not in cells or
-                        is_end((c[0] + dx, c[1] + dz))
-                        for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
-    if half_hip:
-        frontier = [c for c in cells
-                    if any((c[0] + dx, c[1] + dz) not in cells
-                           for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
-    depth = 0
-    while frontier:
-        nxt = []
-        for c in frontier:
-            if c in rings:
-                continue
-            rings[c] = depth
-            for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                n = (c[0] + dx, c[1] + dz)
-                if n in cells and n not in rings:
-                    nxt.append(n)
-        frontier, depth = nxt, depth + 1
-    # End cells inherit the depth of their inboard neighbour, so the ridge
-    # arrives at the gable wall at full height instead of stepping down.
-    for c in sorted(cells):
-        if c in rings:
-            continue
-        step = -1 if pick(c) <= lo + inset else 1
-        inboard = ((c[0] + step, c[1]) if gable_axis == "x"
-                   else (c[0], c[1] + step))
-        rings[c] = rings.get(inboard, 0)
-    return rings
-
-
-def lay_bay(out, pieces, ground, wall, ox: int, oz: int, treatment: str,
-            span: int) -> None:
-    """One test building: two wall courses, then the roof under ``treatment``."""
-    cells = {(x, z) for x in range(BAY_LONG) for z in range(BAY_ACROSS)}
-    slope = pieces["slope"]
-    rise = slope.size_y
-    wall_h = wall.size_y
-
-    # Floor, so the shell has something to stand on and the eye has a datum.
+    cells = {(x, z) for x in range(long_) for z in range(across)}
     floor = pieces["floor"]
+    wall_h = wall.size_y
     for x, z in sorted(cells):
         out.append(place_tile(floor, ox + x, oz + z, -floor.size_y))
-
-    # Shell. Full-cell corner pieces are deliberately NOT used: the question
-    # is the roof, and a corner piece would put a second variable in frame.
-    #
-    # **`place_wall`, not `place_tile` with a hand-rolled rotation.** The first
-    # cut of this probe did the latter with `Tavern Wall 01`, which is a
-    # **2-cell** panel -- so every segment overhung its neighbour and two
-    # panels stacked on each cell edge. On the board that is a jumbled dark
-    # glazed mass, and it sat *under the roof this probe exists to judge*.
-    # `place_wall` insets the thin axis onto the cell boundary and reads which
-    # axis is thin off the collider instead of assuming it.
-    for level in range(WALL_COURSES):
+    for level in range(wall_courses):
         y = level * wall_h
         for x, z in sorted(cells):
             for side, dx, dz in SIDE_OFFSETS:
-                if (x + dx, z + dz) in cells:
-                    continue
-                out.append(place_wall(pieces["wall"], ox + x, oz + z, side, y))
+                if (x + dx, z + dz) not in cells:
+                    out.append(place_wall(wall, ox + x, oz + z, side, y))
 
-    roof_y = WALL_COURSES * wall_h
-    # The ridge runs along the LONG axis, so the gables are the short ends.
-    axis = None if treatment == "hip" else "x"
-    rings = gable_rings(cells, axis, half_hip=(treatment == "half-hip"))
-    top = max(rings.values())
-    edge_off, corner_off = roof_offsets(slope)
+    roof_y = wall_courses * wall_h
+    slope, end, cap = pieces["slope"], pieces["end"], pieces["cap"]
+    rise = slope.size_y
+    cpc = roof_course_cells(slope)
 
+    courses = roof_courses(cells, "x", cpc)
+    anchors = roof_course_anchors(courses, "x", cpc)
     xs = [c[0] for c in cells]
     lo_x, hi_x = min(xs), max(xs)
 
-    for (x, z) in sorted(cells):
-        r = rings[(x, z)]
-        y = roof_y + r * rise
-        on_end = axis is not None and x in (lo_x, hi_x)
+    for (x, z), (course, fall) in sorted(anchors.items()):
+        y = roof_y + course * rise
+        ix, iz = _INWARD[fall]
+        # Centre of the band this piece covers: cpc cells running inward.
+        cx = ox + x + 0.5 + ix * (cpc - 1) * 0.5
+        cz = oz + z + 0.5 + iz * (cpc - 1) * 0.5
+        piece = end if x in (lo_x, hi_x) else slope
+        out.append(place_centered(piece, cx, cz, y,
+                                  (ROOF_EDGE_ROT[fall] + offset) % 24))
 
-        if on_end and treatment == "gable-bare":
-            continue                       # the deliberately open control
+    # The ridge band, capped flat. Laid by its TOP, the rule `Builder.surface`
+    # follows for anything horizontal -- a cap seated by its base sits a
+    # cap-thickness proud of the slopes it closes.
+    if cap is not None:
+        for (x, z), (course, fall) in sorted(courses.items()):
+            if fall is not None:
+                continue
+            y = roof_y + course * rise
+            out.append(place_tile(cap, ox + x, oz + z, y - cap.size_y))
 
-        if on_end and treatment == "gable-end":
-            # The closing piece, facing out along the ridge. Both quarter
-            # turns are laid across the two ends, so one of them is right
-            # whichever way the mesh is authored -- which is the measurement.
-            end = pieces["end2"] if span == 2 else pieces["end"]
-            if end is not None:
-                rot = 0 if x == lo_x else 12
-                out.append(place_tile(end, ox + x, oz + z,
-                                      y, (rot + edge_off) % 24))
-            # Infill below, filling the triangle down to the wall head.
-            inf = pieces["infill"]
-            if inf is not None:
-                for k in range(r):
-                    out.append(place_tile(
-                        inf, ox + x, oz + z, roof_y + k * rise,
-                        18 if x == lo_x else 6))
-            continue
-
-        fall = tuple(s for s, dx, dz in SIDE_OFFSETS
-                     if rings.get((x + dx, z + dz), -1) < r)
-        if not fall:
-            piece, rot = pieces["cap"], 0
-        elif len(fall) == 1:
-            piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
-        else:
-            which = CORNER_OF.get(frozenset(fall))
-            if which is None:
-                piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
-            else:
-                piece, rot = pieces["corner"], ROOF_CORNER_ROT[which] + corner_off
-        if piece is not None:
-            out.append(place_tile(piece, ox + x, oz + z, y, rot % 24))
+    # The gable TRIANGLE, filled column by column. One panel per course, from
+    # the wall head up to the roof line at that across-position -- so the
+    # infill steps up toward the ridge and follows the slope, which is what
+    # makes it a triangle rather than a rectangle.
+    infill = pieces.get("infill")
+    if infill is not None:
+        for (x, z), (course, fall) in sorted(courses.items()):
+            if x not in (lo_x, hi_x):
+                continue
+            side = "w" if x == lo_x else "e"
+            for k in range(course):
+                out.append(place_wall(infill, ox + x, oz + z, side,
+                                      roof_y + k * infill.size_y))
 
 
 def main() -> None:
@@ -278,6 +245,26 @@ def main() -> None:
                     help="which panel width the closing piece is laid at. "
                          "One per board: both on one board does not fit a "
                          "frame, which camera_aim says before it is pasted.")
+    ap.add_argument("--scale", type=int, choices=(1, 2), default=1,
+                    help="1 sweeps the four END TREATMENTS at the "
+                         "single-course scale -- which is what the town "
+                         "builds and which has no end piece. 2 sweeps the "
+                         "four ROTATION OFFSETS of the double-course family, "
+                         "which is the only one that has one.")
+    ap.add_argument("--long", type=int, default=BAY_LONG, dest="long_",
+                    help="length ALONG the ridge, in cells. Must be at least "
+                         "--across or the gable ends up on the long face and "
+                         "the building reads squat -- which is a fact about "
+                         "the probe's composition, not about the roof.")
+    ap.add_argument("--across", type=int, default=WIDE_ACROSS,
+                    help="span across the ridge, in cells. 4 was the only "
+                         "span the two scales agreed on before "
+                         "`build.roof_courses`; every span tiles now, and "
+                         "11 is what a real East Tradebourne warehouse is.")
+    ap.add_argument("--offset", type=int, default=None, choices=(0, 6, 12, 18),
+                    help="lay ONE bay at this offset instead of sweeping all "
+                         "four. The rotation is measured (+6); this is for "
+                         "showing a wide span, where four bays do not frame.")
     ap.add_argument("--cols", type=int, default=2,
                     help="treatments per row. 2 keeps the board framable; "
                          "4 lays them in a line and does not fit.")
@@ -289,7 +276,17 @@ def main() -> None:
     for a in cat.assets:
         byname.setdefault(a.name, a)
 
-    names = GABLE_SETS[args.kit]
+    if args.scale == 2:
+        if args.kit not in WIDE_SETS:
+            ap.error(f"no double-course vocabulary recorded for {args.kit!r}; "
+                     f"have {', '.join(WIDE_SETS)}")
+        names = dict(WIDE_SETS[args.kit])
+        names.setdefault("end2", None)
+        names.setdefault("infill", None)
+        names.setdefault("corner", None)
+        names.setdefault("inner", None)
+    else:
+        names = GABLE_SETS[args.kit]
     pieces = {k: (byname.get(v) if v else None) for k, v in names.items()}
     missing = [k for k, v in pieces.items()
                if v is None and names[k] is not None]
@@ -298,17 +295,28 @@ def main() -> None:
                  + ", ".join(f"{k}={names[k]!r}" for k in missing))
     if pieces["end"] is None:
         ap.error(f"{args.kit} ships no end piece; it cannot be gabled")
+    # The ridge cap is laid one per cell, so it has to BE one cell. This is
+    # the check that would have caught the north-east overhang before it went
+    # on a board.
+    cap = pieces.get("cap")
+    if cap is not None and (cap.size_x, cap.size_z) != (1.0, 1.0):
+        ap.error(f"cap {cap.name!r} is {cap.size_x:g}x{cap.size_z:g} cells; "
+                 f"it is laid per cell and would overhang")
     pieces["floor"] = palette.require("floor")
 
     ground = palette.require("ground")
     marker = byname.get("md_stairblock_01") or pieces["floor"]
 
     out: list = []
-    cols = max(1, args.cols)
-    rows = (len(TREATMENTS) + cols - 1) // cols
+    # A wide span needs the bay spacing to follow it, or the bays overlap.
+    across = args.across if args.scale == 2 else BAY_ACROSS
+    sweep = ([args.offset] if args.offset is not None
+             else list(ROT_OFFSETS) if args.scale == 2 else list(TREATMENTS))
+    cols = max(1, min(args.cols, len(sweep)))
+    rows = (len(sweep) + cols - 1) // cols
 
-    pitch = BAY_LONG + BAY_GAP
-    band = BAY_ACROSS + BAND_GAP
+    pitch = (args.long_ if args.scale == 2 else BAY_LONG) + BAY_GAP
+    band = across + BAND_GAP
     width = cols * pitch
     depth = rows * band
 
@@ -316,10 +324,15 @@ def main() -> None:
         for dx in range(-MARGIN - 1, width + MARGIN):
             out.append(place_tile(ground, dx, dz, -ground.size_y - 0.5))
 
-    for ti, treat in enumerate(TREATMENTS):
+    for ti, item in enumerate(sweep):
         ox = (ti % cols) * pitch
         oz = (ti // cols) * band
-        lay_bay(out, pieces, ground, pieces["wall"], ox, oz, treat, args.span)
+        if args.scale == 2:
+            lay_bay_wide(out, pieces, ox, oz, item, pieces["wall"],
+                         WALL_COURSES, across, args.long_)
+        else:
+            lay_bay(out, pieces, ground, pieces["wall"], ox, oz, item,
+                    args.span)
         # Numbered as a BAR ON THE GROUND running east, not a stack: a
         # vertical tally reads at an oblique and vanishes in plan, and this
         # probe is read in plan first.
@@ -332,10 +345,18 @@ def main() -> None:
     for k in range(args.span):
         out.append(place_tile(marker, -MARGIN - 1, -MARGIN - 2, k * marker.size_y))
 
-    print(f"# {args.kit}: {len(TREATMENTS)} end treatments, "
-          f"{args.span}-cell closing piece, {cols} per row", file=sys.stderr)
-    for i, t in enumerate(TREATMENTS):
-        print(f"#   bar of {i + 1} to its south: {t}", file=sys.stderr)
+    if args.scale == 2:
+        print(f"# {args.kit}: double-course gable, span {across} across, "
+              f"{len(sweep)} bay(s)", file=sys.stderr)
+        for i, o in enumerate(sweep):
+            print(f"#   bar of {i + 1} to its south: offset +{o}",
+                  file=sys.stderr)
+    else:
+        print(f"# {args.kit}: {len(TREATMENTS)} end treatments, "
+              f"{args.span}-cell closing piece, {cols} per row",
+              file=sys.stderr)
+        for i, t in enumerate(TREATMENTS):
+            print(f"#   bar of {i + 1} to its south: {t}", file=sys.stderr)
     print(f"#   NW stack = span ({args.span} block(s))", file=sys.stderr)
     print(f"#   READ OVERHEAD FIRST, then both ends at eye level, "
           f"then the long flank", file=sys.stderr)

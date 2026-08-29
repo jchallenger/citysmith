@@ -55,7 +55,7 @@ sys.path.insert(0, ".")
 
 from citysmith.build import (
     ROOF_CORNER_ROT, ROOF_EDGE_ROT, SIDE_OFFSETS, _is_reflex,
-    _normalized_whole_tiles, _roof_rings, place_tile,
+    _normalized_whole_tiles, _roof_rings, place_tile, placed_bounds,
 )
 from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
@@ -88,7 +88,7 @@ def _footprint_ok(a, footprint: str) -> bool:
 ROTS = (0, 6, 12, 18)
 COL_PITCH = 3          #: cells between piece columns (1x1 scale)
 ROW_PITCH = 3          #: cells between rotation rows (1x1 scale)
-WIDE_PITCH = 5         #: ... and at the double-course scale, where a piece is
+WIDE_PITCH = 4         #: ... and at the double-course scale, where a piece is
                        #: two cells deep and would otherwise sit on its
                        #: neighbour rather than beside it
 RUN = 3                #: pieces in the straight-run band
@@ -182,6 +182,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--kit", default="Tavern",
                     help="catalog folder, e.g. Tavern, 'Castle Fortified', Rural")
+    ap.add_argument("--band", default="both", choices=("matrix", "runs", "both"),
+                    help="which band to lay. `both` is 46 cells deep at the "
+                         "1x1 scale and does not frame at the wide one, so a "
+                         "wide sweep is two boards.")
+    ap.add_argument("--only", action="append", default=None, metavar="SUBSTR",
+                    help="keep only pieces whose name contains this "
+                         "(repeatable). `--footprint wide --only Side` is the "
+                         "four pieces the gable question turns on.")
     ap.add_argument("--footprint", default="1x1", choices=sorted(FOOTPRINTS),
                     help="which SCALE of the kit's roof family to sweep. "
                          "1x1 is the single-course family _lay_roofs builds "
@@ -203,12 +211,17 @@ def main() -> None:
     palette = Palette(load_or_build(), MEDIEVAL)
     cat = palette.catalog
     pieces = roof_pieces(cat, args.kit, args.footprint)
+    if args.only:
+        pieces = [p for p in pieces
+                  if any(s.lower() in p.name.lower() for s in args.only)]
     if not pieces:
-        ap.error(f"no {args.footprint} roof pieces in folder {args.kit!r}")
+        ap.error(f"no {args.footprint} roof pieces in folder {args.kit!r}"
+                 + (f" matching {args.only}" if args.only else ""))
 
     byname = {}
     for a in cat.assets:
         byname.setdefault(a.name, a)
+    byid_all = {a.id: a for a in cat.assets}
     grass = palette.require("ground")
     pedestal = palette.require("floor")
     marker = byname.get("md_stairblock_01") or pedestal
@@ -244,43 +257,62 @@ def main() -> None:
     out: list = []
     cp = WIDE_PITCH if args.footprint != "1x1" else COL_PITCH
     rp = WIDE_PITCH if args.footprint != "1x1" else ROW_PITCH
-    width = len(pieces) * cp + 4
-    depth = len(ROTS) * rp + 12
-
-    for dz in range(-4, depth):
-        for dx in range(-4, width):
-            out.append(place_tile(grass, dx, dz, -grass.size_y))
 
     # Row labels: rotation index, in a stack west of each row.
     for r, rot in enumerate(ROTS):
         for t in range(r + 1):
-            out.append(place_tile(marker, -3, r * rp, t * marker.size_y))
-    # Column labels: piece index, in a stack south of each column.
-    south = len(ROTS) * rp + 2
-    for c in range(len(pieces)):
-        for t in range(c + 1):
-            out.append(place_tile(marker, c * cp, south, t * marker.size_y))
+            out.append(place_tile(marker, -2, r * rp, t * marker.size_y))
 
-    # Band A: the matrix. One pedestal per (piece, rotation), with a marker
-    # block off its north side.
-    for c, piece in enumerate(pieces):
-        for r, rot in enumerate(ROTS):
-            x, z = c * cp, r * rp
-            out.append(place_tile(pedestal, x, z, 0.0))
-            out.append(place_tile(marker, x, z - 1, 0.0))
-            out.append(place_tile(piece, x, z, pedestal.size_y, rot))
+    if args.band in ("matrix", "both"):
+        # Column labels: piece index, in a stack south of each column.
+        south = len(ROTS) * rp + 2
+        for c in range(len(pieces)):
+            for t in range(c + 1):
+                out.append(place_tile(marker, c * cp, south, t * marker.size_y))
 
-    # Band B: three in a line, per rotation. A lone slope can look right and a
-    # run of them still gap at every join -- which is the failure the town
-    # shows and the matrix above cannot.
-    runz = south + 4
-    for c, piece in enumerate(pieces):
-        for r, rot in enumerate(ROTS):
-            z = runz + r * (RUN + 2)
-            for i in range(RUN):
-                x = c * cp
-                out.append(place_tile(pedestal, x, z + i, 0.0))
-                out.append(place_tile(piece, x, z + i, pedestal.size_y, rot))
+        # Band A: the matrix. One pedestal per (piece, rotation), with a
+        # marker block off its north side.
+        for c, piece in enumerate(pieces):
+            for r, rot in enumerate(ROTS):
+                x, z = c * cp, r * rp
+                out.append(place_tile(pedestal, x, z, 0.0))
+                out.append(place_tile(marker, x, z - 1, 0.0))
+                out.append(place_tile(piece, x, z, pedestal.size_y, rot))
+
+    if args.band in ("runs", "both"):
+        # Band B: three in a line, per rotation. A lone slope can look right
+        # and a run of them still gap at every join -- which is the failure
+        # the town shows and the matrix above cannot.
+        runz = (len(ROTS) * rp + 6) if args.band == "both" else 0
+        for c, piece in enumerate(pieces):
+            for r, rot in enumerate(ROTS):
+                z = runz + r * (RUN + 2)
+                for i in range(RUN):
+                    x = c * cp
+                    out.append(place_tile(pedestal, x, z + i, 0.0))
+                    out.append(place_tile(piece, x, z + i, pedestal.size_y,
+                                          rot))
+
+    # **The ground is laid LAST, under whatever was actually placed.** It used
+    # to be laid first at `len(ROTS) * rp + 12` deep, computed by hand -- and
+    # Band B runs to `4 * (RUN + 2)` past the labels, so at the 1x1 scale the
+    # sheet stopped at z=32 with roof pieces standing over bare void out to
+    # z=46. The extent is read off the placements now (`placed_bounds`, the
+    # one function that knows how to turn a stored coordinate back into a
+    # box), so a band that grows cannot outrun its own ground again.
+    x0 = z0 = 10 ** 9
+    x1 = z1 = -10 ** 9
+    for pl in out:
+        a = byid_all[pl.asset_id]
+        bx0, bz0, bx1, bz1 = placed_bounds(a, pl)
+        x0, z0 = min(x0, bx0), min(z0, bz0)
+        x1, z1 = max(x1, bx1), max(z1, bz1)
+    pad = 1
+    ground = []
+    for dz in range(int(z0) - pad, int(z1) + pad + 1):
+        for dx in range(int(x0) - pad, int(x1) + pad + 1):
+            ground.append(place_tile(grass, dx, dz, -grass.size_y))
+    out = ground + out
 
     print(f"# kit {args.kit}: {len(pieces)} pieces x {len(ROTS)} rotations",
           file=sys.stderr)

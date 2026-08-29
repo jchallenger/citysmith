@@ -267,6 +267,92 @@ def footprints(tm) -> dict[str, set[tuple[int, int]]]:
     return out
 
 
+#: What a doorway opens onto, worst to best. The order is the ranking.
+FRONTAGE_RANK = ("open", "lane", "cart", "main")
+
+#: How frontage moves a building's storey count, as ``(delta, weight)``.
+#:
+#: **A weighted deal, not a flat subtraction**, and that is the whole point.
+#: The complaint in `docs/building-massing.md` §11 is not that the town is too
+#: tall -- it is that "the craft block is 15 of 21 at three storeys and has no
+#: single-storey building at all. A real street has a low workshop and an
+#: outbuilding." Subtracting a storey from every back-lane building trades one
+#: monotone skyline for another, one course lower. Dealing it gives a lane a
+#: mix, which is what a lane looks like.
+#:
+#: Measured before choosing (East Tradebourne, 989 buildings): main 22 at mean
+#: 2.55, cart 334 at 2.33, lane 463 at 1.94, open 170 at 1.94. So frontage
+#: already correlates -- bigger buildings sit on bigger streets -- but lane and
+#: open are indistinguishable from each other, and 76 lane-fronted buildings
+#: stand three storeys tall.
+FRONTAGE_STOREYS: dict[str, tuple[tuple[int, float], ...]] = {
+    "main": ((1, 0.35), (0, 0.65)),
+    "cart": ((0, 1.00),),
+    "lane": ((-1, 0.55), (0, 0.45)),
+    "open": ((-1, 0.70), (0, 0.30)),
+}
+
+#: Cache of per-map frontage, keyed by ``id(tm)``. `storeys_of` is read by
+#: three passes over every cell, so this cannot be recomputed per call.
+_FRONTAGE: dict[int, dict[str, str]] = {}
+
+
+def frontage_of(tm) -> dict[str, str]:
+    """Building id -> the best thing any of its doorways opens onto.
+
+    **`street_class` alone is the wrong test and reading it that way hides
+    most of the town.** It is only set for main and cart roads; a back lane is
+    paved -- ``surface == "lane"`` -- and carries an *empty* class. Ranking on
+    the class found 10 lane-fronted buildings on East Tradebourne. Ranking on
+    the class *and* the surface finds 463. `_main_street_frontage` reads the
+    class alone and is right to, because it only ever asks about main roads.
+    """
+    key = id(tm)
+    if key in _FRONTAGE:
+        return _FRONTAGE[key]
+    out: dict[str, str] = {}
+    for bid, doors in tm.doors.items():
+        best = "open"
+        for x, z, side in doors:
+            dx, dz = next((d, e) for s, d, e in SIDE_OFFSETS if s == side)
+            ox, oz = x + dx, z + dz
+            if not tm.inside(ox, oz):
+                continue
+            cls = tm.street_class[oz][ox]
+            surf = tm.surface[oz][ox]
+            if cls in ("main", "cart"):
+                got = cls
+            elif surf in ("lane", "street"):
+                got = "lane"
+            elif surf in ("plaza", "court", "pier"):
+                got = "cart"      # a square is public frontage, like a road
+            else:
+                got = "open"
+            if FRONTAGE_RANK.index(got) > FRONTAGE_RANK.index(best):
+                best = got
+        out[bid] = best
+    _FRONTAGE[key] = out
+    return out
+
+
+def storeys_by_frontage(base: int, frontage: str, bid: str) -> int:
+    """``base`` moved by what this building fronts onto, dealt stably.
+
+    Same crc32 deal as :func:`roof_suffix_for` and :func:`gable_end_for`, for
+    the same reason: a town must rebuild to the same bytes. Never returns less
+    than 1 -- a building with no storeys is a floor with a roof on it.
+    """
+    mix = FRONTAGE_STOREYS.get(frontage)
+    if not mix:
+        return base
+    roll = (zlib.crc32(f"frontage:{frontage}:{bid}".encode()) % 10_000) / 10_000.0
+    for delta, weight in mix:
+        if roll < weight:
+            return max(1, base + delta)
+        roll -= weight
+    return max(1, base + mix[-1][0])
+
+
 def storeys_of(tm, bid: str | None, ceiling: int) -> int:
     """A building's own storey count, clamped to ``1..ceiling``.
 
@@ -282,7 +368,15 @@ def storeys_of(tm, bid: str | None, ceiling: int) -> int:
     # `footprints` records the same lesson about *where* a building is.
     if tier_of(bid) == "utility":
         return min(UTILITY_STOREYS, ceiling)
-    return min(max(1, tm.floors.get(bid, 1)), ceiling)
+    base = max(1, tm.floors.get(bid, 1))
+    # **Frontage is applied HERE, beside the utility cap and for the same
+    # reason.** Three passes read this -- the shell, the upper floors and the
+    # roof -- and a roof that disagrees with the walls about how tall a
+    # building is floats or buries itself. `storeys_for` cannot do it: it runs
+    # in the importer, where there is no raster and so no doorway and no
+    # street to open onto.
+    base = storeys_by_frontage(base, frontage_of(tm).get(bid, "open"), bid)
+    return min(base, ceiling)
 
 
 #: A footprint this many cells or more is built as two ranges rather than one
@@ -4232,9 +4326,393 @@ def _ridge_rotations(wing, rings, top_ring, chimney_at):
     return {c: (near if c[axis] < pivot else far) for c in crown}
 
 
+#: A wing needs this many cells along its ridge before a gable means anything.
+#: Below it the "ridge" is a point or two and the end treatment has nothing to
+#: terminate, so the wing stays hipped whatever its quarter deals.
+GABLE_MIN_RIDGE = 4
+
+#: ... and this many across, or there is no slope either side to step down.
+GABLE_MIN_SPAN = 3
+
+
+def crowstep_tread(palette, wall_asset):
+    """The half-height panel of ``wall_asset``'s own kit, or ``None``.
+
+    A crow-step is one cell in and one course up, so its tread is a wall piece
+    exactly **1.0 tall** in the building's own fabric. **Only two medieval kits
+    ship one** -- Castle Fortified and Marble Palace -- so a boarded barn or a
+    timber-framed house asking for a crow-step gets ``None`` here and falls
+    back to a flush gable, which is correct rather than a shortfall:
+    crow-stepping is a masonry form.
+
+    The kit is the folder, the same rule that found the facade's own corner.
+    Broken and ruined variants are refused by name: `Abandoned Village` ships
+    `haunted wall 1x1 broken` at exactly this size, and a broken wall makes a
+    crow-step read as damage.
+    """
+    if wall_asset is None:
+        return None
+    kit = wall_asset.folder or ""
+    best = None
+    for a in getattr(palette.catalog, "assets", ()):
+        if a.kind != "tile" or (a.folder or "") != kit:
+            continue
+        if round(a.size_y, 2) != 1.0:
+            continue
+        if "wall" not in (a.group_tag or "").lower():
+            continue
+        if min(a.size_x, a.size_z) > 0.6 or max(a.size_x, a.size_z) > 1.0:
+            continue
+        low = a.name.lower()
+        if any(w in low for w in ("broken", "ruin", "window", "door")):
+            continue
+        if best is None or len(a.name) < len(best.name):
+            best = a
+    return best
+
+
+#: Which palette role supplies each tier's exterior wall, for the crow-step
+#: tread lookup. The tread has to come from the same kit as the wall or the
+#: parapet is a different material from the gable it stands on.
+_WALL_ROLE_BY_TIER = {"civic": "wall_civic", "utility": "wall_utility"}
+
+
+def _tread_for(palette, tier: str, cache: dict):
+    """`crowstep_tread` for a tier, memoised."""
+    if tier not in cache:
+        role = _WALL_ROLE_BY_TIER.get(tier, "wall")
+        wall = palette.resolve(role) or palette.resolve("wall")
+        cache[tier] = crowstep_tread(palette, wall)
+    return cache[tier]
+
+
+def gable_infill(palette, tier: str, tread=None):
+    """What closes the triangle between a gable's wall head and its roof.
+
+    **A gable always needs one.** The hole is not an oversight in the geometry:
+    a gable is exactly the case where the roof rises above the wall at the end
+    of a building, and a hip has no triangle only because its boundary cells
+    sit at the wall head. So "gable without infill" is not a thing that can be
+    built, and the first wiring of this shipped a 1.5-tile hole at every flush
+    gable end on East Tradebourne because it tried.
+
+    Two answers, in order:
+
+    * **The wall kit's own half-height panel**, where it has one. Castle
+      Fortified's `castle wall 1x1 half` is the gable wall carried up, which is
+      what a masonry gable actually is. This is also the crow-step tread, so
+      civic gets one piece for both jobs.
+    * **The roof kit's flat cap**, where it does not. `Tavern` and `Rural` ship
+      no wall piece under two tiles -- only floors, roofs and stairs -- so the
+      house and the barn cannot carry their wall up. Closing the verge in the
+      *roof's* material instead is not a fallback dressed as a feature: tile
+      hanging and wrapped thatch are both how a real gable of those materials
+      is finished, and the cap is 0.5 tall so two of them make a course
+      exactly.
+
+    Returns ``None`` only if the tier has neither, in which case the caller
+    must fall back to a hip -- a gable it cannot close is worse than a hip.
+    """
+    if tread is not None:
+        return tread
+    cap = roof_set(palette, tier)[3]
+    if cap is not None and (cap.size_x, cap.size_z) == (1.0, 1.0):
+        return cap
+    return None
+
+
+#: Cells a double-course end piece spans ACROSS the slope, and the number of
+#: single-course courses it therefore stands over. They are the same 2, and
+#: that is the whole reason the two scales mix: the piece is 2 tiles tall and
+#: 2 cells deep, so it covers exactly two 1x1x1 courses of the field beside it.
+#: Measured off a hand-build the user made and handed over -- `docs/roofscape.md`
+#: §8.2 -- after `docs/great-buildings.md` §3.1 had concluded from a ring flood
+#: that the scales could not mix at all.
+END_PIECE_CELLS = 2
+
+
+def gable_end_piece(palette, side):
+    """The 1-cell double-course end piece of ``side``'s own kit, or ``None``.
+
+    A verge closed in another kit's material is the mismatch the tier system
+    exists to prevent, so the kit is the folder -- the same rule that found the
+    facade's corner and the crow-step's tread.
+
+    **Only `Tavern` ships one**, which `docs/great-buildings.md` §3.4c already
+    records from the other direction ("Tavern is the ONLY kit in the library
+    with a roof end piece"). So a thatched or slated wing gets ``None`` here and
+    falls back to a flush gable, exactly as `crow` falls back where the fabric
+    ships no tread. That is a property of the library, not a shortfall in this
+    function.
+
+    The shape test is the piece's own geometry rather than its name: one cell
+    along the ridge, two cells across the slope, and twice the field's rise.
+    `Thatched Roof Wall` is tagged `end` in the same way and is 2 x 2 x 1 -- a
+    verge board, not a double-course end -- and the collider is what tells them
+    apart.
+    """
+    if side is None:
+        return None
+    kit = (side.folder or "").lower()
+    want_y = round(side.size_y * END_PIECE_CELLS, 2)
+    best = None
+    for a in getattr(palette.catalog, "assets", ()):
+        if a.kind != "tile" or (a.folder or "").lower() != kit:
+            continue
+        if "roof" not in (a.group_tag or "").lower():
+            continue
+        if "end" not in a.name.lower():
+            continue
+        if round(a.size_y, 2) != want_y:
+            continue
+        # One cell along the ridge, END_PIECE_CELLS across. The 2-cell partner
+        # (`Village Roof Side End 02`) is deliberately not taken: a verge two
+        # cells wide eats a cell of the field, and the field has to stay wide
+        # enough to carry a ridge. `roof-end-wide-verge` is where that goes.
+        span = (round(min(a.size_x, a.size_z), 2), round(max(a.size_x, a.size_z), 2))
+        if span != (1.0, float(END_PIECE_CELLS)):
+            continue
+        if best is None or len(a.name) < len(best.name):
+            best = a
+    return best
+
+
+def _end_pairs(verge, courses, across_i):
+    """Pair a verge column's cells from the eaves inward, per slope half.
+
+    Returns ``[(low_across, base_course, fall), ...]`` -- one entry per pair a
+    double-course end piece can cover, and nothing for the cells it cannot.
+
+    **Leftovers are left**, which is the point. A slope half with an odd number
+    of cells, and the single ridge cell an odd-depth wing carries, have no whole
+    piece that fits; they keep the flush treatment and the verge comes out
+    part end-piece and part infill. That is the same rule `walls.pack` follows
+    for a wide panel and `lay_flat_deck` for a 2x2 cap: lay the wide piece
+    where all of its cells fit, and fill the remainder with the narrow one.
+    Measured over the three towns, pairing covers both halves whole on 34% of
+    gable-eligible wings and all but one ridge cell on a further 45%.
+    """
+    out = []
+    for fall in ("n", "s", "e", "w"):
+        half = [c for c in verge if courses[c][1] == fall]
+        if not half:
+            continue
+        # From the eaves inward, which is the order the courses climb.
+        half.sort(key=lambda c: courses[c][0])
+        for i in range(0, len(half) - 1, 2):
+            a, b = half[i], half[i + 1]
+            if courses[b][0] - courses[a][0] != 1:
+                break                      # not consecutive courses; stop
+            if abs(a[across_i] - b[across_i]) != 1:
+                break                      # not adjacent cells
+            out.append((min(a[across_i], b[across_i]), courses[a][0], fall))
+    return out
+
+
+def _wing_gable(wing: set[tuple[int, int]],
+                quarter_at: dict[tuple[int, int], str] | None,
+                seed: int) -> str:
+    """How this wing ends its ridge: ``hip``, ``flush`` or ``crow``."""
+    if not quarter_at:
+        return "hip"
+    xs = [x for x, _ in wing]
+    zs = [z for _, z in wing]
+    w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
+    if max(w, d) < GABLE_MIN_RIDGE or min(w, d) < GABLE_MIN_SPAN:
+        return "hip"
+    # The quarter of the wing's own low corner. One lookup per wing rather
+    # than a vote, because a wing is small enough that its cells agree.
+    quarter = quarter_at.get(min(wing))
+    if quarter is None:
+        return "hip"
+    return gable_end_for(quarter, seed)
+
+
+def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
+                     roof_y: float, rise: float, side, cap,
+                     edge_off: int, tread, chimney=None, infill=None,
+                     end=None, stack=None) -> None:
+    """One gabled wing: ridge along the long axis, ends per ``treatment``.
+
+    ``crow`` carries the end wall one course proud of the roof and **owns the
+    end column** -- the roof stops against it. Standing the parapet beside a
+    roofed end column instead makes the roof rise between every pair of steps,
+    and the staircase reads as detached lumps rather than one wall. Measured on
+    `PROBE crow-step`; `docs/great-buildings.md` §3.4c.
+
+    Falls back to ``flush`` when the fabric ships no tread, which is every kit
+    but Castle Fortified and Marble Palace.
+    """
+    if treatment == "crow" and tread is None:
+        treatment = "flush"
+    # **A verge needs the piece to close it with.** Only `Tavern` ships a
+    # double-course end, so a thatched or slated wing falls back to flush the
+    # same way a timber one falls back from `crow`. See `gable_end_piece`.
+    if treatment == "endmix" and end is None:
+        treatment = "flush"
+
+    xs = [x for x, _ in wing]
+    zs = [z for _, z in wing]
+    w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
+    axis = "x" if w >= d else "z"          # the ridge runs along the long side
+    cpc = roof_course_cells(side) if side is not None else 1
+
+    courses = roof_courses(wing, axis, cpc)
+    anchors = roof_course_anchors(courses, axis, cpc)
+    ends = ((min(xs), max(xs)) if axis == "x" else (min(zs), max(zs)))
+    on_end = (lambda c: c[0] in ends) if axis == "x" else (lambda c: c[1] in ends)
+    crow = treatment == "crow"
+
+    # **The double-course verge.** Pair each verge column's cells from the
+    # eaves inward and stand one end piece over every pair -- 2 cells across,
+    # 2 courses tall, in the field's own kit. `covered` is the cells an end
+    # piece owns, and they take no slope, no cap and no infill: the piece IS
+    # the roof there and it closes its own triangle, which is what makes this
+    # the only treatment that reads as a gable on a board (`PROBE roof mix`,
+    # `docs/roofscape.md` §9).
+    covered: set[tuple[int, int]] = set()
+    if treatment == "endmix":
+        across_i = 1 if axis == "x" else 0
+        for e in ends:
+            verge = [c for c in courses if (c[0] if axis == "x" else c[1]) == e]
+            for low, base, fall in _end_pairs(verge, courses, across_i):
+                a = e
+                rot = (ROOF_EDGE_ROT[fall] + edge_off) % 24
+                # **The footprint is read off the rotation, never inferred
+                # from the fall.** The piece is 1 x 2, so which way round it
+                # lands depends on whether the fall's rotation is an even
+                # quarter turn -- and that depends on the KIT's own offset.
+                # Tavern's is +6, which makes n and s both even and the piece
+                # land 1 along the ridge by 2 across; at an offset of 0 the
+                # same fall gives an odd turn, the piece lies ACROSS the
+                # ridge, and its min corner lands half a tile outside the
+                # wing. Caught by test_an_end_piece_never_overhangs_its_wing
+                # before it reached a board. A kit whose end cannot face the
+                # right way keeps the flush treatment for that verge rather
+                # than being laid wrong -- the same "a gable it cannot close
+                # is worse than a hip" rule, one step down.
+                fw, fd = rotated_footprint(end, rot)
+                want = ((1.0, float(END_PIECE_CELLS)) if axis == "x"
+                        else (float(END_PIECE_CELLS), 1.0))
+                if (round(fw, 2), round(fd, 2)) != want:
+                    continue
+                cx = (a + 0.5) if axis == "x" else (low + END_PIECE_CELLS / 2.0)
+                cz = (low + END_PIECE_CELLS / 2.0) if axis == "x" else (a + 0.5)
+                # `place_centered`, not `place_tile`: `place_tile` offsets by
+                # the UNROTATED size, which lands a non-square piece off the
+                # grid on an odd quarter turn.
+                b.add(place_centered(end, cx, cz, roof_y + base * rise, rot))
+                for k in range(END_PIECE_CELLS):
+                    covered.add((a, low + k) if axis == "x" else (low + k, a))
+
+    for cell, (course, fall) in sorted(anchors.items()):
+        if cell in covered:
+            continue
+        if crow and on_end(cell):
+            continue
+        if side is not None:
+            b.add(place_tile(side, cell[0], cell[1], roof_y + course * rise,
+                             (ROOF_EDGE_ROT[fall] + edge_off) % 24))
+    # **One chimney, on the ridge.** The hip path places one per building and
+    # the first cut of this one placed none, which took East Tradebourne from
+    # 1,578 chimneys to 40 -- a town losing 97%% of its chimneys is the most
+    # visible thing on a roofscape, and no check would have caught it because
+    # every chimney that remained was correct.
+    chimney_at = None
+    if chimney is not None:
+        top = max(c for c, _ in courses.values())
+        crown = [c for c in sorted(courses) if courses[c][0] == top
+                 and not (crow and on_end(c)) and c not in covered]
+        if crown:
+            chimney_at = crown[len(crown) // 2]
+            y = roof_y + top * rise
+            fall = courses[chimney_at][1]
+            # **The same two cases as the hip path.** A ridge cell caps and
+            # takes the free-standing stack; a sloped cell already has its
+            # slope from the anchors loop above, so the combination piece goes
+            # over it at that slope's own rotation rather than at rot 0. See
+            # `roof_stack`.
+            if fall is not None:
+                b.add(place_tile(chimney, chimney_at[0], chimney_at[1], y,
+                                 (ROOF_EDGE_ROT[fall] + edge_off) % 24))
+            elif stack is not None:
+                if cap is not None:
+                    b.add(place_tile(cap, chimney_at[0], chimney_at[1],
+                                     y - cap.size_y))
+                b.add(place_tile(stack, chimney_at[0], chimney_at[1], y))
+            else:
+                b.add(place_tile(chimney, chimney_at[0], chimney_at[1],
+                                 y - CHIMNEY_LAP))
+                b.add(place_tile(chimney, chimney_at[0], chimney_at[1], y))
+
+    if cap is not None:
+        for cell, (course, fall) in sorted(courses.items()):
+            if fall is not None or (crow and on_end(cell)) or cell in covered:
+                continue
+            if cell == chimney_at:
+                continue
+            b.add(place_tile(cap, cell[0], cell[1],
+                             roof_y + course * rise - cap.size_y))
+    if not crow:
+        # **The gable triangle.** Stack the infill from the wall head up to the
+        # roof line at each across-position, so the end closes and steps with
+        # the slope. Without it the end is a triangular hole up to
+        # (span/2 x rise) tall -- measured at 1.5 tiles on guildhall-0001,
+        # visible on the board as a void under every gable.
+        if infill is not None:
+            for cell, (course, fall) in sorted(courses.items()):
+                if not on_end(cell) or cell in covered:
+                    continue
+                # Stop at the roof's UNDERSIDE, which is half a tile lower on
+                # a capped ridge cell than on a sloped one -- a cap is seated
+                # by its top (`Builder.surface`'s rule) and a slope by its
+                # base. Filling to the course height regardless buries the
+                # infill in the roof: +1,020 tile seams on East Tradebourne,
+                # about five per gabled wing, every one of them a pair the
+                # camera can shimmer between.
+                head = roof_y + course * rise
+                if fall is None and cap is not None:
+                    head -= cap.size_y
+                # **A thin panel goes on the wall line, a full cell fills the
+                # cell.** `castle wall 1x1 half` is 1 x 1 x 0.5 -- a wall
+                # piece -- and `place_tile` would sit it at the cell's corner
+                # rather than on the gable face, half a tile inside the
+                # building. The roof caps that close a timber verge ARE full
+                # cells and want `place_tile`. Reading which off the collider
+                # is the same rule `place_wall` itself follows.
+                thin = min(infill.size_x, infill.size_z) < 1.0
+                if axis == "x":
+                    face = "w" if cell[0] == ends[0] else "e"
+                else:
+                    face = "n" if cell[1] == ends[0] else "s"
+                for k in range(int((head - roof_y) / infill.size_y + 1e-6)):
+                    y = roof_y + k * infill.size_y
+                    if thin:
+                        b.add(place_wall(infill, cell[0], cell[1], face, y))
+                    else:
+                        b.add(place_tile(infill, cell[0], cell[1], y))
+        return
+
+    for cell, (course, _fall) in sorted(courses.items()):
+        if not on_end(cell):
+            continue
+        if axis == "x":
+            face = "w" if cell[0] == ends[0] else "e"
+        else:
+            face = "n" if cell[1] == ends[0] else "s"
+        for k in range(int(round((course + 1) * rise / tread.size_y))):
+            b.add(place_wall(tread, cell[0], cell[1], face,
+                             roof_y + k * tread.size_y))
+            b.add(place_wall(tread, cell[0], cell[1],
+                             {"w": "e", "e": "w", "n": "s", "s": "n"}[face],
+                             roof_y + k * tread.size_y))
+
+
 def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                skip: set[tuple[int, int]] | None = None,
-               roof_override: dict[str, str] | None = None) -> None:
+               roof_override: dict[str, str] | None = None,
+               quarter_at: dict[tuple[int, int], str] | None = None,
+               seed: int = 0) -> None:
     """Roof each block as concentric rings, the way hand-builders do.
 
     The convention here is not inferred from screenshots -- it is read out of
@@ -4287,6 +4765,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
     # Resolved per building, not once per tier -- see ROOF_MIX. Cached,
     # because a town is 989 buildings and a palette lookup is not free.
     _cache: dict[tuple[str, str], tuple] = {}
+    _tread_cache: dict[str, object] = {}
 
     def sets_for(bid: str):
         tier = tier_of(bid)
@@ -4316,6 +4795,22 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         edge_off, corner_off = roof_offsets(side)
         rise = side.size_y if side is not None else 1.0
         roof_y = base_y + fl * storey_h
+        # The crow-step tread comes from the building's OWN wall kit, so a
+        # boarded barn cannot end up with a dressed-stone parapet. Resolved
+        # per block and cached, because a town is 989 buildings.
+        tread = _tread_for(b.palette, tier_of(b.group), _tread_cache)
+        infill = gable_infill(b.palette, tier_of(b.group), tread)
+        # The double-course end comes from the ROOF's kit, not the tier's, so
+        # it follows the material this block was actually dealt. That is the
+        # bug `gable-infill-follows-the-tier-not-the-roof` records against
+        # `infill` one line up, not repeated here.
+        end = gable_end_piece(b.palette, side)
+        # The free-standing stack for this block's own material -- see
+        # `roof_stack`. Keyed on the suffix the block was dealt, not the tier,
+        # so it cannot repeat `gable-infill-follows-the-tier-not-the-roof`.
+        forced_suffix = (roof_override or {}).get(b.group)
+        stack = roof_stack(b.palette, forced_suffix if forced_suffix is not None
+                           else roof_suffix_for(tier_of(b.group), b.group))
 
         # One hip per rectangular wing, not one hip forced over the whole
         # plan. A notched footprint gets a ridge per wing and a valley where
@@ -4325,6 +4820,40 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         chimney_wing = max(wings, key=len) if wings else set()
 
         for wing in wings:
+            # **How this wing ends its ridge, dealt by QUARTER.** `quarter_at`
+            # is None on a settlement whose kinds do not cluster, which is
+            # most of them -- and then there is nothing to key on and the wing
+            # is hipped exactly as it always was. That is the honest fallback
+            # rather than a degradation: see `citysmith/quarters.py`.
+            treatment = _wing_gable(wing, quarter_at, seed)
+            # **A gable it cannot CLOSE is worse than a hip.** The end column's
+            # wall stops at the wall head and the roof climbs away from it, so
+            # a gable leaves a triangular hole up to (span/2 x rise) tall at
+            # each end unless something fills it. `tread` is that something --
+            # a wall piece exactly one course tall -- and it doubles as the
+            # crow parapet, which is why crow is self-closing.
+            #
+            # **Tavern and Rural ship no such piece**, so the house and the
+            # barn cannot gable at the single-course scale at all. That is the
+            # same shortfall as "only Tavern ships a roof `end`" arriving from
+            # the other side, and it is why `gable-single-course-infill` is
+            # open: the double-course family HAS a matching 2.0 infill
+            # (`Village Roof Side Wall`), so the fix is a scale change rather
+            # than a hunt for a piece. Measured on the board first --
+            # guildhall-0001 had a 1.5-tile hole at its ridge end.
+            # A gable it cannot CLOSE is worse than a hip -- see
+            # `gable_infill`, which is why this is a gate and not a warning.
+            if treatment == "crow" and tread is None:
+                treatment = "flush"
+            if treatment != "hip" and infill is None:
+                treatment = "hip"
+            if treatment != "hip":
+                _lay_gabled_wing(b, wing, treatment, roof_y, rise, side, cap,
+                                 edge_off, tread,
+                                 chimney if wing is chimney_wing else None,
+                                 infill, end, stack)
+                continue
+
             rings = _roof_rings(wing)
             top_ring = max(rings.values())
 
@@ -4348,20 +4877,43 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             for (x, z) in sorted(wing):
                 r = rings[(x, z)]
                 y = roof_y + r * rise
-                if (x, z) == chimney_at and chimney is not None:
-                    # Two courses, lapped a quarter, so the stack clears the
-                    # ridge instead of sitting on it as a stub.
-                    b.add(place_tile(chimney, x, z, y - CHIMNEY_LAP))
-                    b.add(place_tile(chimney, x, z, y))
-                    continue
-                if r == top_ring and cap is not None:
-                    b.add(place_tile(cap, x, z, y - cap.size_y,
-                                     ridge_rot.get((x, z), 0)))
-                    continue
                 # Which way the slope falls: the sides where the roof steps
                 # back down towards this wing's own eaves.
                 fall = tuple(s for s, dx, dz in SIDE_OFFSETS
                              if rings.get((x + dx, z + dz), -1) < r)
+                if (x, z) == chimney_at and chimney is not None:
+                    # **Which chimney piece, and which way round.** The tile
+                    # kit's `roof_chimney` is a COMBINATION -- a slope with a
+                    # stack on it -- so on a sloped cell it doubles as the roof
+                    # and must take that cell's own rotation, while on a capped
+                    # ridge it stands a bare slope on end beside the flue. The
+                    # free-standing `stack` is what a cap wants. Both cases are
+                    # in the user's hand-build: it lays the combination over an
+                    # ordinary slope at the slope's rotation, never on a ridge
+                    # and never at rot 0 regardless.
+                    sloped = roof_top_is_supported(rings, x, z, fall) or r < top_ring
+                    if sloped and len(fall) == 1:
+                        b.add(place_tile(side, x, z, y,
+                                         (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24))
+                        b.add(place_tile(chimney, x, z, y,
+                                         (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24))
+                    elif stack is not None:
+                        # A cap seats by its top; the stack stands on it.
+                        b.add(place_tile(cap, x, z, y - cap.size_y,
+                                         ridge_rot.get((x, z), 0)))
+                        b.add(place_tile(stack, x, z, y))
+                    else:
+                        b.add(place_tile(chimney, x, z, y - CHIMNEY_LAP))
+                        b.add(place_tile(chimney, x, z, y))
+                    continue
+                # Cap the top ring only where a slope there would have nothing
+                # to lean on. See `roof_top_is_supported` -- capping the whole
+                # ring is what put a 4 x 2 flat deck on every 6 x 4 wing.
+                if (r == top_ring and cap is not None
+                        and not roof_top_is_supported(rings, x, z, fall)):
+                    b.add(place_tile(cap, x, z, y - cap.size_y,
+                                     ridge_rot.get((x, z), 0)))
+                    continue
                 piece, rot = _roof_piece(fall, side, corner, cap, inner,
                                          _is_reflex(rings, x, z, fall),
                                          edge_off, corner_off)
@@ -4958,6 +5510,121 @@ def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
     return rings
 
 
+#: How many cells one roof piece spans down the slope, keyed on its rise.
+#:
+#: **Every medieval roof kit ships at two scales and only one of them can end a
+#: ridge**, which is the finding `docs/great-buildings.md` §3.1 records: the
+#: single-course family is 1x1x1 and rises 1.0, the double-course family is
+#: 1x2x2 / 2x2x2 and rises 2.0, and *both* `end` pieces -- the only gable
+#: terminators in the catalog -- are in the double-course one. A piece that
+#: rises two tiles also reaches two cells down the slope, so a flood that
+#: steps one cell per course cannot place it. This is the table that says so.
+ROOF_COURSE_CELLS: dict[float, int] = {1.0: 1, 2.0: 2}
+
+
+def roof_course_cells(piece) -> int:
+    """How many cells ``piece`` spans down the slope. Unknown rises give 1."""
+    return ROOF_COURSE_CELLS.get(round(piece.size_y, 2), 1)
+
+
+def roof_courses(cells: set[tuple[int, int]], gable_axis: str,
+                 cells_per_course: int = 1
+                 ) -> dict[tuple[int, int], tuple[int, str | None]]:
+    """``cell -> (course, fall)`` for a GABLED roof over a rectangle.
+
+    ``gable_axis`` is the axis the **ridge** runs along, so its two ends are
+    gables rather than eaves and the roof falls only across it. ``fall`` is the
+    side a cell's slope drops toward, or ``None`` for a ridge cell -- one that
+    belongs to neither side's courses and takes a flat cap, exactly as
+    `_lay_roofs` already caps its innermost ring.
+
+    **This is deliberately not a flag on `_roof_rings`.** That function floods
+    from a block's whole boundary and is what every hip on every board is built
+    from; a gable is a different question asked of the same rectangle, and
+    `roof_wings` has already cut the plan into rectangles by the time either is
+    called. Keeping them apart is what let the gable be probed with the hip
+    beside it as a control.
+
+    The arithmetic, and it is the whole of `roof-rings-two-cell-step`:
+
+        W        span across the ridge
+        full     complete courses per side = (W // 2) // cells_per_course
+        covered  cells each side's courses actually reach = full * cpc
+        middle   W - 2 * covered, the ridge band that takes the cap
+
+    At ``cells_per_course = 1`` that reduces to the familiar case and
+    ``middle`` is 0 or 1 -- a ridge line on an even span, a ridge cell on an
+    odd one. At 2 it is what makes a double-course gable reach a span wider
+    than four cells, which is the constraint that blocked the whole design:
+    measured, a 4-cell span tiled and 5, 6 and 8 did not.
+
+    **The middle band is capped flat rather than pitched**, and that is a
+    choice with a cost. A span of 4k tiles with no cap at all; 4k+2 leaves two
+    cells of flat ridge; odd spans leave one or three. On a wide barn that is a
+    small flat deck along the ridge, which is a real roof form and is not what
+    a tithe barn has. Finishing the remainder with a *single-course* pair --
+    mixing the two scales at the ridge only -- is the better answer and is
+    `roof-ridge-mixed-scale` in `tasks.json`.
+    """
+    if cells_per_course < 1:
+        raise ValueError(f"cells_per_course must be >= 1, got {cells_per_course}")
+    if gable_axis not in ("x", "z"):
+        raise ValueError(f"gable_axis must be 'x' or 'z', got {gable_axis!r}")
+    if not cells:
+        return {}
+
+    # Across the ridge: z when the ridge runs along x, and vice versa.
+    across = (lambda c: c[1]) if gable_axis == "x" else (lambda c: c[0])
+    lo_side, hi_side = ("n", "s") if gable_axis == "x" else ("w", "e")
+    lo = min(across(c) for c in cells)
+    hi = max(across(c) for c in cells)
+
+    width = hi - lo + 1
+    full = (width // 2) // cells_per_course
+    covered = full * cells_per_course
+
+    out: dict[tuple[int, int], tuple[int, str | None]] = {}
+    for c in sorted(cells):
+        a = across(c)
+        from_lo, from_hi = a - lo, hi - a
+        depth = min(from_lo, from_hi)
+        if depth >= covered:
+            # The ridge band. Its course is the one above the last full
+            # course, so a cap laid there sits on top of the slopes rather
+            # than inside them.
+            out[c] = (full, None)
+        else:
+            side = lo_side if from_lo < from_hi else hi_side
+            out[c] = (depth // cells_per_course, side)
+    return out
+
+
+def roof_course_anchors(courses: dict[tuple[int, int], tuple[int, str | None]],
+                        gable_axis: str, cells_per_course: int = 1
+                        ) -> dict[tuple[int, int], tuple[int, str]]:
+    """The cells that actually carry a piece, and which way each falls.
+
+    A piece ``cells_per_course`` cells deep is placed once per band, on the
+    band's **outermost** cell; the cells behind it are covered by the same
+    piece and must not place one of their own. Returning them separately is
+    what stopped the first double-course sweep laying two pieces over the same
+    pair at the ridge.
+    """
+    across = (lambda c: c[1]) if gable_axis == "x" else (lambda c: c[0])
+    lo = min(across(c) for c in courses) if courses else 0
+    hi = max(across(c) for c in courses) if courses else 0
+
+    out: dict[tuple[int, int], tuple[int, str]] = {}
+    for c, (course, fall) in courses.items():
+        if fall is None:
+            continue
+        a = across(c)
+        depth = min(a - lo, hi - a)
+        if depth % cells_per_course == 0:
+            out[c] = (course, fall)
+    return out
+
+
 #: Quarter-step turns to add to the Thatched convention, per kit, as
 #: ``(edge, corner)``. Keyed on the catalog's ``folder``, because **the kit is
 #: the folder** -- the same rule that found the facade's own corner piece.
@@ -5049,6 +5716,89 @@ def roof_suffix_for(tier: str, bid: str) -> str:
     return mix[-1][0]
 
 
+#: How a building's ridge is ended, as ``(treatment, weight)`` per quarter.
+#:
+#: **Dealt by QUARTER, not by building**, which is the whole point and is the
+#: same argument `QUARTER_SURFACE` makes about paving: a district that ends its
+#: ridges one way reads as a district from across the board, and a roofline
+#: dealt per building reads as noise. `ROOF_MIX` already varies the *material*
+#: per building; this varies the *silhouette* per quarter, and the two axes
+#: stay separate on purpose.
+#:
+#: `crow` is the crow-stepped parapet -- the gable that needs no end piece, and
+#: therefore the only one available to a stone or boarded fabric, since
+#: **`Tavern` is the only kit in the library that ships a roof `end`**
+#: (`docs/great-buildings.md` §3.4c). Weighting it toward `civic` is not taste:
+#: crow-stepping is a masonry form and civic is the dressed-stone tier.
+#:
+#: `outskirts` is deliberately all hip. A crow-stepped gable is a town
+#: building's gesture; a cottage in the fields does not make it.
+#: `endmix` closes both verges with the double-course end piece over a
+#: single-course field (`docs/roofscape.md` §8.2). It takes its share from
+#: `flush`, because it *is* a flush gable -- the same silhouette, closed with
+#: the kit's own end rather than with stacked infill, and the only one of the
+#: three that read as a gabled house on `PROBE roof mix`.
+#:
+#: **It self-gates and needs no quarter of its own.** Only `Tavern` ships an
+#: end piece, so a wing whose roof was dealt thatch or slate falls back to
+#: flush inside `_lay_gabled_wing` -- which is why it can be weighted freely
+#: here without a rule about which quarters get tile. `civic` is left alone:
+#: crow-stepping is the masonry form and endmix is a tiled one.
+GABLE_ENDS: dict[str, tuple[tuple[str, float], ...]] = {
+    "civic":       (("crow", 0.70), ("flush", 0.20), ("hip", 0.10)),
+    "market":      (("endmix", 0.30), ("flush", 0.20), ("crow", 0.30),
+                    ("hip", 0.20)),
+    "craft":       (("endmix", 0.35), ("flush", 0.20), ("hip", 0.30),
+                    ("crow", 0.15)),
+    "docks":       (("endmix", 0.35), ("flush", 0.25), ("hip", 0.30),
+                    ("crow", 0.10)),
+    "residential": (("hip", 0.55), ("endmix", 0.25), ("flush", 0.15),
+                    ("crow", 0.05)),
+    "outskirts":   (("hip", 1.00),),
+}
+
+#: What a quarter with no entry in the table gets.
+DEFAULT_GABLE_END = "hip"
+
+
+def gable_end_for(quarter: str, seed: int = 0) -> str:
+    """How this quarter ends its ridges, dealt stably from ``seed``.
+
+    Stable per ``(quarter, seed)`` and **not** per building: two buildings in
+    the same quarter of the same town get the same treatment, and the same town
+    rebuilds to the same bytes -- which `boards.digest_of` depends on. Same
+    crc32 deal as :func:`roof_suffix_for`, for the same reason.
+    """
+    mix = GABLE_ENDS.get(quarter)
+    if not mix:
+        return DEFAULT_GABLE_END
+    roll = (zlib.crc32(f"gable:{quarter}:{seed}".encode()) % 10_000) / 10_000.0
+    for treatment, weight in mix:
+        if roll < weight:
+            return treatment
+        roll -= weight
+    return mix[-1][0]
+
+
+def roof_stack(palette, suffix: str):
+    """The free-standing stack for a roof material, or ``None``.
+
+    **A chimney is two different pieces and which one you want depends on the
+    cell it lands on.** `Village Roof Side/Chimney` is a *combination* -- a
+    roof slope with a stack cast onto it -- and on a sloped cell it is exactly
+    right, because the slope half IS the roof there. Dropped on a capped ridge
+    cell it stands a bare slope on end beside the flue, which reads as a pale
+    skirt hanging off the stack. `Chimney 01` is the free-standing one and is
+    what a ridge wants.
+
+    Falls back to the thatched set a piece at a time, the same way `roof_set`
+    does and for the same reason: a missing stack is invisible in the file and
+    a bare hole in the roof on the board.
+    """
+    asset = palette.resolve(f"roof_stack_{suffix}") if suffix else None
+    return asset if asset is not None else palette.resolve("roof_stack")
+
+
 def roof_set(palette, tier: str, bid: str = ""):
     """The ``(side, corner, inner, cap, chimney)`` a tier is roofed in.
 
@@ -5081,6 +5831,53 @@ def roof_set_named(palette, suffix: str):
         asset = palette.resolve(f"{role}_{suffix}") if suffix else None
         out.append(asset if asset is not None else palette.resolve(role))
     return tuple(out)
+
+
+#: Which cell backs a slope that falls toward each side -- the one its high
+#: edge leans on.
+_BACK_OF = {"n": (0, 1), "s": (0, -1), "e": (-1, 0), "w": (1, 0)}
+
+#: The diagonal a corner piece's high point leans on, per pair of falls.
+_BACK_OF_CORNER = {
+    frozenset(("n", "w")): (1, 1), frozenset(("n", "e")): (-1, 1),
+    frozenset(("s", "w")): (1, -1), frozenset(("s", "e")): (-1, -1),
+}
+
+
+def roof_top_is_supported(rings, x: int, z: int, fall: tuple[str, ...]) -> bool:
+    """Whether a sloped piece here would have its high edge covered.
+
+    **This is what decides a ridge from a plateau.** `_roof_rings` steps one
+    cell in and one course up, so on a wing whose short side is EVEN the flood
+    stops with a band TWO cells wide at the top -- and capping all of it flat
+    loses a whole course and leaves a deck where the ridge belongs. A 6 x 4
+    came out a flat-topped box with a 4 x 2 plateau, which is what most of a
+    town looks like from the side: 5 x 6 is the commonest wing shape on every
+    board measured.
+
+    Capping the top ring was not wrong, it was too broad. The reason it exists
+    is real -- "a slope at the apex shows its open underside", the bare timber
+    that showed at the top of every slate roof -- but that only happens where
+    nothing backs the slope up. Two slopes on the same ring falling opposite
+    ways lean on each other and form a proper ridge; a corner leans on its
+    diagonal. So the test is the neighbour, not the ring index.
+
+    Odd-short-side wings are unaffected: their flood already pinches to a
+    one-cell ridge line, every cell of which falls two or three ways and is
+    capped exactly as before.
+    """
+    r = rings.get((x, z), -1)
+    if len(fall) == 1:
+        dx, dz = _BACK_OF[fall[0]]
+        return rings.get((x + dx, z + dz), -1) >= r
+    if len(fall) == 2:
+        back = _BACK_OF_CORNER.get(frozenset(fall))
+        if back is None:                  # opposite sides: a one-cell ridge run
+            return False
+        return rings.get((x + back[0], z + back[1]), -1) >= r
+    # No fall at all is a cell with roof on every side and needs no support;
+    # three or four is the tip of an arm and can never have any.
+    return not fall
 
 
 def _roof_piece(fall: tuple[str, ...], side, corner, cap, inner=None,
@@ -5799,7 +6596,23 @@ def build_from_tilemap(
                             piece = _deal("wall", span, course, key)
                         if piece is None:
                             piece = (wide if span == 2 else narrow) or face
-                        b.add(place_wall_span(piece, cx, cz, side, span, y))
+                        # **A piece taller than the storey is sunk, not raised.**
+                        # `Tavern Wall 01` is 2.03 against its kit's 2.00, which
+                        # `WIDE_HEIGHT_SLOP` admits because the storey is
+                        # pitched at the 1-cell piece. Left sitting on the
+                        # course line that excess goes UPWARDS, and at the top
+                        # storey there is no course above it -- the wall head
+                        # IS the roof line, so the panel stands 1.8 inches
+                        # proud of its own thatch on every eave of every
+                        # building in the kit. Measured on Forest Church: 697
+                        # pieces. Dropped by the excess instead, the overlap
+                        # goes into the course below, where it is inside the
+                        # floor or the wall beneath and nothing can see it --
+                        # and the head lands exactly on the arithmetic the
+                        # roof pass uses.
+                        b.add(place_wall_span(
+                            piece, cx, cz, side,
+                            span, y - max(0.0, piece.size_y - storey_h)))
 
         # Upper-storey floors. Without these a multi-storey building is a hollow
         # box, and now that facades carry windows you can see straight through one
@@ -5843,7 +6656,7 @@ def build_from_tilemap(
                         W.fabric_for(tier_of(bid),
                                      zlib.crc32(bid.encode()), fabrics))}
             _lay_roofs(b, tm, top, storey_h, storeys, skip=set(towers),
-                       roof_override=poor)
+                       roof_override=poor, quarter_at=quarter_at, seed=seed)
         _lay_towers(b, tm, towers, civic_wall or ext_wall, top, storey_h, storeys)
         b.group = ""
         _lay_town_wall(b, tm, town_wall, top, wall_tiles)

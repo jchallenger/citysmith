@@ -449,7 +449,16 @@ MEDIEVAL = Style(
         "roof_corner_inner_tile": [
             _tile(name="Village Roof Inner Corner 01", **_MED, **_UNIT)],
         "roof_tile": [_tile(name="Tavern Roof flat 01", **_MED, **_UNIT)],
+        # **Two chimney roles, because Tavern ships two kinds of piece.**
+        # `Village Roof Side/Chimney` is a COMBINATION -- a roof slope with a
+        # stack cast onto it, which its tags say outright (`roof` AND `chimney`
+        # AND `wood`, where `Chimney 01` is `chimney` and `stone`). It belongs
+        # on a cell that is already a slope and must take that slope's own
+        # rotation. `roof_stack_*` is the free-standing stack for a cell that
+        # caps: on a ridge the combination piece stands a bare slope on end
+        # beside the flue, which is the pale skirt the user pointed at.
         "roof_chimney_tile": [_tile(name="Village Roof Side/Chimney", **_MED, **_UNIT)],
+        "roof_stack_tile": [_tile(name="Chimney 01", **_MED, **_UNIT)],
         # Grey slate. Reads as the dearest roof on the board, which is why it
         # goes on the civic tier: slate on dressed stone is a temple or a
         # guildhall, and thatch on dressed stone says nothing at all.
@@ -462,6 +471,7 @@ MEDIEVAL = Style(
         #: The Abandoned Village kit ships no 1x1 chimney; the thatched one is
         #: a chimney rather than a roof surface, so it reads fine on slate.
         "roof_chimney_slate": [_tile(name="Thatched Chimney", **_MED, **_UNIT)],
+        "roof_stack_slate": [_tile(name="Thatched Roof Chimney", **_MED, **_UNIT)],
         # A reflex corner is not an outside corner turned round -- it is its
         # own piece, and the kit ships one. Half of all corner cells on this
         # map are reflex (223 of 467), because an L-shaped plan has one at its
@@ -469,6 +479,13 @@ MEDIEVAL = Style(
         # piece is what made the roofscape look jumbled.
         "roof_corner_inner": [_tile(name="Thatched Roof Inner Corner 01", **_MED)],
         "roof_chimney": [_tile(name="Thatched Chimney", **_MED)],
+        # **The taller of Rural's two stacks**, for a cell that caps. Two
+        # `Thatched Chimney` lapped a quarter make 0.75 tiles of stack -- under
+        # four feet -- while `Thatched Roof Chimney` is 1.5 in one piece. The
+        # lap exists because "a single 0.5 piece reads as a stub"; the kit's own
+        # answer to that is the taller piece.
+        "roof_stack": [_tile(name="Thatched Roof Chimney", **_MED, **_UNIT),
+                       _tile(name="Thatched Chimney", **_MED)],
         # -- corners ------------------------------------------------------
         # An outside corner is one full-cell piece, not two wall segments
         # meeting. Calling place_wall() for both exposed sides put two wall

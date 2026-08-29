@@ -186,6 +186,28 @@ caption says which stop it is against -- because a control at its stop is
 otherwise indistinguishable from a dead one, and this project has misread that
 in the game itself more than once.
 
+**What it colours by is a question about the data, not a preference.** East
+Tradebourne is 709 houses out of 991, so colouring by kind leaves 72% of the
+town one colour and says almost nothing; storeys run 169/575/247 across one,
+two and three and vary street by street. Storeys is therefore the default and
+kind is offered beside it -- on a small town kind is the interesting axis, and
+seeing that a quarter is all one kind *is* the finding. The first colour table
+had six entries against the nine kinds the layouts use, so `shop`, `guildhall`,
+`barracks` and `stable` fell through to the house grey: an absent distinction
+that looked like a present one.
+
+Pointing at a building names it -- `Residence -- house -- 2 storeys -- 9.6 x
+7.5 tiles -- at (529.7, 284.6)`. The faces carry the index of the building they
+belong to and only the buildings with a face in shot are sent, so naming a
+dozen visible buildings does not cost the payload of nine hundred.
+
+**Clicking the overhead map moves the camera there.** That is not an invented
+interaction: TaleSpire has the same gesture, and the button is the finding --
+a double RIGHT click on the board centres the camera on the point clicked
+(measured, the frame moves 39.06 against a 0.42 noise floor), while a double
+LEFT click at the same pixel does nothing at all. The map offers the game's own
+gesture on a view where you can see where you are sending it.
+
 It is a **prediction of the framing**, not a render of the board. Buildings are
 boxes at `floors x 2.0` tiles, the shading is a fixed lamp, and the painter's
 sort cannot resolve geometry that interleaves. What it is accurate about is

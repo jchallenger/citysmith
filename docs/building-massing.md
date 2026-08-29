@@ -311,11 +311,18 @@ to accept it, to buy a pack, or to vary something that is not material.
   move available — but it needs per-cell storey counts, and the shell, upper
   floors and roof all read one number per building today (`storeys_of`). That
   is a real refactor, and on 7% of buildings.
-- **Storeys inside the walls.** The craft block is 15 of 21 at three storeys
-  and has no single-storey building at all. A real street has a low workshop
-  and an outbuilding. `storeys_for` cannot see frontage, because it runs in the
-  importer and frontage needs the raster — so either the decision moves to
-  build time or the importer gets a cheaper proxy.
+- **Storeys inside the walls. BUILT 2026-08-29** — the decision moved to build
+  time, not the importer. `build.storeys_by_frontage` is applied inside
+  `storeys_of`, beside the utility cap and for the same reason: three passes
+  read it and a roof that disagrees with the walls floats. What the work turned
+  on was a measurement rather than a design: **`street_class` is only set for
+  main and cart roads**, and a back lane is paved with an *empty* class, so
+  ranking frontage on the class alone found 10 lane-fronted buildings on East
+  Tradebourne where ranking on class *and surface* finds 463. It is a weighted
+  deal rather than a subtraction, because the complaint here was variety and
+  not height. After: main 2.73, cart 2.33, lane 1.52, open 1.35, and the town's
+  single-storey buildings go 137 → 399 with lane split 255/175/33 across one,
+  two and three storeys.
 - **Yards**, still, and waiting on nothing now that fencing has landed on
   `main`: surface the clearance ring, bound it with `yard_fence`, and cluster
   the clutter by trade (§4 of the first pass).

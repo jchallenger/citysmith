@@ -16,12 +16,16 @@ This file is the internal engineering notes. User-facing docs:
 `docs/great-buildings.md` (markets, warehouses, churches and the halls --
   designed, not built),
 `docs/fencing.md` (field walls, and why they are not on the grid),
+`docs/roofscape.md` (roofing, chimney placement and rooftop terraces --
+  measured and designed, none of it built),
 `docs/camera-model.md` (the builder camera, measured, and the moves that
   drive it),
 `tasks.json` (what is designed, what is built, and `citysmith tasks --check`),
 `docs/board-strategy.md` (interior vs exterior boards, and moving a party
   between them -- what the community recommends, and what we do instead),
 `docs/branching.md` (worktrees, and the policy that closes them),
+`docs/regeneration.md` (the seven towns, what each measures, and the road
+  network a park polygon was erasing),
 `.claude/skills/citysmith/SKILL.md` (agent driving instructions),
 `.claude/skills/talespire-boards/SKILL.md` (campaigns, boards, naming).
 

@@ -1272,7 +1272,52 @@ def _yard_forms(tm, yards) -> str:
     return ", ".join(f"{k} {v}" for k, v in forms.most_common())
 
 
-def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
+def _gables_built(builder, tm, seed: int) -> tuple[int, int]:
+    """``(wings that should be gabled, those with no hip corner in them)``.
+
+    **Read off the artifact, not off the deal.** A hipped wing lays a roof
+    *corner* piece at each of its ends and a gabled one lays none, so the
+    question "did this build actually gable" is answered by looking for corners
+    inside the wings the deal picked out. Counting the deal instead would
+    report the feature as built because we asked for it, which is the
+    plan-versus-artifact trap this module exists to close -- and which it has
+    already closed seven times for other checks.
+    """
+    from .build import (SIDE_OFFSETS, _wing_gable, cell_of, footprints,
+                        roof_set, roof_wings)
+    from .quarters import quarter_map
+
+    quarters = quarter_map(tm)
+    if not quarters:
+        return (0, 0)
+
+    corner_ids = set()
+    for tier in ("civic", "trade", "common", "utility"):
+        pieces = roof_set(builder.palette, tier)
+        for piece in (pieces[1], pieces[2]):
+            if piece is not None:
+                corner_ids.add(piece.id)
+    lookup = builder.palette.catalog.by_id
+    corner_cells = set()
+    for p in builder.placements:
+        if p.asset_id in corner_ids:
+            a = lookup(p.asset_id)
+            if a is not None:
+                corner_cells.add(cell_of(p, a))
+
+    want = clean = 0
+    for bid, cells in footprints(tm).items():
+        for wing in roof_wings(cells):
+            if _wing_gable(wing, quarters, seed) == "hip":
+                continue
+            want += 1
+            if not (wing & corner_cells):
+                clean += 1
+    return (want, clean)
+
+
+def feature_report(builder, tm, layout=None, seed: int = 0
+                   ) -> list[tuple[str, str, str]]:
     """What each designed feature had available, and what it actually built.
 
     **This check exists because a feature was built, shipped, reviewed and
@@ -1304,6 +1349,58 @@ def feature_report(builder, tm, layout=None) -> list[tuple[str, str, str]]:
             if asset is not None:
                 ids.add(asset.id)
         return len(ids & used)
+
+    # -- gabled ridge ends ---------------------------------------------------
+    # **Cropping a town destroys its quarters, and the gable is keyed on
+    # them.** `quarter_map` measures clustering before it fires and returns
+    # None below a lift of 1.2, which is the correct answer on a small map --
+    # so a 44x40 crop of East Tradebourne has 14 buildings, a lift of 1.04, no
+    # quarters, and every ridge hipped. That crop was pasted and read as "the
+    # gable did not fire" when the truth was that the region could not contain
+    # it. Measured: the same town needs a **160x160** crop, 193 buildings, for
+    # its quarters to survive. Exactly the failure this whole function exists
+    # for, arriving on a feature added after it was written.
+    from .quarters import quarter_map
+    from .build import gable_end_for
+    quarters = quarter_map(tm)
+    if quarters:
+        dealt = {gable_end_for(q, seed) for q in sorted(set(quarters.values()))}
+        gabled = dealt - {"hip"}
+        if not gabled:
+            out.append(("pass", "gabled ends",
+                        "none; every quarter here dealt a hipped end at this "
+                        "seed, which is the deal working rather than a miss"))
+        else:
+            want, clean = _gables_built(builder, tm, seed)
+            # **A PRESENCE check, not a per-wing audit.** This function's own
+            # contract is "did this build contain the thing you think you are
+            # looking at", and `check_placements` is where correctness lives.
+            # The distinction is not pedantry here: `_lay_roofs` roofs
+            # *blocks* -- connected cells sharing a storey count, which a
+            # terrace makes span two buildings -- while this counts per
+            # building footprint, so a straggler or two is the two definitions
+            # disagreeing rather than a defect. Failing on that would be a
+            # check that cries wolf on every town with a terrace in it.
+            if want and clean:
+                stragglers = ("" if clean == want else
+                              f"; {want - clean} of them still carry a hip "
+                              f"corner, which is a terrace roofed as one block")
+                out.append(("pass", "gabled ends",
+                            f"{clean} of {want} wing(s) gabled, dealing "
+                            f"{', '.join(sorted(gabled))}{stragglers}"))
+            elif want:
+                out.append(("fail", "gabled ends",
+                            f"{want} wing(s) should be gabled and every one of "
+                            f"them still carries a hip corner"))
+            else:
+                out.append(("pass", "gabled ends",
+                            f"none; the quarters here deal "
+                            f"{', '.join(sorted(gabled))} but no wing is big "
+                            f"enough to have a ridge to end"))
+    else:
+        out.append(("pass", "gabled ends",
+                    "none here; no quarters to key on, so every ridge is "
+                    "hipped -- a crop rarely clusters enough to have any"))
 
     # -- field walls ---------------------------------------------------------
     runs = len(getattr(tm, "fences", ()) or ())

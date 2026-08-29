@@ -233,9 +233,154 @@ Two ways forward, and they are genuinely different designs:
 finding. It filtered to `(1.0, 1.0)` footprints — so the tool built to answer
 "which quarter turn closes a hip", after this project got the hip rotations
 wrong once and wrote them up, was blind to the entire double-course family.
-It takes `--footprint 1x1|1x2|2x2|wide|all` now. Its board does not frame yet
-at the wide scale, so **the double-course rotations remain unmeasured** and
-nothing should be built on them until they are.
+It takes `--footprint 1x1|1x2|2x2|wide|all` now, and `--band matrix|runs|both`,
+because both bands on one board is 46 cells deep and does not frame.
+
+**Its ground sheet was also computed by hand and was too small**, which is a
+defect in its own right and not only a framing nuisance: `depth` was
+`len(ROTS) * ROW_PITCH + 12` while Band B ran to `4 * (RUN + 2)` past the
+labels, so at the 1x1 scale the sheet stopped at z=32 with roof pieces
+standing over bare void out to z=46. The extent is read off the placements now
+(`placed_bounds`), so a band that grows cannot outrun its own ground again.
+
+
+### 3.1a The double-course rotation, MEASURED
+
+`gable_probe.py --scale 2` sweeps the four quarter-step offsets, building a
+gabled double-course roof at each. Board: `PROBE gable double-course`.
+
+**Two of the four tile and two are a rank of fins**, which is the sweep working
+as designed. Which two is settled analytically rather than by counting label
+bars off a screenshot — and that matters, because reading the bars off the plan
+shot gave `+12, +18` and that is **wrong**:
+
+| offset | fall n | fall s | footprint | result |
+|---|---|---|---|---|
+| +0 | rot 6 | rot 18 | 2x1 | wrong axis — fins |
+| **+6** | **rot 12** | **rot 0** | **1x2** | **tiles** |
+| +12 | rot 18 | rot 6 | 2x1 | wrong axis — fins |
+| +18 | rot 0 | rot 12 | 1x2 | tiles |
+
+`Village Roof Side 02` and `Village Roof Side End 01` are both authored
+1 x 2 x 2, so only the two offsets that present a **1x2** footprint can sit on
+the pair of cells a double-course piece spans. That is +6 and +18, exactly two,
+exactly matching the board.
+
+**+6 is the answer, and the kit says so itself.** `build.ROOF_ROT_OFFSET`
+records Tavern's single-course edge offset as **+6**, giving fall n → rot 12
+and fall s → rot 0 — identical to the double-course +6 row above. **The two
+scales share one convention.** +18 is its 180-degree inversion: it tiles, but
+every slope falls the wrong way.
+
+**Worth recording as a caution: the inversion was NOT distinguishable by eye**
+from any of the seven views taken. Both +6 and +18 read as closed, correct
+roofs from overhead and from all four faces. Had the analytic footprint check
+not been run, a coin-flip between them would have looked fully evidenced. This
+is "a probe read from one angle is a probe that lies" with the twist that
+*seven* angles did not help — the discriminator was in the collider, not the
+picture.
+
+**What the gable actually looks like, and it is the payoff:** a proper ridge
+running the full length with tiled slopes falling both ways and a **closed
+triangular gable end with timber framing**. Unmistakably a barn or a hall, and
+unmistakably not a hip.
+
+**The catch, and it is a real constraint: the double-course family only tiles
+a 4-CELL SPAN.** `_roof_rings` steps one cell per course and a piece covers
+two, so the scales only agree where the span is exactly one piece each side.
+Enumerated across spans:
+
+| span | rings across | result |
+|---|---|---|
+| **4** | 0,1,1,0 | **32/32 cells covered, no gap, no overlap** |
+| 5 | 0,1,2,1,0 | ridge cell bare |
+| 6 | 0,1,2,2,1,0 | two cells bare |
+| 8 | 0,1,2,2,2,2,1,0 | two cells bare |
+
+So a 20 ft span gabled cleanly and **nothing wider did**.
+
+**CLOSED. `build.roof_courses` is the flood that steps at the piece's own
+scale**, and every span from 3 to 13 now tiles at both scales with zero gaps
+and zero overlap — asserted rather than asserted-about, in
+`tests/test_roof_scale.py`. The arithmetic is four lines:
+
+    W        span across the ridge
+    full     complete courses per side = (W // 2) // cells_per_course
+    covered  cells each side's courses reach = full * cells_per_course
+    middle   W - 2 * covered, the ridge band
+
+`roof_course_cells` reads the scale off the piece's rise (1.0 -> 1 cell,
+2.0 -> 2), so a caller never states it; `roof_course_anchors` returns only the
+**outermost** cell of each band, which is what stops two pieces landing on one
+pair at the ridge.
+
+It is a **new function beside `_roof_rings`, not a flag on it.** That one
+floods from a block's whole boundary and is what every hip on every board is
+built from; a gable is a different question asked of the same rectangle, and
+`roof_wings` has already cut the plan into rectangles before either is called.
+Nine existing callers are untouched.
+
+**Verified on the board at a real warehouse footprint** — 11 x 11, two 2.0
+courses of wall for a 20 ft eaves, gabled both ends: `PROBE gable warehouse`.
+In plan the roof is one continuous tiled surface with no gap anywhere; from
+the side it is a proper barn, with a ridge running the full length, slopes
+falling both ways and closed gable ends.
+
+**The cost, and it is visible in that plan shot: the remainder is capped
+FLAT.** A span of 4k tiles with no cap at all; anything else leaves 1 to 3
+cells of flat ridge deck — on the 11-cell warehouse, three cells, which reads
+as a small flat strip down the middle of the roof. That is a real roof form
+and it is not what a tithe barn has. Finishing the remainder with a
+*single-course* pair instead, mixing the two scales at the ridge only, would
+leave at most one flat cell; it is `roof-ridge-mixed-scale` in `tasks.json`.
+
+**The roof was one unit too big to the north and east, and a copy-out off the
+board is what said so.** Decoded against the probe's own output, the ridge cap
+ran to x=15 on a building whose walls stop at x=14 — because the cap was
+`Tavern Roof flat 02`, which is 2 x 0.5 x **2**, laid one per cell with
+`place_tile`. A piece bigger than a cell puts its min corner on the cell and
+reaches past it. The kit ships `flat 01` at 1 x 0.5 x 1 for exactly this.
+
+Three things worth keeping about it:
+
+- **It is CLAUDE.md's oldest asset rule** — "`place_tile` needs an asset that
+  fills the cell" — arriving through a piece table I wrote by hand. I reached
+  for "the 2-wide partner" because the *courses* were two cells deep, and the
+  cap is laid per **cell**, not per course. Those are different axes and the
+  name does not distinguish them.
+- **The town was never affected.** `palette`'s `roof` role resolves to
+  `flat 01` for every tier at every seed checked — the probe bypasses
+  `palette.CELL_ROLES`, which is the guard that would have caught it.
+- **It is guarded now**, by
+  `test_every_roof_piece_laid_per_cell_is_exactly_one_cell` over four tiers and
+  four seeds. That guard exists for `gable-ends`, not for today: wiring the
+  gable into `_lay_roofs` means writing a double-course piece table for real,
+  and this is the exact mistake waiting there.
+
+**One more thing the board found that the arithmetic could not.** The first
+warehouse was built without the gable *infill*, and it was a barn you could
+see straight through: `Village Roof Side End` closes the roof's own edge and
+**nothing closes the wall below it**, so the gable was an open triangle with
+the far slope's underside visible through it. §3.1's own table names
+`Village Roof Side Wall` as "the panel *under* the gable" and the wide piece
+set left it out anyway. One panel per course, stepping up toward the ridge, is
+what makes the triangle a triangle.
+
+Three placement bugs were found and fixed getting here, all mine and all worth
+keeping because each is the same shape of error:
+
+- The flood **walked into the gable columns**, so an end cell took a depth from
+  the flood instead of inheriting one, and the whole gable column sat a course
+  high with no cell for the end piece.
+- The eaves frontier counted a neighbouring **end** cell as an edge, dropping
+  the two columns beside each gable to ring 0 — a step in the ridge a cell
+  short of both ends.
+- The fall test measured **all four sides**, so a gable-end cell saw open board
+  along the ridge axis, read as a corner and was skipped — which is exactly the
+  cell the end piece exists for. The first run left every gable open and read
+  as "the end piece does not close", when nothing had asked it to.
+
+
 
 ### 3.2 The tall wall exists and is unreachable by construction
 
@@ -384,6 +529,93 @@ each cell edge — a jumbled dark mass, sitting directly under the roof the prob
 existed to judge. `place_wall` exists precisely to inset the thin axis and read
 which axis is thin off the collider. A probe that hand-rolls what the builder
 already does correctly is testing its own arithmetic.
+
+
+### 3.4c The crow-stepped gable, probed
+
+**`Tavern` is the only kit in the library with a roof `end` piece.** Rural,
+Castle Fortified, Abandoned Village, Moorgoth and Marble Palace ship none, at
+either scale. So the measured double-course gable is available to the house
+fabric and to nothing else — and the two great buildings that most want a
+gable, the barn in boarding and the temple in dressed stone, cannot have one
+that way.
+
+A crow-stepped gable needs no end piece: the gable wall carries on past the
+roof in steps that follow its pitch. `tools/crowstep_probe.py` sweeps four end
+treatments in the **civic** fabric (Castle Fortified walls, Abandoned Village
+slate — what `roof_set` actually resolves for that tier) on `PROBE crow-step`.
+
+**The piece is `castle wall 1x1 half`** — 1 x **1.0** x 0.5, coursed pale
+stone, exactly one 45-degree step. Settled by render before any slab existed,
+and so was its rival: `castle merlon 1x1 stair L/R` is 1x1x1 and the name says
+stair. It **is** one — a wooden staircase for climbing. CLAUDE.md already
+records that this kit's entire merlon group is boarded timber ("the circuit was
+crowned with wooden crates for eleven revisions"), and the render confirmed it
+in a second. Third time this session the shortlist has paid for itself.
+
+**It works.** In profile the steps read as a deliberate masonry staircase —
+pale stone against grey slate, unmistakably an architectural decision rather
+than a jagged edge. A stone building gets an identity the flush gable does not
+give it, and it costs one piece the kit already ships.
+
+Two things the board corrected:
+
+- **A crow-stepped end is not roofed, and the first run got that backwards.**
+  It laid the roof over the end column and stood the parapet on its outer face,
+  reasoning that a parapet is a wall beside a roofed cell. On the board that is
+  a row of **detached lumps with slate between them**: the parapet stands one
+  course proud of the roof at each position, and the roof one position inward
+  is a course higher again, so it rises between every pair of steps and the
+  staircase never reads as one wall. A crow-step is the building's *end* — the
+  roof stops against it. The end column carries the parapet and no roof.
+- **The coping is worse than none.** `Top 1x1 flare out` is a real leaded
+  coping and at this scale it reads as a row of little hats perched on the
+  steps, each visibly detached. `crow-bare` is cleaner. If a coping is wanted
+  it needs a piece that sits flush, not a roof-top border course.
+
+**The square-on end elevation, taken 2026-08-29, and it confirms the form.**
+`PROBE gable by district`. At native pixels, square-on to the west wall, the
+crow-step is **continuous coursed masonry** climbing in clean one-tile steps to
+a flat two-cell apex, standing proud of the slate behind it. The "detached
+lumps" of the first run are entirely gone. Pale stone against grey slate reads
+at a glance, and the three treatments — hip, flush, crow — are distinguishable
+instantly, side by side, which is what makes dealing them by district worth
+doing at all.
+
+**Why every earlier reading was oblique, and it is a defect in the review
+recipe rather than in anyone's patience.** `review.ps1 360` orbits
+`-DX 320` between shots, and CLAUDE.md already records that **320 px is about
+60 degrees, not a quarter turn** — it says so explicitly, in the camera
+section, and calls inferring a game constant from our own script "the trap this
+whole file exists to warn about". So the four shots named `n`, `e`, `s`, `w`
+are 60 degrees apart from an arbitrary start: they are four obliques, and they
+can only land square-on to a wall by luck. Every crow-step reading before this
+one came off them.
+
+The elevation was taken by aiming instead: read the bearing off the compass
+(`ts.ps1 camerastate`), turn 180 degrees at the measured 0.1876 deg/px, verify
+on the compass again, then drop the pitch. **The open-loop turn landed clean**
+— W at the top of the rose before, E after — which is worth recording beside
+`camera-drive-open-loop`, the task about a driven move landing 14 degrees off.
+A 180 on the spot is evidently not the case that fails.
+
+`review-cardinal-faces` in `tasks.json` covers making the recipe's four faces
+actually cardinal.
+
+**Dealt by district.** `build.GABLE_ENDS` and `build.gable_end_for` deal a
+treatment per **quarter**, not per building, stably from a seed — the same
+crc32 deal `roof_suffix_for` uses, for the same reason (a town must rebuild to
+the same bytes; `boards.digest_of` depends on it). Per quarter rather than per
+building is the argument `QUARTER_SURFACE` already makes about paving: a
+district that ends its ridges one way reads as a district from across the
+board, and a roofline dealt per building reads as noise. `ROOF_MIX` varies the
+*material* per building; this varies the *silhouette* per quarter, and the two
+axes stay separate.
+
+`civic` is weighted 70% to `crow` — not taste: crow-stepping is a masonry form
+and civic is the dressed-stone tier. `outskirts` is all hip, because a
+crow-stepped gable is a town building's gesture and a cottage in the fields
+does not make it.
 
 
 ### 3.5 Aisle posts and arcades
