@@ -42,7 +42,9 @@ param(
   [int]$ShotEvery = 1,
   [string[]]$Slab,
   [int]$X = 700, [int]$Y = 600,
-  [int]$ZoomOut = 6
+  [int]$ZoomOut = 6,
+  [string]$Board,
+  [string]$Source
 )
 
 $ts = Join-Path $PSScriptRoot "ts.ps1"
@@ -277,6 +279,25 @@ switch ($Recipe) {
       "$i/$($chunks.Count) : $(Split-Path $c -Leaf)"
     }
     TS orbit -X $cx -Y $cy -DX 0 -DY (-$PITCH_DOWN)
+
+    # **Name it and index it here, while anything still knows what it is.**
+    # `newboard` leaves `Unknown Realm N`, and once the run ends nothing can
+    # recover what went on: TaleSpire exposes no contents, no size and no date,
+    # so a board holding a finished town and one holding last week's throwaway
+    # are the same row in the campaign list. That is the whole reason a
+    # twenty-board prune has to be done by eye.
+    if ($Board) {
+      TS rename -Text $Board
+      Start-Sleep -Milliseconds 800
+      # Windows PowerShell 5.1: no ternary, no null-coalescing.
+      $src = $Source
+      if (-not $src) { $src = $Stem }
+      & python -m citysmith boards note --board $Board --holds town `
+          --source $src --stem $Stem --chunks $chunks.Count --keep |
+        Write-Output
+    } else {
+      "NOT INDEXED -- pass -Board to name this board and record what is on it."
+    }
     "tiled $i chunk(s) of $Stem at $cx,$cy -> out\flyby\$Name-NN-{hold,down}.jpg"
   }
 }

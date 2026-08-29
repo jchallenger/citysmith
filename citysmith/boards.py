@@ -43,7 +43,11 @@ import os
 import pathlib
 from dataclasses import asdict, dataclass, field
 
-REGISTRY_VERSION = 1
+#: Bumped to 2 when the index arrived beside the scene records. A version 1
+#: file loads with an empty index rather than being refused: it is a true
+#: record of the scenes, and the thing it is missing is the thing that could
+#: not be recovered from anywhere else either.
+REGISTRY_VERSION = 2
 
 NEW = "NEW"
 READY = "READY"
@@ -71,14 +75,85 @@ class BoardRecord:
     superseded: list[str] = field(default_factory=list)
 
 
+#: What a board can hold. `other` is not a failure -- it is the honest answer
+#: for a board somebody made by hand, and it still buys a name, a date and a
+#: note, which is more than the campaign list gives.
+HOLDS = ("town", "scene", "probe", "other")
+
+#: Which of those are disposable unless told otherwise. A probe board is made
+#: to be looked at once; a town or a scene is where something happened.
+DISPOSABLE_BY_DEFAULT = ("probe",)
+
+
+@dataclass
+class BoardEntry:
+    """One board in the campaign, and what was put on it.
+
+    **TaleSpire tells you a name and nothing else.** No asset count, no size,
+    no date, no contents -- the campaign list is a column of strings, and two
+    boards holding a finished town and last week's throwaway look identical in
+    it. That is why deleting is dangerous and why `prunable` can only ever
+    recommend the boards a *scene* superseded: everything else was unrecorded,
+    so the honest answer was "look at it yourself".
+
+    So the index is written **at paste time**, because that is the only moment
+    anything knows what is going onto the board. Nothing can be recovered
+    afterwards. Same argument `BoardRecord` already makes for scenes, pointed
+    at every board rather than at the ones a scene owns.
+
+    What it deliberately does NOT do is claim to know the board's *current*
+    state. An entry is a record of a paste, and a person can paste over it,
+    rename it or delete it with no way for anything here to notice.
+    `reconcile` against a campaign listing is what turns that from a silent
+    lie into a reported difference.
+    """
+
+    board: str
+    holds: str = "other"
+    #: What it was built from: a layout path, a scene id, a slab, a sentence.
+    source: str = ""
+    #: The folder it was filed under, as of `recorded`. "" is loose.
+    folder: str = ""
+    #: The build stem, where there was one -- what the slab files are called.
+    stem: str = ""
+    #: How many slabs went on, and how many assets they held. Zero means "not
+    #: recorded", which is different from "empty" and is why neither is None.
+    chunks: int = 0
+    assets: int = 0
+    #: Digest of the files pasted, where the caller had them. Lets a rebuild
+    #: notice that the board and the files have parted company, the same way a
+    #: scene does.
+    digest: str = ""
+    recorded: str = ""
+    #: Safe to delete without looking. Set from `holds` unless overridden --
+    #: and it is a claim by whoever recorded it, not a deduction.
+    disposable: bool = False
+    note: str = ""
+
+    @property
+    def summary(self) -> str:
+        bits = [self.holds]
+        if self.source:
+            bits.append(self.source)
+        if self.chunks:
+            bits.append(f"{self.chunks} slab(s)")
+        if self.assets:
+            bits.append(f"{self.assets:,} assets")
+        return ", ".join(bits)
+
+
 class Registry:
     """The scene -> board record, loaded from and saved to one JSON file."""
 
     def __init__(self, path: pathlib.Path, records: dict[str, BoardRecord],
-                 campaign: str = ""):
+                 campaign: str = "", index: dict[str, BoardEntry] | None = None):
         self.path = path
         self.records = records
         self.campaign = campaign
+        #: Board name -> what it holds. Keyed on the NAME, because that is the
+        #: only handle the campaign list gives and the only thing a person can
+        #: match a row against.
+        self.index: dict[str, BoardEntry] = index or {}
 
     # -- io -------------------------------------------------------------------
 
@@ -88,10 +163,13 @@ class Registry:
         if not p.exists():
             return cls(p, {})
         data = json.loads(p.read_text(encoding="utf-8"))
-        if data.get("registry_version") != REGISTRY_VERSION:
+        version = data.get("registry_version")
+        # A version 1 file predates the index and is otherwise correct, so it
+        # is read rather than refused -- refusing it would throw away the scene
+        # records, which cannot be regenerated from anything.
+        if version not in (1, REGISTRY_VERSION):
             raise ValueError(
-                f"{p}: registry_version {data.get('registry_version')}, "
-                f"expected {REGISTRY_VERSION}"
+                f"{p}: registry_version {version}, expected {REGISTRY_VERSION}"
             )
         records = {}
         for scene_id, raw in (data.get("boards") or {}).items():
@@ -99,7 +177,12 @@ class Registry:
             raw["centroid"] = tuple(raw.get("centroid", (0.0, 0.0)))
             raw.setdefault("scene_id", scene_id)
             records[scene_id] = BoardRecord(**raw)
-        return cls(p, records, data.get("campaign", ""))
+        index = {}
+        for name, raw in (data.get("index") or {}).items():
+            raw = dict(raw)
+            raw.setdefault("board", name)
+            index[name] = BoardEntry(**raw)
+        return cls(p, records, data.get("campaign", ""), index)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -110,6 +193,7 @@ class Registry:
                 sid: {**asdict(r), "centroid": list(r.centroid)}
                 for sid, r in sorted(self.records.items())
             },
+            "index": {name: asdict(e) for name, e in sorted(self.index.items())},
         }
         self.path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
 
@@ -117,6 +201,57 @@ class Registry:
 
     def get(self, scene_id: str) -> BoardRecord | None:
         return self.records.get(scene_id)
+
+    # -- the index ------------------------------------------------------------
+
+    def note(self, board: str, *, holds: str = "other", source: str = "",
+             folder: str = "", stem: str = "", chunks: int = 0, assets: int = 0,
+             digest: str = "", note: str = "",
+             disposable: bool | None = None) -> BoardEntry:
+        """Record what a board holds, replacing any earlier entry for it.
+
+        Upserts rather than appends, because a board is one thing at a time:
+        pasting a second town onto a board does not make it two boards, and an
+        index that grew a row per paste would be a log pretending to be an
+        index.
+        """
+        if holds not in HOLDS:
+            raise ValueError(f"holds must be one of {HOLDS}, got {holds!r}")
+        was = self.index.get(board)
+        entry = BoardEntry(
+            board=board, holds=holds, source=source, folder=folder, stem=stem,
+            chunks=chunks, assets=assets, digest=digest,
+            recorded=_now(),
+            disposable=(holds in DISPOSABLE_BY_DEFAULT
+                        if disposable is None else disposable),
+            note=note or (was.note if was else ""),
+        )
+        self.index[board] = entry
+        return entry
+
+    def drop(self, board: str) -> bool:
+        """Forget a board. Does not touch the board itself -- nothing here can."""
+        return self.index.pop(board, None) is not None
+
+    def rename_board(self, old: str, new: str) -> BoardEntry | None:
+        """Follow a rename.
+
+        The index is keyed on the name and TaleSpire has no board id, so a
+        rename is the one edit that silently orphans an entry. Every other
+        difference between the index and the list is reported by `reconcile`;
+        this one has to be told.
+        """
+        entry = self.index.pop(old, None)
+        if entry is None:
+            return None
+        for record in self.records.values():
+            if record.board == old:
+                record.board = new
+                if old not in record.superseded:
+                    record.superseded.append(old)
+        entry.board = new
+        self.index[new] = entry
+        return entry
 
     def status(self, scene, digest: str) -> tuple[str, BoardRecord | None]:
         """What to do about this scene: see the four states in the module doc."""
@@ -469,6 +604,70 @@ def _claimed(registry: "Registry") -> set[str]:
         out.add(record.board)
         out.update(record.superseded)
     return out
+
+
+@dataclass
+class Reconciliation:
+    """The index held against a campaign listing, three ways.
+
+    Every one of the three is a real state and none of them is an error on its
+    own -- which is the point. The index is a record of pastes and the listing
+    is a transcription of a screen; they part company for ordinary reasons, and
+    saying *how* is more use than a pass/fail.
+    """
+
+    #: Indexed, and still in the list. The boring case, and most of them.
+    matched: list[BoardEntry]
+    #: Indexed, and not in the list any more: deleted or renamed by hand.
+    missing: list[BoardEntry]
+    #: In the list, and nothing recorded about it. This is the bucket that
+    #: makes pruning dangerous, so it is the one worth shrinking.
+    unrecorded: list[SeenBoard]
+
+    @property
+    def coverage(self) -> float:
+        seen = len(self.matched) + len(self.unrecorded)
+        return len(self.matched) / seen if seen else 0.0
+
+
+def reconcile(registry: "Registry", seen: list[SeenBoard]) -> Reconciliation:
+    """Hold the index against what the campaign list actually shows.
+
+    **The index cannot notice anything on its own.** A person can paste over a
+    board, rename it or delete it and nothing here is told; the only handle is
+    the name, and the only place the names live is a panel no API can read. So
+    the listing -- transcribed off a `ts.ps1 boards` screenshot -- is the
+    ground truth, and this says where the record disagrees with it rather than
+    trusting either one.
+    """
+    names = {b.name for b in seen}
+    matched = [e for name, e in sorted(registry.index.items()) if name in names]
+    missing = [e for name, e in sorted(registry.index.items())
+               if name not in names]
+    unrecorded = [b for b in seen if b.name not in registry.index]
+    return Reconciliation(matched, missing, unrecorded)
+
+
+def disposable(registry: "Registry", seen: list[str] | None = None) -> list[BoardEntry]:
+    """Boards the index itself records as safe to delete.
+
+    **The fourth bucket, and the only one that is a recommendation.** The other
+    three exist because nothing was written down: `unclaimed` is "somebody
+    named it, so ask them", `unnamed` is "switch to it and look", and
+    `prunable` can only see the boards a scene *superseded*. All three are the
+    absence of a record dressed up as advice.
+
+    This one is a record. Somebody pasted a probe, said so at the time, and the
+    entry has carried that ever since -- so it can be acted on without opening
+    the board. A board claimed by a live scene is never listed, whatever its
+    entry says, because the scene registry is the older claim.
+    """
+    claimed = _claimed(registry)
+    out = [e for e in registry.index.values()
+           if e.disposable and e.board not in claimed]
+    if seen is not None:
+        out = [e for e in out if e.board in set(seen)]
+    return sorted(out, key=lambda e: e.board)
 
 
 def keepers(registry: "Registry") -> list[BoardRecord]:

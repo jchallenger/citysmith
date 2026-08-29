@@ -92,8 +92,14 @@ Add-Type -AssemblyName System.Windows.Forms
 #: Key names to virtual-key codes, for the chord sender.
 $VK = @{
   ctrl=0x11; shift=0x10; alt=0x12; esc=0x1B; escape=0x1B; space=0x20;
-  enter=0x0D; tab=0x09; delete=0x2E; f1=0x70; f2=0x71;
-  up=0x26; down=0x28; left=0x25; right=0x27
+  enter=0x0D; tab=0x09; delete=0x2E;
+  # The whole function row, not just the two that happened to be needed. A
+  # missing name here does not fall back to anything sensible -- `Send-Chord`
+  # only special-cases single characters, so `-Keys f8` threw "unknown key".
+  f1=0x70; f2=0x71; f3=0x72; f4=0x73; f5=0x74; f6=0x75;
+  f7=0x76; f8=0x77; f9=0x78; f10=0x79; f11=0x7A; f12=0x7B;
+  up=0x26; down=0x28; left=0x25; right=0x27;
+  home=0x24; end=0x23; insert=0x2D; pgup=0x21; pgdn=0x22
 }
 # 120 ms, not 150, and not the 40 ms that the measurement allows. TaleSpire
 # runs under a 25 fps cap here, so one frame is ~41 ms, and a key has to be

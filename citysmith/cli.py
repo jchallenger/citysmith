@@ -572,6 +572,13 @@ def _scene_dir(cfg, ref: str) -> pathlib.Path:
     return pathlib.Path(cfg.get("out_dir", "out/scenes")) / ref
 
 
+#: Mirrors `boards.HOLDS`. Repeated rather than imported because `cli` builds
+#: its parser at import time and every other module here is imported inside the
+#: command that needs it -- `test_cli_holds_matches_the_registry` is what keeps
+#: the two honest.
+_HOLDS = ("town", "scene", "probe", "other")
+
+
 def cmd_boards(args) -> int:
     """The scene -> board record. Read by tools/scene.ps1 before every paste.
 
@@ -598,20 +605,120 @@ def cmd_boards(args) -> int:
                 print(f"    superseded: {old}")
         return 0
 
-    if args.action == "prune":
-        seen = [n.strip() for n in (args.seen or "").splitlines() if n.strip()]
+    def _listing():
+        """The campaign listing, from --seen and --seen-file together.
+
+        Indentation carries the folder, so the raw lines go to `parse_seen`
+        with their leading whitespace intact -- stripping first was a bug
+        waiting to happen, since the parser's whole input is the indentation.
+        """
+        raw = [n for n in (args.seen or "").splitlines() if n.strip()]
         if args.seen_file:
-            seen += [n.strip() for n
-                     in pathlib.Path(args.seen_file).read_text(encoding="utf-8").splitlines()
-                     if n.strip()]
-        # A listing may record folders as `Folder/Name`; the checks below work
-        # on names, so keep both.
-        filed = boards.parse_seen(seen)
+            raw += [n for n in pathlib.Path(args.seen_file)
+                    .read_text(encoding="utf-8").splitlines() if n.strip()]
+        return boards.parse_seen(raw)
+
+    if args.action == "index":
+        filed = _listing()
+        if not registry.index:
+            print(f"No boards indexed in {registry.path}.\n")
+            print("The index is written at PASTE time, because that is the only "
+                  "moment anything knows what is going on a board -- TaleSpire "
+                  "exposes no contents, no size and no date afterwards. Record "
+                  "one with:\n")
+            print('  citysmith boards note --board "East Tradebourne" '
+                  '--holds town --source out/tradebourne-v2/layout.json')
+            if not filed:
+                return 0
+
+        if registry.index:
+            print(f"{len(registry.index)} board(s) indexed in {registry.path}:\n")
+            by_folder: dict[str, list] = {}
+            for entry in sorted(registry.index.values(), key=lambda e: e.board):
+                by_folder.setdefault(entry.folder, []).append(entry)
+            for folder in sorted(by_folder):
+                if folder:
+                    print(f"  {folder}:")
+                for entry in by_folder[folder]:
+                    lead = "    " if folder else "  "
+                    flag = "  [disposable]" if entry.disposable else ""
+                    print(f"{lead}{entry.board}{flag}")
+                    print(f"{lead}  {entry.summary}")
+                    if entry.recorded:
+                        print(f"{lead}  recorded {entry.recorded}")
+                    if entry.note:
+                        print(f"{lead}  {entry.note}")
+
+        if not filed:
+            print("\n(No campaign list given, so nothing here is checked "
+                  "against the game. Run `tools\\ts.ps1 boards`, transcribe the "
+                  "rows and pass them with --seen-file to find the boards "
+                  "nobody wrote down.)")
+            return 0
+
+        r = boards.reconcile(registry, filed)
+        print(f"\nAGAINST THE CAMPAIGN LIST -- {len(r.matched)} of "
+              f"{len(r.matched) + len(r.unrecorded)} board(s) on screen are "
+              f"indexed ({r.coverage:.0%}).")
+        if r.missing:
+            print(f"\nGONE -- {len(r.missing)} indexed board(s) are not in the "
+                  "list. Deleted or renamed by hand; nothing here is told "
+                  "either way. `boards rename` follows a rename, `boards drop` "
+                  "forgets a deletion:")
+            for entry in r.missing:
+                print(f"  {entry.board}  ({entry.summary})")
+        if r.unrecorded:
+            print(f"\nUNRECORDED -- {len(r.unrecorded)} board(s) in the list "
+                  "with nothing written down. This is the bucket that makes "
+                  "deleting dangerous: the list gives a name and nothing else, "
+                  "so a finished town and last week's throwaway read the same:")
+            for board in r.unrecorded:
+                where = f"  [{board.folder}]" if board.folder else ""
+                print(f"  {board.name}{where}")
+        return 1 if r.unrecorded else 0
+
+    if args.action == "note":
+        if not args.board:
+            raise SystemExit("error: boards note needs --board <name>")
+        disposable = None
+        if args.disposable:
+            disposable = True
+        if args.keep:
+            disposable = False
+        entry = registry.note(
+            args.board, holds=args.holds, source=args.source,
+            folder=args.folder, stem=args.stem, chunks=args.chunks,
+            assets=args.assets, note=args.note, disposable=disposable)
+        registry.save()
+        flag = " (disposable)" if entry.disposable else ""
+        print(f"indexed {entry.board!r}: {entry.summary}{flag}")
+        return 0
+
+    if args.action == "drop":
+        if not args.board:
+            raise SystemExit("error: boards drop needs --board <name>")
+        if registry.drop(args.board):
+            registry.save()
+            print(f"dropped {args.board!r} from the index; "
+                  "the board itself is untouched")
+            return 0
+        print(f"no index entry for {args.board!r}")
+        return 4
+
+    if args.action == "prune":
+        filed = _listing()
         seen = [b.name for b in filed]
         gone = boards.prunable(registry, seen)
         keep = boards.keepers(registry)
         other = boards.unclaimed(registry, seen)
         blank = boards.unnamed(registry, seen)
+        spare = boards.disposable(registry, seen or None)
+        indexed = {e.board for e in registry.index.values()}
+        # Anything the index already accounts for is not a mystery, so it does
+        # not belong in the two "go and look" buckets. Those exist because
+        # nothing was written down; this is what writing it down is worth.
+        other = [n for n in other if n not in indexed]
+        blank = [n for n in blank if n not in indexed]
         print(f"KEEP -- {len(keep)} board(s) a scene points at:")
         for record in keep:
             print(f"  {record.board}")
@@ -629,6 +736,13 @@ def cmd_boards(args) -> int:
                   "and look, then name the ones worth keeping:")
             for name in blank:
                 print(f"  {name}")
+        if spare:
+            print(f"\nDISPOSABLE -- {len(spare)} board(s) the index records as "
+                  "safe to delete. This is the only bucket here that is a "
+                  "record rather than the absence of one: somebody said so when "
+                  "they pasted it:")
+            for entry in spare:
+                print(f"  {entry.board}  ({entry.summary})")
         print(f"\nPRUNE -- {len(gone)} board(s) nothing points at:")
         for item in gone:
             print(f"  {item.describe()}")
@@ -665,10 +779,18 @@ def cmd_boards(args) -> int:
     if args.action == "rename":
         if not args.board:
             raise SystemExit("error: boards rename needs --board <new name>")
+        # A rename is the one edit that silently orphans an index entry, since
+        # the index is keyed on the name and TaleSpire has no board id. Follow
+        # it here, where the old name is still known.
+        was = registry.get(args.scene)
         record = registry.rename(args.scene, args.board)
         if record is None:
             print(f"no record of {args.scene}")
             return 4
+        if was is not None and was.board in registry.index:
+            registry.index[args.board] = registry.index.pop(was.board)
+            registry.index[args.board].board = args.board
+            registry.save()
         print(f"{record.scene_id} now points at {record.board!r}; "
               "the digest is untouched, so a stale board still reads STALE")
         return 0
@@ -691,6 +813,14 @@ def cmd_boards(args) -> int:
 
     if args.action == "record":
         record = registry.record(scene, digest, board=args.board or scene.board)
+        # A scene board is a board, so it goes in the index too -- otherwise
+        # `index --seen-file` reports every interior as unrecorded and the
+        # coverage number is a lie about the one thing that was tracked all
+        # along.
+        registry.note(record.board, holds="scene", source=record.scene_id,
+                      folder=args.folder or boards.PUBLISHED_FOLDER,
+                      digest=digest, disposable=False)
+        registry.save()
         print(f"recorded {record.scene_id} on board {record.board!r} "
               f"({record.visits} visit(s))")
         return 0
@@ -1079,14 +1209,17 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("boards", help="which board holds which scene")
     c.add_argument("action",
                    choices=["status", "record", "rename", "visit", "forget",
-                            "list", "prune"],
+                            "list", "prune", "index", "note", "drop"],
                    help="status: what to do about this scene (exit 0 READY, "
                         "3 STALE, 4 NEW, 5 MOVED). record: note that it has "
                         "been pasted. visit: count a return trip. forget: drop "
                         "the record for a board deleted by hand. rename: "
                         "point the record at a new board name without "
                         "claiming a fresh paste. prune: list the boards "
-                        "nothing points at, so a person can delete them.")
+                        "nothing points at, so a person can delete them. "
+                        "index: what every board holds, and what the campaign "
+                        "list shows that nothing has written down. note: "
+                        "record what a board holds. drop: forget a board.")
     c.add_argument("--seen", default="",
                    help="board names from the campaign list, one per line; "
                         "anything no scene claims is reported as prunable")
@@ -1095,7 +1228,28 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("scene", nargs="?", default="",
                    help="scene id, its directory, or a path to scene.json")
     c.add_argument("--board", default=None,
-                   help="with record, the board name actually used")
+                   help="with record, the board name actually used; with note "
+                        "and drop, the board to index or forget")
+    c.add_argument("--holds", default="other", choices=list(_HOLDS),
+                   help="with note, what is on the board (default: other)")
+    c.add_argument("--source", default="",
+                   help="with note, what it was built from -- a layout path, a "
+                        "scene id, a slab, a sentence")
+    c.add_argument("--folder", default="",
+                   help="with note, the campaign folder it is filed under")
+    c.add_argument("--stem", default="",
+                   help="with note, the build stem its slab files carry")
+    c.add_argument("--chunks", type=int, default=0,
+                   help="with note, how many slabs were pasted")
+    c.add_argument("--assets", type=int, default=0,
+                   help="with note, how many assets those slabs held")
+    c.add_argument("--note", default="",
+                   help="with note, anything worth remembering about it")
+    c.add_argument("--disposable", action="store_true",
+                   help="with note, mark the board safe to delete without "
+                        "looking. `probe` is disposable by default")
+    c.add_argument("--keep", action="store_true",
+                   help="with note, the opposite: never list it as disposable")
     c.add_argument("--config", default=None)
     c.set_defaults(func=cmd_boards)
 

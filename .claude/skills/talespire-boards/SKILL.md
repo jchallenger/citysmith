@@ -262,6 +262,64 @@ hunting for a row each time.
   dashed circle) that is **unidentified** -- it shows no tooltip on hover and
   has not been clicked.
 
+### Index
+
+**The campaign list is a column of names and nothing else.** No contents, no
+asset count, no size, no date. A board holding a finished town and one holding
+last week's throwaway are the same row, and that single fact is why deleting is
+dangerous, why `prune` has three buckets that are really just "go and look",
+and why a nineteen-board clean-up on 2026-08-27 had to be done off screenshots
+and memory.
+
+So write it down at the moment it is knowable:
+
+```bash
+citysmith boards note --board "East Tradebourne" --holds town \
+    --source out/tradebourne-v2/layout.json --stem et --chunks 114 --keep
+```
+
+`--holds` is `town`, `scene`, `probe` or `other`. **`other` is not a failure**
+-- it is the honest answer for a board somebody made by hand, and it still
+buys a name, a date and a note, which is more than the list gives. `probe` is
+marked disposable automatically; `--keep` and `--disposable` override either
+way, because it is a claim by whoever recorded it and not a deduction.
+
+**The index is written at PASTE time, and that is the whole design.** Nothing
+can be recovered afterwards, so both drivers do it themselves:
+
+- `panel_review.ps1` records its probe board as disposable.
+- `review.ps1 tiled -Board "Graybank"` renames the board after the paste and
+  records the town. Without `-Board` it prints `NOT INDEXED` rather than going
+  quiet -- the same rule as "rename a board the moment a paste lands on it",
+  turned into one command.
+- `citysmith boards record <scene>` indexes the scene board too.
+
+Read it back, and hold it against the game:
+
+```bash
+citysmith boards index --seen-file campaign/campaign-list.txt
+```
+
+Three states, all of them ordinary, which is why this reports rather than
+passes or fails:
+
+| | what it means |
+|---|---|
+| **matched** | indexed and still on screen. Most of them, once it is filled |
+| **GONE** | indexed, not in the list: deleted or renamed by hand. Nothing here is told either way -- `boards rename` follows a rename, `boards drop` forgets a deletion |
+| **UNRECORDED** | in the list, nothing written down. **The bucket worth shrinking**: it is exactly the set of boards you cannot decide anything about without opening them |
+
+Exit is 1 while anything is unrecorded, so a session can be held to leaving the
+campaign accounted for.
+
+**An entry is a record of a paste, not a reading of the board.** A person can
+paste over a board, rename it or delete it with no way for anything here to
+notice; reconciling against a transcribed listing is what turns that from a
+silent lie into a reported difference. Backfilled entries should say so in
+their `--note` -- this campaign's town boards carry *"backfilled from the
+layout still in out/; NOT recorded at paste time, so the digest is unknown"*,
+which is the difference between a record and a guess.
+
 ### Delete
 
 **Decide what to delete before you learn how.** This is the one irreversible
@@ -295,11 +353,25 @@ of the screen rather than a translation of it. `prune` then sorts them into thre
 |---|---|---|
 | **keepers** | a scene in `campaign/boards.json` points at it | leave alone |
 | **unfit to publish** | unnamed, but filed under `Ready to publish` | **FAIL** -- name it or unfile it |
+| **disposable** | the **index** records it as safe to delete | safe to delete |
 | **prunable** | *provably* disposable: a scene name the registry itself recorded as superseded | safe to delete |
 | **unnamed** | still called `Unknown Realm N` | **switch to each and look**, then name the keepers |
 | **unclaimed** | named by hand, claimed by no scene | **no recommendation** -- ask |
 
-**Two of those four are deliberately not delete lists, and each cost a bug.**
+**`disposable` is the only bucket here that is a record rather than the absence
+of one.** The others all mean "nothing was written down", in three flavours:
+`unclaimed` is ask-the-owner, `unnamed` is switch-and-look, and `prunable` can
+only ever see the boards a scene explicitly superseded. `disposable` is
+somebody having said what a board was when they pasted it. A board a live scene
+claims is never listed there, whatever its entry says -- the scene registry is
+the older claim.
+
+Anything the index accounts for drops out of `unclaimed` and `unnamed`, because
+those exist to flag mysteries and an indexed board is not one. On this campaign
+that took the go-and-look list from ten boards to two.
+
+**Two of the remaining buckets are deliberately not delete lists, and each cost
+a bug.**
 
 `unclaimed` exists because the registry only ever tracked *scene* boards, so
 East Tradebourne, Graybank and Pelvesthollow are claimed by nothing, and a
@@ -319,7 +391,9 @@ decide, and that is a person's job.
 
 Two cheap habits keep the bucket small: **rename a board the moment a paste
 lands on it**, and give throwaways a `Probe - ` prefix so they read as
-disposable without anyone having to remember which they were.
+disposable without anyone having to remember which they were. Both are now one
+flag on the driver that did the paste -- `review.ps1 tiled -Board`, and
+`panel_review.ps1`, which indexes its probe without being asked.
 
 There is a delete, and it is deliberately awkward. Expand a row with the `▶` at
 its **left** (x=79) — not the play arrow at x=360, which switches to the board —
@@ -453,11 +527,28 @@ confirm the *content*:
 - **The `Filter...` box is unmeasured.** Four questions above; answering them
   probably closes "switching to an existing board, unattended", which is the
   oldest open item in `CLAUDE.md`'s "Not built yet".
-- **Delete is not scripted**, only documented above. The coordinates are
-  verified over eight consecutive deletions, but nothing guards against a
-  mis-click landing on the play arrow and switching boards mid-loop, so
-  screenshot every few iterations.
-- **No board metadata is readable.** Asset count, size and last-modified are
-  not exposed anywhere the driver can see, so the only record of what is on a
-  board is what you wrote down when you pasted it. This is why deleting is
-  dangerous: the list tells you a name and nothing else.
+- ~~Delete is not scripted~~ **SCRIPTED 2026-08-27**, `tools/delete_boards.ps1`.
+  It deletes whatever is at `-RowY` (default 283, the first ungrouped board
+  with both folders collapsed) and repeats, which needs no re-reading of
+  positions because a deleted row's successor rises into the same slot.
+  `-Expect` is the count you have *seen* on a screenshot and is mandatory:
+  nothing here can read a board name, so the caller checking the list first is
+  the only thing between this and somebody's town.
+
+  **It guards on the dialog's own orange banner and stops rather than clicking
+  blind.** Without that, a delete that does not open leaves the next two clicks
+  landing on the board behind the panel. The guard fired for real on the
+  nineteenth of a twenty-board run -- the row expander simply did not take --
+  and cost a re-run of three rows instead of two unexplained clicks on a map.
+
+  **The coordinates in the table above are stale.** On a 1920x1080 client the
+  confirmation dialog is centred: field at (960, 551), OK at (862, 605), banner
+  at (960, 453). The script derives all three from the client rect.
+- **No board metadata is readable, and that has not changed** -- asset count,
+  size and last-modified are not exposed anywhere the driver can see. What
+  changed is that *what you wrote down when you pasted it* is now a place
+  rather than a habit: `citysmith boards index`, filled by the drivers
+  themselves. The gap that remains is real and worth naming: the index knows
+  what was **put** on a board and can never know what is **on** it now. Only
+  reconciling against a hand-transcribed listing closes any of that, and the
+  transcription is itself a person reading a screenshot.
