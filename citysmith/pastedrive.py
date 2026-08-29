@@ -463,6 +463,41 @@ class Driver:
 
     # -- the run --------------------------------------------------------------
 
+    def camera_moves(self, moves) -> dict:
+        """Run a sequence of `ts.ps1` camera calls, in order.
+
+        Each move arrives as a verb and a **parameter map** from
+        `citysmith.camera.plan`, and every value goes through as its own argv
+        entry. Nothing is pasted into a command string: PowerShell's array
+        splat reads an element beginning with `-` as a parameter name, and a
+        plan carrying `-DY -91` bound `-91` as a switch when this was tried the
+        other way.
+
+        No preflight. A camera move places nothing and cannot be spoiled by a
+        build plane -- the checks that guard a paste would only be theatre
+        here, and a check nobody needs is a check people learn to skip.
+        """
+        if not self.available:
+            raise PasteRefused(self.note or WINDOWS_ONLY)
+        host = self._powershell()
+        script = str(self.ts)
+        run = self.run if self.run is not None else subprocess.run
+        done = []
+        for move in moves:
+            command = [host, "-NoProfile", "-ExecutionPolicy", "Bypass",
+                       "-File", script, str(move["cmd"])]
+            for key, value in move["params"].items():
+                command += [f"-{key}", str(value)]
+            result = run(command, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace")
+            code = getattr(result, "returncode", 0)
+            done.append({"command": command, "code": code,
+                         "out": (getattr(result, "stdout", "") or "").strip()})
+            if code:
+                break
+        return {"moves": done,
+                "ok": all(d["code"] == 0 for d in done) and bool(done)}
+
     def paste(self, *, stem: str, name: str, out_dir, shot_every: int = 1
               ) -> Iterator[dict]:
         """Drive `review.ps1 tiled`, yielding one event per thing that happened.

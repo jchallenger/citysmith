@@ -13,6 +13,7 @@
   <nav class="tabs" id="tabs">
     <button type="button" class="tab is-on" data-screen="build">Build</button>
     <button type="button" class="tab" data-screen="paste">Paste</button>
+    <button type="button" class="tab" data-screen="camera">Camera</button>
     <!-- SEAM. A screen is one button here, one <section class="screen">
          below, and one row in uiserver._ROUTES. Nothing in app.js knows what a
          screen is beyond swapping which section is shown. -->
@@ -301,6 +302,207 @@
       <h2>Chunks <span class="hint">in PASTE ORDER, with the grab taken after each</span></h2>
       <p class="meta" id="paste-chunk-meta"></p>
       <ol class="chunks paste-chunks" id="paste-chunks"></ol>
+    </section>
+
+  </div>
+</section>
+
+<section class="screen" id="screen-camera">
+
+  <form class="panel form" id="camera-form" autocomplete="off">
+    <h2>Frame a shot</h2>
+
+    <!-- Unlike paste, this runs anywhere: there is no game to drive, only a
+         model of one, measured off the game by tools/camera_calib.ps1. -->
+    <p class="hint">
+      Where the camera has to be to see a piece of board, whether it can get
+      there, and the <code>ts.ps1</code> calls that take it. The model is
+      measured, not guessed &mdash; every constant below says which it is.
+    </p>
+
+    <fieldset>
+      <legend>Draw it over a town <span class="hint">optional</span></legend>
+      <!-- Layout coordinates ARE tiles -- `raster.rasterize` takes
+           `layout.width`/`depth` as the tile dimensions and pads by zero -- so
+           a building's outline is in the same space as the frustum footprint.
+           There is no scale to agree on, which is why this overlay can be
+           exact rather than approximate. -->
+      <div class="row">
+        <label for="cam-source">Layout</label>
+        <select id="cam-source"></select>
+      </div>
+      <p class="hint">A built <code>layout.json</code>. Without one the frame
+        is drawn over empty tile space, which says whether it fits and not
+        what is in it.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>What to look at, in tiles</legend>
+      <!-- **`step="any"` on every number here, deliberately.** A `step` is a
+           silent trap: the field goes invalid and the form simply refuses to
+           submit, which is indistinguishable from a dead button. It bit twice.
+           `step="16"` on the client height rejected its own default of 1080,
+           so the screen was broken from the moment it loaded; `step="0.1"` on
+           the camera's focus then rejected 5.78 -- a real pose, read off a
+           real screenshot. None of these quantities is quantised, and the
+           server validates the ranges properly anyway. -->
+      <div class="grid2">
+        <div class="row">
+          <label for="cam-x0">x from</label>
+          <input type="number" id="cam-x0" value="0" step="any">
+        </div>
+        <div class="row">
+          <label for="cam-x1">x to</label>
+          <input type="number" id="cam-x1" value="30" step="any">
+        </div>
+        <div class="row">
+          <label for="cam-z0">z from</label>
+          <input type="number" id="cam-z0" value="0" step="any">
+        </div>
+        <div class="row">
+          <label for="cam-z1">z to</label>
+          <input type="number" id="cam-z1" value="20" step="any">
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>How to look at it</legend>
+      <div class="grid2">
+        <div class="row">
+          <label for="cam-yaw">Bearing</label>
+          <input type="number" id="cam-yaw" value="0" step="any" min="-360" max="360">
+        </div>
+        <div class="row">
+          <label for="cam-pitch">Pitch below horizon</label>
+          <input type="number" id="cam-pitch" value="55" step="any" min="0" max="90">
+        </div>
+        <div class="row">
+          <label for="cam-margin">Edge margin, px</label>
+          <input type="number" id="cam-margin" value="40" step="any" min="0" max="400">
+        </div>
+        <div class="row">
+          <label for="cam-width">Client width</label>
+          <!-- step="any". These were step="any" and the default height of 1080 is
+               not on the 240+16n lattice that implies, so the field was invalid
+               from the moment the page loaded and the form silently refused to
+               submit -- indistinguishable from a dead button. A client rect is
+               whole pixels and nothing here wants it rounded. -->
+          <input type="number" id="cam-width" value="1920" step="any" min="320" max="7680">
+        </div>
+        <div class="row">
+          <label for="cam-height">Client height</label>
+          <input type="number" id="cam-height" value="1080" step="any" min="240" max="4320">
+        </div>
+      </div>
+      <p class="hint">Width and height are what <code>ts.ps1 client</code>
+        reports, not the monitor.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Where the camera is now <span class="hint">optional</span></legend>
+      <!-- Without this there is nothing to plan FROM, and the "how to get
+           there" panel can never appear -- which is a promise the screen makes
+           and could not keep. Blank means "just frame it, do not route to it". -->
+      <p class="hint">Fill this in and the screen also emits the
+        <code>ts.ps1</code> calls that take the camera from there to the
+        framing. <code>python tools/camera_read.py &lt;shot.png&gt;</code>
+        reports these five numbers off a screenshot.</p>
+      <div class="grid2">
+        <div class="row">
+          <label for="cam-at-fx">Looking at x</label>
+          <input type="number" id="cam-at-fx" step="any" placeholder="blank = skip">
+        </div>
+        <div class="row">
+          <label for="cam-at-fz">Looking at z</label>
+          <input type="number" id="cam-at-fz" step="any" placeholder="blank = skip">
+        </div>
+        <div class="row">
+          <label for="cam-at-dist">Slant range</label>
+          <input type="number" id="cam-at-dist" step="any" min="1" placeholder="tiles">
+        </div>
+        <div class="row">
+          <label for="cam-at-yaw">Bearing now</label>
+          <input type="number" id="cam-at-yaw" step="any" placeholder="deg">
+        </div>
+        <div class="row">
+          <label for="cam-at-pitch">Pitch now</label>
+          <input type="number" id="cam-at-pitch" step="any" min="0" max="90" placeholder="deg">
+        </div>
+      </div>
+    </fieldset>
+
+    <div class="row actions">
+      <button type="submit" id="cam-go">Frame it</button>
+    </div>
+  </form>
+
+  <div class="results" id="camera-results">
+
+    <section class="panel" id="cam-verdict-panel" hidden>
+      <h2>Verdict</h2>
+      <p id="cam-verdict"></p>
+      <p class="meta" id="cam-detail"></p>
+    </section>
+
+    <section class="panel" id="cam-preview-panel" hidden>
+      <h2>Preview <span class="hint">the frame itself, through the same measured camera</span></h2>
+      <!-- Not an illustration: the polygons are projected on the server by
+           `citysmith.preview` through the very `Camera` that plans the move,
+           so if a building is off the left edge here it is off the left edge
+           in TaleSpire. The browser draws quads and does no 3D of its own. -->
+      <div class="camstage">
+        <canvas id="cam-preview" width="960" height="540"></canvas>
+      </div>
+      <div class="row inline">
+        <label for="cam-colour">Colour by</label>
+        <!-- Two modes, because which one is worth looking at is a fact about
+             the town and not a preference. 709 of East Tradebourne's 991
+             buildings are `house`, so colouring by kind leaves most of it one
+             colour; storeys run 169/575/247 and vary everywhere. -->
+        <select id="cam-colour">
+          <option value="floors" selected>storeys</option>
+          <option value="kind">what it is</option>
+        </select>
+        <span class="legend" id="cam-legend"></span>
+      </div>
+      <p class="meta" id="cam-preview-note"></p>
+      <p class="meta" id="cam-hover">Point at a building to name it.</p>
+      <div class="row inline">
+        <button type="button" id="cam-drive">Send the camera there</button>
+        <span class="hint" id="cam-drive-note"></span>
+      </div>
+    </section>
+
+    <section class="panel" id="cam-view-panel" hidden>
+      <h2>In plan <span class="hint">the ground the frustum covers, over what you asked for</span></h2>
+      <!-- The <svg> root lives here rather than being made in JavaScript,
+           so app.js never has to name the SVG namespace. It is not a URL that
+           is ever fetched, but `test_the_page_talks_to_no_other_origin` reads
+           the script for any absolute URL scheme, and a guard with exceptions
+           in it is not a guard. app.js takes the namespace off this element
+           instead. -->
+      <p class="hint">Click the map to look somewhere else &mdash; the camera
+        moves to the point you click, the same thing a double right-click does
+        in TaleSpire.</p>
+      <div class="camview" id="cam-view">
+        <svg id="cam-plan" width="100%" role="img"
+             aria-label="the ground the camera can see, drawn over the area asked for"></svg>
+      </div>
+      <p class="meta" id="cam-scale"></p>
+    </section>
+
+    <section class="panel" id="cam-script-panel" hidden>
+      <h2>How to get there</h2>
+      <p class="hint">Run these in order. Every camera command is relative, so
+        they only mean anything from the pose they were planned from.</p>
+      <pre class="log" id="cam-script"></pre>
+    </section>
+
+    <section class="panel" id="cam-rig-panel" hidden>
+      <h2>Constants <span class="hint">measured, or not</span></h2>
+      <p class="meta" id="cam-rig-note"></p>
+      <table class="rig" id="cam-rig"></table>
     </section>
 
   </div>

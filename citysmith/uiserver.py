@@ -71,13 +71,18 @@ import http.server
 import json
 import os
 import pathlib
+import math
 import re
 import secrets
 import threading
+import time
 import traceback
 import urllib.parse
 from dataclasses import dataclass, field
 
+from . import camera
+from . import preview
+from .layout import Layout
 from . import pastedrive
 from .build import DEFAULT_CHUNK_TILES, DEFAULT_FENCE_STYLE, FENCE_STYLES
 from .palette import STYLES
@@ -517,8 +522,7 @@ def run_build(job: Job, params: dict, *, out_dir, palette_factory) -> None:
     things this endpoint can do a closed list.
     """
     from . import importers
-    from .layout import Layout
-
+    
     source: Source = params["source"]
     out_dir = pathlib.Path(out_dir)
     try:
@@ -761,6 +765,361 @@ _UI_DIR = pathlib.Path(__file__).resolve().parent / "ui"
 #: The whole API. A method, a path pattern, and the handler that answers it --
 #: there is no route that takes a verb or an operation *as data*, which is the
 #: structural half of "named operations". A chat screen is one more row.
+# --------------------------------------------------------------------------
+# the camera screen
+# --------------------------------------------------------------------------
+
+#: Everything the camera screen may send. Same rule as the build form: an
+#: unrecognised key is refused rather than ignored, because a control that
+#: silently does nothing is the worst kind of broken.
+_CAMERA_FIELDS = {"rect", "yaw", "pitch", "width", "height", "margin",
+                  "targets", "at", "source"}
+
+
+def _num(body: dict, key: str, default, lo: float, hi: float):
+    value = body.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BadRequest(f"{key}: expected a number, got {value!r}")
+    if not lo <= float(value) <= hi:
+        raise BadRequest(f"{key}: must be between {lo} and {hi}, got {value}")
+    return float(value)
+
+
+def _rect(value, key: str):
+    if (not isinstance(value, (list, tuple)) or len(value) != 4
+            or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                   for v in value)):
+        raise BadRequest(f"{key}: expected four numbers [x0, z0, x1, z1]")
+    x0, z0, x1, z1 = (float(v) for v in value)
+    if x1 <= x0 or z1 <= z0:
+        raise BadRequest(f"{key}: the second corner must be past the first")
+    return (x0, z0, x1, z1)
+
+
+#: How many building outlines the board plan will send. East Tradebourne has
+#: 989 and a plan view a few hundred pixels wide cannot show them apart, so
+#: beyond this they are sent as boxes only -- and past `_BOARD_MAX` the biggest
+#: ones win, because a plan that drops the market hall to keep nine sheds is
+#: worse than one that says it dropped anything.
+_BOARD_MAX = 1200
+
+
+def _bbox(ring):
+    xs = [p[0] for p in ring]
+    zs = [p[1] for p in ring]
+    return [round(min(xs), 1), round(min(zs), 1),
+            round(max(xs), 1), round(max(zs), 1)]
+
+
+def board_plan(path) -> dict:
+    """The town in plan, in TILE coordinates, for drawing under a frustum.
+
+    **Layout coordinates are already tiles.** `raster.rasterize` takes
+    `layout.width` and `layout.depth` as the tile dimensions and shifts rings
+    by a padding of zero, so a building's ring is in the same space as
+    `Camera.footprint()`. That is what makes this overlay exact: there is no
+    scale to agree on and nothing to line up.
+
+    Boxes rather than outlines. At the size this is drawn a building is a few
+    pixels across, an outline and its bounding box are the same picture, and
+    the box is a quarter of the bytes.
+    """
+    layout = Layout.load(path)
+    buildings = [(_bbox(b.ring), b.kind) for b in layout.buildings if b.ring]
+    dropped = 0
+    if len(buildings) > _BOARD_MAX:
+        buildings.sort(
+            key=lambda bk: (bk[0][2] - bk[0][0]) * (bk[0][3] - bk[0][1]),
+            reverse=True)
+        dropped = len(buildings) - _BOARD_MAX
+        buildings = buildings[:_BOARD_MAX]
+    # **Water as its own outline, not a box.** A river is a long diagonal
+    # polygon and its bounding box is meaningless: East Tradebourne's second
+    # water area spans (-278, -784) to (1468, 607), which is larger than the
+    # whole 739x598 board and extends well off it. Drawn as a rectangle it
+    # painted most of the town teal -- a picture that is not merely ugly but
+    # wrong about where the river is.
+    #
+    # They are sent whole and the SVG clips them. On an FTG import they often
+    # reach a long way outside the cropped core -- `ftg.core_cluster` crops to
+    # the settled cluster and does not trim the area rings -- so on East
+    # Tradebourne one of them runs from z=-784 to z=607 against a 598-tile
+    # board, and most of it is simply off the plan. That is the map being
+    # honest about its own source, not a drawing fault.
+    water = [[[round(x, 1), round(z, 1)] for x, z in a.ring[:400]]
+             for a in layout.areas_of("water") if len(a.ring) >= 3][:40]
+    return {
+        "name": layout.name,
+        "extent": [0.0, 0.0, round(layout.width, 1), round(layout.depth, 1)],
+        "buildings": [b for b, _ in buildings],
+        "kinds": [k for _, k in buildings],
+        "water": water,
+        "walls": [[[round(x, 1), round(z, 1)] for x, z in ring]
+                  for ring in layout.walls[:4]],
+        "dropped": dropped,
+    }
+
+
+def boxes_in_frame(cam, boxes, margin: float) -> list[int]:
+    """Which boxes are wholly inside the frame. Indices, so the page can
+    colour them differently rather than being told a number to believe."""
+    return [i for i, b in enumerate(boxes)
+            if cam.covers_all(camera.rect_corners(b), margin)]
+
+
+def read_camera_request(body, sources=()) -> dict:
+    """Turn a JSON body into typed keywords for :func:`plan_camera`.
+
+    ``sources`` is the current scan; ``body['source']`` is an id from it, so a
+    request cannot name a file the server did not offer -- the same rule the
+    build form follows, and the reason neither screen takes a path.
+    """
+    if not isinstance(body, dict):
+        raise BadRequest("expected a JSON object")
+    unknown = sorted(set(body) - _CAMERA_FIELDS)
+    if unknown:
+        raise BadRequest(f"unknown field(s): {', '.join(unknown)}")
+    if "rect" not in body:
+        raise BadRequest("rect: required, as [x0, z0, x1, z1] in tiles")
+
+    targets = body.get("targets") or []
+    if not isinstance(targets, list):
+        raise BadRequest("targets: expected a list of [x0, z0, x1, z1]")
+    if len(targets) > 500:
+        raise BadRequest(f"targets: at most 500, got {len(targets)}")
+
+    at = body.get("at")
+    if at is not None:
+        if (not isinstance(at, (list, tuple)) or len(at) != 5
+                or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                       for v in at)):
+            raise BadRequest("at: expected [fx, fz, dist, yaw, pitch]")
+        at = tuple(float(v) for v in at)
+
+    source = body.get("source") or None
+    chosen = None
+    if source is not None:
+        by_id = {s.id: s for s in sources}
+        if source not in by_id:
+            raise BadRequest(f"source: no such file offered ({source!r})")
+        chosen = by_id[source]
+        if chosen.kind != "layout":
+            raise BadRequest(
+                "source: the board plan needs a layout.json. A GeoJSON export "
+                "has not been rasterised yet, so it has no tile coordinates "
+                "to draw in -- build it first.")
+
+    return {
+        "source": chosen,
+        "rect": _rect(body["rect"], "rect"),
+        "yaw": _num(body, "yaw", 0.0, -3600.0, 3600.0),
+        "pitch": _num(body, "pitch", 55.0, 0.0, 90.0),
+        "width": _int(body, "width", 1920, 320, 7680),
+        "height": _int(body, "height", 1080, 240, 4320),
+        "margin": _num(body, "margin", 40.0, 0.0, 400.0),
+        "targets": [_rect(t, f"targets[{i}]") for i, t in enumerate(targets)],
+        "at": at,
+    }
+
+
+def plan_camera(params: dict, *, config_path=None) -> dict:
+    """Frame a board rectangle, and say how to get the camera there.
+
+    Pure arithmetic over :mod:`citysmith.camera` -- no game driven, nothing
+    spawned, and no file touched beyond `config/camera.json`. That is what lets
+    the camera screen work on any machine, unlike paste.
+
+    (The word for spawning a child process is deliberately not written here:
+    `test_nothing_in_the_server_can_reach_a_shell` reads this module's source
+    for it, and a blunt guard that has to reason about context is not a guard.)
+    """
+    rig = camera.load_rig(config_path)
+    lens = rig.lens(params["width"], params["height"])
+    rect = params["rect"]
+    framing = camera.frame_rect(rect, rig=rig, lens=lens, yaw=params["yaw"],
+                                pitch=params["pitch"],
+                                margin_px=params["margin"])
+    cam = camera.Camera(lens, framing.pose)
+
+    start = (camera.Pose(*_at_order(params["at"]))
+             if params["at"] is not None else None)
+    plan = (camera.plan(start, framing.pose, rig=rig, lens=lens)
+            if start is not None else None)
+
+    targets = params["targets"]
+    held = [i for i, t in enumerate(targets)
+            if cam.covers_all(camera.rect_corners(t), params["margin"])]
+
+    board = None
+    if params.get("source") is not None:
+        board = board_plan(params["source"].path)
+        board["in_frame"] = boxes_in_frame(cam, board["buildings"],
+                                           params["margin"])
+
+    shots = []
+    if not framing.fits and targets:
+        shots = [f.as_json() for f in camera.shot_list(
+            targets, rig=rig, lens=lens, yaw=params["yaw"],
+            pitch=params["pitch"], margin_px=params["margin"])]
+
+    return {
+        "framing": framing.as_json(),
+        "footprint": [[round(x, 2), round(z, 2)] for x, z in cam.footprint()],
+        "visible_bounds": [round(v, 2) for v in cam.visible_bounds()],
+        "sees_horizon": cam.sees_horizon(),
+        "px_per_tile": [round(v, 2) for v in cam.px_per_tile()],
+        "anchor_slide_1_5": round(cam.anchor_slide(1.5), 3),
+        "plan": plan.as_json() if plan is not None else None,
+        "targets": {"total": len(targets), "in_frame": len(held),
+                    "indices": held},
+        "shot_list": shots,
+        "board": board,
+        "rig": rig_json(rig, config_path),
+    }
+
+
+def rig_json(rig, config_path=None) -> dict:
+    """The constants, with provenance, and any config key that does nothing."""
+    return {
+        "constants": [
+            {"name": name, "value": c.value, "source": c.source,
+             "measured": c.measured, "residual": c.residual}
+            for name, c in sorted(rig.const.items(),
+                                  key=lambda kv: (kv[1].measured, kv[0]))
+        ],
+        "unknown_keys": camera.unknown_keys(config_path),
+    }
+
+
+def _at_order(at):
+    fx, fz, dist, yaw, pitch = at
+    return (fx, fz, 0.0, dist, yaw, pitch)
+
+
+# --------------------------------------------------------------------------
+# the 3D preview
+# --------------------------------------------------------------------------
+
+_VIEW_FIELDS = {"source", "pose", "drag", "width", "height"}
+
+#: What the preview's mouse does, and it is deliberately the game's own set.
+#: Dragging the preview runs the *rig* -- the measured control model -- so the
+#: sensitivities are TaleSpire's and so are the stops. You cannot drag the
+#: preview past a 78-degree pitch because the camera cannot go there, which
+#: means the preview can never show a shot that cannot be taken.
+_DRAGS = ("orbit", "pan", "scroll", "none")
+
+
+def read_view_request(body, sources=()) -> dict:
+    if not isinstance(body, dict):
+        raise BadRequest("expected a JSON object")
+    unknown = sorted(set(body) - _VIEW_FIELDS)
+    if unknown:
+        raise BadRequest(f"unknown field(s): {', '.join(unknown)}")
+
+    pose = body.get("pose")
+    if (not isinstance(pose, (list, tuple)) or len(pose) != 5
+            or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                   for v in pose)):
+        raise BadRequest("pose: expected [fx, fz, dist, yaw, pitch]")
+    fx, fz, dist, yaw, pitch = (float(v) for v in pose)
+    if not 0.1 <= dist <= 10_000:
+        raise BadRequest(f"pose: slant range out of range ({dist})")
+
+    drag = body.get("drag") or {}
+    if not isinstance(drag, dict):
+        raise BadRequest("drag: expected an object")
+    kind = _choice(drag, "kind", "none", _DRAGS)
+
+    by_id = {s.id: s for s in sources}
+    source = body.get("source") or None
+    if source is not None and source not in by_id:
+        raise BadRequest(f"source: no such file offered ({source!r})")
+    chosen = by_id[source] if source else None
+    if chosen is not None and chosen.kind != "layout":
+        raise BadRequest("source: the preview needs a layout.json")
+
+    return {
+        "source": chosen,
+        "pose": camera.Pose(fx, fz, 0.0, dist, yaw, pitch),
+        "drag": {"kind": kind,
+                 "dx": _int(drag, "dx", 0, -20_000, 20_000),
+                 "dy": _int(drag, "dy", 0, -20_000, 20_000),
+                 "ticks": _int(drag, "ticks", 0, -200, 200)},
+        "width": _int(body, "width", 960, 160, 7680),
+        "height": _int(body, "height", 540, 120, 4320),
+    }
+
+
+#: One layout, parsed once. A drag asks for a frame every few milliseconds and
+#: East Tradebourne's layout.json is 550 KB; re-reading it per frame turns a
+#: pan into a slideshow. Keyed on the path and its mtime, so editing a layout
+#: still takes effect.
+_LAYOUT_CACHE: dict = {}
+
+
+def _cached_scene(path):
+    key = (str(path), path.stat().st_mtime_ns)
+    hit = _LAYOUT_CACHE.get(key)
+    if hit is None:
+        layout = Layout.load(path)
+        hit = (preview.boxes_from_layout(layout),
+               preview.ground_grid([0.0, 0.0, layout.width, layout.depth]),
+               [[[x, z] for x, z in a.ring[:400]]
+                for a in layout.areas_of("water") if len(a.ring) >= 3][:40],
+               layout.name)
+        _LAYOUT_CACHE.clear()
+        _LAYOUT_CACHE[key] = hit
+    return hit
+
+
+def preview_view(params: dict, *, config_path=None) -> dict:
+    """Apply the drag through the rig, then project the board through it."""
+    rig = camera.load_rig(config_path)
+    pose = params["pose"]
+    drag = params["drag"]
+    if drag["kind"] == "orbit":
+        pose = rig.orbit(pose, drag["dx"], drag["dy"])
+    elif drag["kind"] == "scroll":
+        pose = rig.scroll(pose, drag["ticks"])
+    elif drag["kind"] == "pan":
+        # Pan moves what the camera is looking AT, in the camera's own frame,
+        # scaled by how big a tile is on screen at the centre -- so a drag of
+        # N pixels moves the town under the cursor by about N pixels, which is
+        # what a hand on a map does.
+        lens = rig.lens(params["width"], params["height"])
+        cam = camera.Camera(lens, pose)
+        across, along = cam.px_per_tile()
+        if across > 0 and along > 0:
+            yr = math.radians(pose.yaw)
+            side = -drag["dx"] / across
+            ahead = drag["dy"] / along
+            pose = dataclasses.replace(
+                pose,
+                fx=pose.fx + side * math.cos(yr) + ahead * math.sin(yr),
+                fz=pose.fz - side * math.sin(yr) + ahead * math.cos(yr))
+
+    lens = rig.lens(params["width"], params["height"])
+    cam = camera.Camera(lens, pose)
+
+    boxes, grid, water, name = ((), (), (), None)
+    if params["source"] is not None:
+        boxes, grid, water, name = _cached_scene(params["source"].path)
+
+    scene = preview.render(cam, boxes, ground=grid, water=water)
+    scene["pose"] = pose.as_json()
+    scene["town"] = name
+    scene["px_per_tile"] = [round(v, 2) for v in cam.px_per_tile()]
+    scene["sees_horizon"] = cam.sees_horizon()
+    scene["at_stop"] = {
+        "pitch_max": abs(pose.pitch - rig["pitch_max_deg"]) < 0.05,
+        "pitch_min": abs(pose.pitch - rig["pitch_min_deg"]) < 0.05,
+        "dist_max": abs(pose.dist - rig["dist_max"]) < 0.05,
+        "dist_min": abs(pose.dist - rig["dist_min"]) < 0.05,
+    }
+    return scene
+
+
 _ROUTES = (
     ("GET", re.compile(r"^/$"), "page_index"),
     ("GET", re.compile(r"^/app\.css$"), "page_css"),
@@ -778,6 +1137,13 @@ _ROUTES = (
     ("POST", re.compile(r"^/api/paste$"), "api_paste_start"),
     ("GET", re.compile(r"^/api/paste/([0-9a-f]{16})$"), "api_paste_poll"),
     ("GET", re.compile(r"^/api/paste/shots/(.+)$"), "api_paste_shot"),
+    # The camera screen. Pure arithmetic over `citysmith.camera`, so unlike
+    # paste it works on any machine -- there is no game to drive, only a model
+    # of one.
+    ("GET", re.compile(r"^/api/camera/rig$"), "api_camera_rig"),
+    ("POST", re.compile(r"^/api/camera/plan$"), "api_camera_plan"),
+    ("POST", re.compile(r"^/api/camera/view$"), "api_camera_view"),
+    ("POST", re.compile(r"^/api/camera/drive$"), "api_camera_drive"),
 )
 
 #: No external origin is reachable from the page, so an Anthropic key could not
@@ -949,8 +1315,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         })
 
     def api_sources(self):
+        # The Rescan button. It is the one caller that must not be served a
+        # cached list: its whole purpose is to pick up a file that appeared.
         self._json(200, {"sources": [s.as_json()
-                                     for s in scan_sources(self.server.roots)]})
+                                     for s in self.server.sources(fresh=True)]})
 
     #: Why a second job is refused, keyed on what is already running. Two
     #: builds sharing an output directory delete each other's slabs; a build
@@ -1079,6 +1447,95 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         ctype = {".png": "image/png"}.get(path.suffix.lower(), "image/jpeg")
         self._send(200, ctype, path.read_bytes())
 
+    def api_camera_rig(self):
+        """The camera constants and where each of them came from.
+
+        Sent rather than baked into the page for the same reason the style list
+        is: a constant that is an assumption has to look different from one
+        that was measured, wherever it is read.
+        """
+        self._json(200, rig_json(camera.load_rig(self.server.camera_config),
+                                 self.server.camera_config))
+
+    def api_camera_plan(self):
+        try:
+            params = read_camera_request(self._body(), self.server.sources())
+        except BadRequest as exc:
+            self._error(400, str(exc))
+            return
+        self._json(200, plan_camera(params,
+                                    config_path=self.server.camera_config))
+
+    def api_camera_view(self):
+        try:
+            params = read_view_request(self._body(), self.server.sources())
+        except BadRequest as exc:
+            self._error(400, str(exc))
+            return
+        self._json(200, preview_view(params,
+                                     config_path=self.server.camera_config))
+
+    def api_camera_drive(self):
+        """Run the plan that takes the real camera to the preview's pose.
+
+        **Open loop, and it says so.** Nothing here reads the game back: the
+        page supplies where the camera is, this works out the moves and runs
+        them, and the reply reports where the plan *lands*, not where the
+        camera *is*. Those agree to about a degree (measured over four driven
+        moves) and they drift as errors accumulate, which is why the reply
+        names `camera_read.py` rather than pretending otherwise.
+        """
+        body = self._body()
+        if not isinstance(body, dict):
+            self._error(400, "expected a JSON object")
+            return
+        unknown = sorted(set(body) - {"at", "pose", "width", "height"})
+        if unknown:
+            self._error(400, f"unknown field(s): {', '.join(unknown)}")
+            return
+        try:
+            at = [float(v) for v in body["at"]]
+            target = [float(v) for v in body["pose"]]
+            if len(at) != 5 or len(target) != 5:
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            self._error(400, "at and pose: each [fx, fz, dist, yaw, pitch]")
+            return
+
+        driver = self.server.paste_driver
+        if not driver.available:
+            self._error(409, driver.note)
+            return
+
+        rig = camera.load_rig(self.server.camera_config)
+        lens = rig.lens(_int(body, "width", 1920, 320, 7680),
+                        _int(body, "height", 1080, 240, 4320))
+        start = camera.Pose(at[0], at[1], 0.0, at[2], at[3], at[4])
+        want = camera.Pose(target[0], target[1], 0.0,
+                           target[2], target[3], target[4])
+        plan = camera.plan(start, want, rig=rig, lens=lens)
+        if not plan.moves:
+            self._json(200, {"text": "already there -- no moves needed.",
+                             "landed": start.as_json(), "moves": []})
+            return
+        try:
+            out = driver.camera_moves([m.as_json() for m in plan.moves])
+        except pastedrive.PasteRefused as exc:
+            self._error(409, str(exc))
+            return
+
+        end = plan.end
+        residual = plan.residual()
+        text = (f"ran {len(out['moves'])} move(s). The plan lands at bearing "
+                f"{end.yaw:.1f}, pitch {end.pitch:.1f}, range {end.dist:.1f} "
+                f"-- open loop, so read it back with camera_read.py before "
+                f"trusting it far.")
+        if not out["ok"]:
+            text = "a move failed: " + (out["moves"][-1]["out"] or "no output")
+        self._json(200, {"text": text, "landed": end.as_json(),
+                         "residual": residual, "moves": out["moves"],
+                         "ok": out["ok"]})
+
     def api_file(self, relative: str):
         path = resolve_in(self.server.out_dir, relative)
         if not path.is_file():
@@ -1103,8 +1560,11 @@ class _Server(http.server.ThreadingHTTPServer):
     allow_reuse_address = False
 
     def __init__(self, address, handler, *, out_dir, roots, palette_factory,
-                 log, paste_driver):
+                 log, paste_driver, camera_config=None):
         super().__init__(address, handler)
+        #: `config/camera.json` unless a test says otherwise. Held here rather
+        #: than read at each request so a test can point it at a fixture.
+        self.camera_config = camera_config
         self.out_dir = pathlib.Path(out_dir)
         self.roots = tuple(roots)
         self.palette_factory = palette_factory
@@ -1115,10 +1575,31 @@ class _Server(http.server.ThreadingHTTPServer):
         self.log = log
         self.jobs: dict[str, Job] = {}
         self.jobs_lock = threading.Lock()
+        self._sources: tuple[float, list] = (0.0, [])
+
+    #: How long a source scan is reused. **This is a performance fix, not a
+    #: convenience.** `scan_sources` walks `out/` and one level under it,
+    #: opening and sniffing every candidate; against a working directory full
+    #: of build artefacts and screen grabs it measured **706 ms**, while the
+    #: preview render it was called for measured 2.9. Every dragged frame paid
+    #: it, and the preview was unusable on a big town for that reason alone.
+    #:
+    #: Short, because a build writes a new layout and the page should offer it
+    #: without a restart; the Rescan button bypasses this entirely.
+    SOURCE_TTL = 3.0
+
+    def sources(self, *, fresh: bool = False) -> list:
+        now = time.monotonic()
+        when, cached = self._sources
+        if fresh or not cached or now - when > self.SOURCE_TTL:
+            cached = scan_sources(self.roots)
+            self._sources = (now, cached)
+        return cached
 
 
 def make_server(*, host: str = "127.0.0.1", port: int = 8765, out_dir="out",
-                roots=None, palette_factory=None, log=None, paste_driver=None):
+                roots=None, palette_factory=None, log=None, paste_driver=None,
+                camera_config=None):
     """Bind a server without serving it. ``port=0`` takes an ephemeral one.
 
     Raises :class:`ValueError` for any host that is not loopback. That is the
@@ -1144,7 +1625,7 @@ def make_server(*, host: str = "127.0.0.1", port: int = 8765, out_dir="out",
 
     return _Server((LOOPBACK[host], port), _Handler, out_dir=out_dir,
                    roots=roots, palette_factory=palette_factory, log=log,
-                   paste_driver=paste_driver)
+                   paste_driver=paste_driver, camera_config=camera_config)
 
 
 def serve(*, host: str = "127.0.0.1", port: int = 8765, out_dir="out",

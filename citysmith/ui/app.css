@@ -456,3 +456,79 @@ button[disabled] { opacity: 0.55; cursor: progress; }
 
 #files { margin-top: 0.6rem; overflow-wrap: anywhere; }
 #files a { color: inherit; }
+
+/* -- the camera screen ----------------------------------------------------- */
+
+.camview {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  padding: 4px;
+}
+
+/* Capped. The SVG carries a viewBox and `width: 100%`, so on a maximised
+   window it scaled to about 1100 px tall and pushed the script and the
+   constants table off the bottom of the screen -- the two things the picture
+   exists to introduce. `max-height` with the default `xMidYMid meet` letterboxes
+   it instead, and the text inside scales down with it. */
+.camview svg { display: block; width: 100%; height: auto; max-height: 360px; }
+
+/* The frustum is filled and the target outlined, so "does the shaded thing
+   cover the outlined thing" is answerable at a glance and at any size. Colour
+   is not carrying the distinction on its own -- one shape is filled and one is
+   dashed, which survives being printed, resized or read by someone who cannot
+   separate the two hues. */
+.cam-frustum { fill: color-mix(in srgb, var(--pass) 18%, transparent);
+               stroke: var(--pass); stroke-width: 1.5; }
+.cam-target  { fill: none; stroke: var(--warn); stroke-width: 2;
+               stroke-dasharray: 6 4; }
+.cam-axis    { stroke: var(--pass); stroke-width: 1; stroke-dasharray: 3 3; }
+.cam-eye     { fill: var(--pass); }
+.cam-focus   { fill: var(--warn); }
+.cam-key     { fill: var(--ink-dim); font-size: 12px; }
+
+table.rig { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+table.rig th { text-align: left; padding: 4px 8px 4px 0; color: var(--ink-dim); }
+table.rig td { padding: 3px 8px 3px 0; vertical-align: top; }
+table.rig td:nth-child(4) { color: var(--ink-dim); }
+/* An assumption has to look different from a measurement wherever it is read.
+   That distinction is the entire reason this table exists. */
+table.rig tr.is-assumed td:first-child { color: var(--warn); font-weight: 600; }
+table.rig tr.is-measured td:first-child { color: var(--ink-dim); }
+
+/* The town under the frustum. Muted, because it is context: the reader is
+   looking for where the bright frame falls on it, not at the buildings. */
+.cam-extent { fill: none; stroke: var(--line); stroke-width: 1; }
+.cam-water  { fill: color-mix(in srgb, #3f6d7a 45%, transparent); }
+.cam-bldg   { fill: var(--ink-dim); }
+/* A building wholly inside the frame. This is the answer to "is the thing I
+   want to review actually in this shot", so it is the one thing on the plan
+   that is allowed to be bright. */
+.cam-bldg.is-in { fill: var(--warn); }
+.cam-wall   { stroke: #c9c3b6; stroke-width: 1.5; }
+
+/* The preview stage. 16:9 because that is the shape of the client area the
+   model is told about; a preview in a different aspect would frame differently
+   from the game and the whole point is that it does not. */
+.camstage {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #10131a;
+  overflow: hidden;
+  line-height: 0;
+}
+.camstage canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: grab;
+  touch-action: none;
+}
+.camstage canvas.is-dragging { cursor: grabbing; }
+
+.legend { display: inline-flex; gap: 0.7rem; align-items: center;
+          font-size: 0.78rem; color: var(--ink-dim); flex-wrap: wrap; }
+.legend i { display: inline-block; width: 0.7rem; height: 0.7rem;
+            border-radius: 2px; margin-right: 0.25rem; vertical-align: -1px; }
+#cam-plan { cursor: crosshair; }
+#cam-hover { min-height: 1.2em; }

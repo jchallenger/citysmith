@@ -138,6 +138,10 @@ async function rescan() {
   try {
     const data = await getJSON("/api/sources");
     sources = data.sources;
+    /* One scan, both screens. The camera picker offering last week's list
+       while the build picker shows this week's is the kind of drift that
+       makes a page untrustworthy. */
+    fillCameraSources();
   } catch (err) {
     note.textContent = "scan failed: " + err.message;
     return;
@@ -531,7 +535,7 @@ function showPlanDetail() {
   const kb = Math.max(1, Math.round(plan.bytes / 1024));
   line.textContent = plural(plan.chunks, "chunk") + ", " + kb + " KB"
     + (plan.missing.length
-      ? "  --  " + plural(plan.missing.length, "slab") + " NAMED BUT MISSING: "
+      ? " -- " + plural(plan.missing.length, "slab") + " NAMED BUT MISSING: "
         + plan.missing.join(", ")
       : "");
 }
@@ -714,6 +718,13 @@ $("zoom").addEventListener("input", () => {
   if (img.naturalWidth) img.style.width = (img.naturalWidth * percent / 100) + "px";
   $("zoom-note").textContent = percent + "%";
 });
+$("camera-form").addEventListener("submit", frameShot);
+$("cam-drive").addEventListener("click", driveCamera);
+wirePreview();
+wirePlanClick();
+$("cam-colour").addEventListener("change", () => {
+  if (previewLast) drawPreview(previewLast);
+});
 $("tabs").addEventListener("click", (event) => {
   const tab = event.target.closest(".tab");
   if (!tab) return;
@@ -729,3 +740,648 @@ $("tabs").addEventListener("click", (event) => {
 });
 
 boot();
+
+
+/* -- the camera screen ----------------------------------------------------- *
+ *
+ * The other two screens do something to the world; this one only predicts.
+ * That is the point. Every camera command in `ts.ps1` is *relative*, so a
+ * session that only issues them ends up over the void wondering where the map
+ * went -- and the one thing nobody could do before was ask what a frame would
+ * contain *before* taking it. Fences were built, shipped and reviewed over two
+ * sessions from crops that contained none of them.
+ *
+ * The plan view is drawn here because it is four points and a rectangle. The
+ * FOOTPRINT is not: it comes from `citysmith.camera` on the server and is
+ * never re-derived in JavaScript. Two implementations of a frustum is two
+ * frustums, and only one of them was measured against the game.
+ */
+
+/* Taken off the empty <svg> in the page, never written down here: the page is
+ * checked for any absolute URL scheme, and an XML namespace looks exactly like
+ * an origin to a check blunt enough to be worth having. */
+function svgNS() {
+  return $("cam-plan").namespaceURI;
+}
+
+function svg(tag, cls, attrs) {
+  const node = document.createElementNS(svgNS(), tag);
+  if (cls) node.setAttribute("class", cls);
+  for (const key in attrs) node.setAttribute(key, attrs[key]);
+  return node;
+}
+
+/* Two blank lines then a comment, appended under a plan that leans on a
+ * constant nobody measured. Written as an escape rather than a multi-line
+ * literal so the shape of the string survives being edited by tools. */
+const ASSUMED_NOTE =
+  "\n\n# this plan leans on constants that are NOT measurements: ";
+
+/* Layouts only. A GeoJSON export has not been rasterised, so it has no tile
+ * coordinates to draw in -- the server refuses it and this does not offer it. */
+function fillCameraSources() {
+  const select = $("cam-source");
+  const chosen = select.value;
+  clear(select);
+  const none = el("option", null, "none -- empty tile space");
+  none.value = "";
+  select.appendChild(none);
+  for (const source of sources) {
+    if (source.kind !== "layout") continue;
+    const option = el("option", null, source.label + "  " + source.detail);
+    option.value = source.id;
+    if (source.id === chosen) option.selected = true;
+    select.appendChild(option);
+  }
+}
+
+function camRect() {
+  return [Number($("cam-x0").value), Number($("cam-z0").value),
+          Number($("cam-x1").value), Number($("cam-z1").value)];
+}
+
+function camFail(message) {
+  $("cam-verdict-panel").hidden = false;
+  $("cam-verdict").textContent = message;
+  $("cam-verdict").className = "verdict is-fail";
+  for (const id of ["cam-view-panel", "cam-script-panel"]) $(id).hidden = true;
+}
+
+async function frameShot(event) {
+  event.preventDefault();
+  const rect = camRect();
+  if (!(rect[2] > rect[0] && rect[3] > rect[1])) {
+    camFail("The second corner has to be past the first.");
+    return;
+  }
+  const body = {
+    source: $("cam-source").value || undefined,
+    rect: rect,
+    yaw: Number($("cam-yaw").value),
+    pitch: Number($("cam-pitch").value),
+    margin: Number($("cam-margin").value),
+    width: Number($("cam-width").value),
+    height: Number($("cam-height").value),
+  };
+  /* All five or none. A partial pose would be sent as zeroes and planned from
+   * a camera at the origin looking north, which is a confident answer to a
+   * question nobody asked. */
+  const at = ["cam-at-fx", "cam-at-fz", "cam-at-dist", "cam-at-yaw",
+              "cam-at-pitch"].map((id) => $(id).value.trim());
+  if (at.some((v) => v !== "")) {
+    if (at.some((v) => v === "")) {
+      camFail("Give all five of the current-pose numbers, or none of them.");
+      return;
+    }
+    body.at = at.map(Number);
+  }
+  let data;
+  try {
+    data = await postJSON("/api/camera/plan", body);
+  } catch (err) {
+    camFail(String(err.message || err));
+    return;
+  }
+  paintCamera(data, rect);
+}
+
+function paintCamera(data, rect) {
+  const f = data.framing;
+  const p = f.pose;
+
+  $("cam-verdict-panel").hidden = false;
+  const verdict = $("cam-verdict");
+  verdict.textContent = f.fits
+    ? "This fits in one shot."
+    : "This does NOT fit in one shot.";
+  verdict.className = "verdict " + (f.fits ? "is-ok" : "is-warn");
+  $("cam-detail").textContent =
+    f.note + " -- focus (" + p.fx + ", " + p.fz + "), bearing " + p.yaw +
+    " deg, pitch " + p.pitch + " deg, slant range " + p.dist +
+    " tiles, eye " + p.eye_y + " tiles above the board" +
+    (data.sees_horizon ? ". The horizon is in shot." : ".");
+
+  $("cam-view-panel").hidden = false;
+  planSvg(data, rect);
+  let scale =
+    "Scale at the centre of the frame: " + data.px_per_tile[0] +
+    " px per tile across, " + data.px_per_tile[1] + " along. A 1.5-tile " +
+    "obstruction under the cursor would slide a paste " +
+    data.anchor_slide_1_5 + " tiles toward the camera.";
+  /* The count is the whole reason for drawing the board. Fences were built,
+   * shipped and reviewed twice from crops that held none of them, and nothing
+   * on the screen said so. */
+  if (data.board) {
+    const held = data.board.in_frame.length;
+    const total = data.board.buildings.length;
+    scale += "  " + data.board.name + ": " + held + " of " + total +
+      " buildings wholly in frame" +
+      (held === 0 ? " -- NOTHING of the town is in this shot." : ".");
+    if (data.board.dropped) {
+      scale += "  (" + data.board.dropped + " of the smallest are not drawn.)";
+    }
+  }
+  $("cam-scale").textContent = scale;
+
+  /* Seed the preview from the framing, then let the mouse take over. */
+  $("cam-preview-panel").hidden = false;
+  previewPose = [p.fx, p.fz, p.dist, p.yaw, p.pitch];
+  requestView({ kind: "none", dx: 0, dy: 0, ticks: 0 });
+
+  $("cam-script-panel").hidden = false;
+  $("cam-script").textContent = data.plan
+    ? data.plan.script
+    : "Fill in \"where the camera is now\" and the moves appear here. " +
+      "Every camera command is relative, so there is nothing to say without " +
+      "a pose to start from.";
+  if (data.plan && data.plan.assumed.length) {
+    $("cam-script").textContent += ASSUMED_NOTE + data.plan.assumed.join(", ");
+      data.plan.assumed.join(", ");
+  }
+
+  paintRig(data.rig);
+}
+
+/* The board, the frustum and the target into one box, and draw.
+ *
+ * **z runs DOWN here, as it does in `city-raster.svg`.** This started the
+ * other way, with a key that read "north is up" -- and that was two mistakes
+ * in one line. The raster the Build screen shows draws tile z downward, so two
+ * plan views of the same town would have disagreed in handedness, which is the
+ * kind of error that looks entirely plausible while being a mirror. And
+ * "north" was a claim about the game's compass that was never measured;
+ * "+z down, same as the raster" is a fact about our own renderer.
+ */
+function planSvg(data, rect) {
+  const pts = data.footprint;
+  const board = data.board;
+  const xs = pts.map((q) => q[0]).concat([rect[0], rect[2]]);
+  const zs = pts.map((q) => q[1]).concat([rect[1], rect[3]]);
+  if (board) {
+    /* Fit the whole town, not just the frame. The point of drawing the board
+     * is to see WHERE on it the frame falls. */
+    xs.push(board.extent[0], board.extent[2]);
+    zs.push(board.extent[1], board.extent[3]);
+  }
+  const pad = 4;
+  const x0 = Math.min.apply(null, xs) - pad, x1 = Math.max.apply(null, xs) + pad;
+  const z0 = Math.min.apply(null, zs) - pad, z1 = Math.max.apply(null, zs) + pad;
+  const w = 640;
+  const h = Math.max(200, Math.min(520, Math.round(w * (z1 - z0) / (x1 - x0))));
+  const sx = (v) => ((v - x0) / (x1 - x0)) * w;
+  const sz = (v) => ((v - z0) / (z1 - z0)) * h;
+  const box = (b, cls) => svg("rect", cls, {
+    x: sx(b[0]).toFixed(1), y: sz(b[1]).toFixed(1),
+    width: Math.max(1, sx(b[2]) - sx(b[0])).toFixed(1),
+    height: Math.max(1, sz(b[3]) - sz(b[1])).toFixed(1),
+  });
+
+  const rad = Math.PI / 180;
+  const p = data.framing.pose;
+  const back = p.dist * Math.cos(p.pitch * rad);
+  const eye = [p.fx - Math.sin(p.yaw * rad) * back,
+               p.fz - Math.cos(p.yaw * rad) * back];
+
+  const node = $("cam-plan");
+  clear(node);
+  node.setAttribute("viewBox", "0 0 " + w + " " + h);
+  /* Kept so a click on the map can be turned back into tiles. The forward
+   * transform is built here and nowhere else, so the inverse has to be taken
+   * from it rather than recomputed -- two transforms would drift and the map
+   * would send the camera somewhere adjacent to where you pointed. */
+  planTransform = { x0: x0, x1: x1, z0: z0, z1: z1, w: w, h: h };
+
+  /* Board first, so the frustum washes over it and you can see through to
+   * what is underneath. Water, then buildings, then the wall. */
+  if (board) {
+    node.appendChild(box(board.extent, "cam-extent"));
+    for (const ring of board.water) {
+      node.appendChild(svg("polygon", "cam-water", {
+        points: ring.map((q) => sx(q[0]).toFixed(1) + "," + sz(q[1]).toFixed(1))
+                    .join(" "),
+      }));
+    }
+    const lit = new Set(board.in_frame);
+    board.buildings.forEach((b, i) => {
+      node.appendChild(box(b, lit.has(i) ? "cam-bldg is-in" : "cam-bldg"));
+    });
+    for (const ring of board.walls) {
+      node.appendChild(svg("polyline", "cam-wall", {
+        points: ring.map((q) => sx(q[0]).toFixed(1) + "," + sz(q[1]).toFixed(1))
+                    .join(" "),
+        fill: "none",
+      }));
+    }
+  }
+
+  node.appendChild(svg("polygon", "cam-frustum", {
+    points: pts.map((q) => sx(q[0]).toFixed(1) + "," + sz(q[1]).toFixed(1)).join(" "),
+  }));
+  node.appendChild(box(rect, "cam-target"));
+  node.appendChild(svg("line", "cam-axis", {
+    x1: sx(eye[0]).toFixed(1), y1: sz(eye[1]).toFixed(1),
+    x2: sx(p.fx).toFixed(1), y2: sz(p.fz).toFixed(1),
+  }));
+  node.appendChild(svg("circle", "cam-eye", {
+    cx: sx(eye[0]).toFixed(1), cy: sz(eye[1]).toFixed(1), r: 5,
+  }));
+  node.appendChild(svg("circle", "cam-focus", {
+    cx: sx(p.fx).toFixed(1), cy: sz(p.fz).toFixed(1), r: 4,
+  }));
+  const key = svg("text", "cam-key", { x: 8, y: 18 });
+  key.textContent = "+x right, +z down -- the same way up as " +
+                    "city-raster.svg. Shaded: what the camera sees. " +
+                    "Dashed: what you asked for.";
+  node.appendChild(key);
+}
+
+function paintRig(rig) {
+  $("cam-rig-panel").hidden = false;
+  const assumed = rig.constants.filter((c) => !c.measured);
+  let note = assumed.length
+    ? assumed.length + " of " + rig.constants.length + " constants are " +
+      "assumptions rather than measurements. Anything leaning on them is a " +
+      "guess with arithmetic on top."
+    : "Every constant here was measured off the running game.";
+  if (rig.unknown_keys && rig.unknown_keys.length) {
+    note += "  config/camera.json also has keys the model does not know, " +
+            "and they do nothing: " + rig.unknown_keys.join(", ") + ".";
+  }
+  $("cam-rig-note").textContent = note;
+
+  const table = $("cam-rig");
+  clear(table);
+  const head = el("tr");
+  for (const label of ["evidence", "constant", "value", "where it came from"]) {
+    head.appendChild(el("th", null, label));
+  }
+  table.appendChild(head);
+  for (const c of rig.constants) {
+    const row = el("tr", c.measured ? "is-measured" : "is-assumed");
+    row.appendChild(el("td", null, c.measured ? "measured" : "ASSUMED"));
+    const name = el("td");
+    name.appendChild(el("code", null, c.name));
+    row.appendChild(name);
+    row.appendChild(el("td", null, String(Number(c.value.toFixed(5)))));
+    row.appendChild(el("td", null, c.source));
+    table.appendChild(row);
+  }
+}
+
+
+/* -- the preview, and why the mouse does what it does ---------------------- *
+ *
+ * Dragging here runs the RIG -- the measured control model -- on the server.
+ * Left-drag is `orbit`, wheel is Ctrl+scroll, shift-drag pans. Those are the
+ * game's own controls with the game's own measured sensitivities, which has
+ * one consequence worth stating: **the preview cannot show you a shot the
+ * camera cannot take.** Drag the pitch past 78 degrees and it stops, because
+ * that is where the real one stops.
+ *
+ * The browser projects nothing. It posts a pose and a drag, and draws the
+ * quads that come back. One implementation of the camera, and it is the
+ * measured one.
+ */
+
+/* -- what the preview is allowed to claim about a building ----------------- *
+ *
+ * Colour by STOREYS by default, and it is not a style choice. Measured on the
+ * layouts: East Tradebourne is 709 houses out of 991, so colouring by kind
+ * leaves 72% of the town one colour and says almost nothing; storeys run
+ * 169/575/247 across one, two and three and vary street by street. Kind is
+ * still offered, because on a small town it is the interesting axis -- and
+ * because being able to see that a quarter is all one kind IS the finding.
+ *
+ * Every kind the layouts actually contain has an entry. The first version had
+ * six and the towns use nine, so `shop`, `guildhall`, `barracks` and `stable`
+ * fell through to the house grey -- an absent distinction that looked like a
+ * present one.
+ */
+const KIND_INK = {
+  house: [126, 124, 116],
+  shop: [163, 141, 92],
+  smithy: [130, 88, 64],
+  tavern: [176, 118, 66],
+  warehouse: [116, 106, 88],
+  temple: [150, 142, 172],
+  guildhall: [140, 112, 160],
+  barracks: [110, 122, 136],
+  stable: [126, 114, 92],
+  manor: [166, 132, 152],
+  apothecary: [112, 152, 126],
+  market: [170, 138, 84],
+};
+/* Storeys: one hue, three clearly separated lightnesses. A sequence should
+ * read as a sequence -- three unrelated hues would say "three categories". */
+const FLOOR_INK = {
+  1: [92, 104, 120],
+  2: [132, 146, 164],
+  3: [186, 198, 212],
+  4: [226, 234, 244],
+};
+
+function previewInkFor(face, scene) {
+  if (face.kind === "water") return [58, 96, 112];
+  if (face.kind === "ground") return null;
+  const mode = $("cam-colour").value;
+  const b = (scene.buildings || [])[face.b];
+  if (mode === "floors" && b) {
+    return FLOOR_INK[Math.min(4, b.floors)] || FLOOR_INK[1];
+  }
+  return KIND_INK[face.kind] || KIND_INK.house;
+}
+
+function paintLegend(scene) {
+  const box = $("cam-legend");
+  clear(box);
+  const mode = $("cam-colour").value;
+  const seen = new Map();
+  for (const b of scene.buildings || []) {
+    const key = mode === "floors" ? Math.min(4, b.floors) : b.kind;
+    seen.set(key, (seen.get(key) || 0) + 1);
+  }
+  if (!seen.size) return;
+  const keys = [...seen.keys()].sort((a, c) =>
+    mode === "floors" ? a - c : String(a).localeCompare(String(c)));
+  for (const key of keys) {
+    const ink = mode === "floors"
+      ? (FLOOR_INK[key] || FLOOR_INK[1]) : (KIND_INK[key] || KIND_INK.house);
+    const item = el("span");
+    const swatch = el("i");
+    swatch.style.background = "rgb(" + ink.join(",") + ")";
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(
+      (mode === "floors" ? key + " storey" : key) + " × " + seen.get(key)));
+    box.appendChild(item);
+  }
+}
+
+/* Point in polygon, so the page can say what you are pointing at. Faces come
+ * furthest-first, so the LAST one containing the cursor is the nearest -- the
+ * same order the painter drew them in, which is why this needs no depth of
+ * its own. */
+function faceUnder(scene, x, y) {
+  for (let i = scene.faces.length - 1; i >= 0; i--) {
+    const f = scene.faces[i];
+    if (f.kind === "ground" || f.b === undefined) continue;
+    const p = f.pts;
+    let inside = false;
+    for (let a = 0, c = p.length - 1; a < p.length; c = a++) {
+      const [xa, ya] = p[a], [xc, yc] = p[c];
+      if ((ya > y) !== (yc > y)
+          && x < (xc - xa) * (y - ya) / (yc - ya) + xa) inside = !inside;
+    }
+    if (inside) return f;
+  }
+  return null;
+}
+
+function describeBuilding(b) {
+  if (!b) return "Point at a building to name it.";
+  const bits = [];
+  if (b.name) bits.push(b.name);
+  bits.push(b.kind);
+  bits.push(b.floors + (b.floors === 1 ? " storey" : " storeys"));
+  bits.push(b.size[0] + " x " + b.size[1] + " tiles");
+  bits.push("at (" + b.at[0] + ", " + b.at[1] + ")");
+  if (b.stone) bits.push("stone");
+  return bits.join("  --  ");
+}
+
+let planTransform = null;
+let previewPose = null;       /* [fx, fz, dist, yaw, pitch] */
+let previewBusy = false;      /* one request in flight at a time */
+let previewQueued = null;     /* the drag accumulated while it was busy */
+let previewLast = null;       /* the last scene drawn */
+
+function previewCanvas() {
+  return $("cam-preview");
+}
+
+/* Coalesced. A drag fires mousemove far faster than a round trip, and sending
+ * every one would queue a hundred frames the user has already dragged past.
+ * One in flight, one waiting, and the waiting one accumulates. */
+async function requestView(drag) {
+  if (!previewPose) return;
+  if (previewBusy) {
+    if (!previewQueued || previewQueued.kind !== drag.kind) {
+      previewQueued = Object.assign({}, drag);
+    } else {
+      previewQueued.dx += drag.dx || 0;
+      previewQueued.dy += drag.dy || 0;
+      previewQueued.ticks += drag.ticks || 0;
+    }
+    return;
+  }
+  previewBusy = true;
+  const canvas = previewCanvas();
+  try {
+    const scene = await postJSON("/api/camera/view", {
+      source: $("cam-source").value || undefined,
+      pose: previewPose,
+      drag: drag,
+      width: canvas.width,
+      height: canvas.height,
+    });
+    const p = scene.pose;
+    previewPose = [p.fx, p.fz, p.dist, p.yaw, p.pitch];
+    drawPreview(scene);
+  } catch (err) {
+    $("cam-preview-note").textContent = "preview failed: " +
+      (err.message || err);
+  } finally {
+    previewBusy = false;
+    const next = previewQueued;
+    previewQueued = null;
+    if (next) requestView(next);
+  }
+}
+
+function drawPreview(scene) {
+  previewLast = scene;
+  const canvas = previewCanvas();
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#10131a";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (const face of scene.faces) {
+    const ink = previewInkFor(face, scene);
+    const s = face.shade;
+    if (face.kind === "ground" || ink === null) {
+      /* The grid is lines, not a filled shape: a closed ground ring filled
+       * would paint over everything behind it. */
+      ctx.strokeStyle = "rgba(150,150,140,0.22)";
+      ctx.lineWidth = 1;
+      strokePath(ctx, face.pts);
+      continue;
+    }
+    ctx.fillStyle = "rgb(" + Math.round(ink[0] * s) + "," +
+      Math.round(ink[1] * s) + "," + Math.round(ink[2] * s) + ")";
+    fillPath(ctx, face.pts);
+  }
+
+  const p = scene.pose;
+  let note = "bearing " + p.yaw.toFixed(1) + " deg, pitch " +
+    p.pitch.toFixed(1) + " deg, slant range " + p.dist.toFixed(1) +
+    " tiles, eye " + p.eye_y.toFixed(1) + " above the board. Looking at (" +
+    p.fx.toFixed(1) + ", " + p.fz.toFixed(1) + ").";
+  const stops = [];
+  if (scene.at_stop.pitch_max) stops.push("the top of the pitch range");
+  if (scene.at_stop.pitch_min) stops.push("the bottom of the pitch range");
+  if (scene.at_stop.dist_max) stops.push("the far end of Ctrl+scroll");
+  if (scene.at_stop.dist_min) stops.push("the near end of Ctrl+scroll");
+  if (stops.length) {
+    /* Say it, rather than letting the drag feel broken. A control against its
+     * stop is indistinguishable from a dead one, and this project has misread
+     * that in the game itself more than once. */
+    note += "  AT A STOP: " + stops.join(" and ") +
+      " -- the real camera goes no further either.";
+  }
+  if (scene.dropped) note += "  (" + scene.dropped + " faces not drawn.)";
+  $("cam-preview-note").textContent = note;
+  paintLegend(scene);
+}
+
+function fillPath(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function strokePath(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.stroke();
+}
+
+/* Mouse. The canvas is drawn at its own pixel size and displayed scaled to the
+ * panel, so a drag in CSS pixels has to be converted before it means anything
+ * to a model that thinks in client pixels. */
+function previewDragScale() {
+  const canvas = previewCanvas();
+  const rect = canvas.getBoundingClientRect();
+  return rect.width ? canvas.width / rect.width : 1;
+}
+
+/* Click the overhead map to look somewhere else.
+ *
+ * This is the same gesture TaleSpire itself has -- a double RIGHT click on the
+ * board centres the camera on the point clicked (measured: the frame moves
+ * 39.06 against a 0.42 noise floor, while a double LEFT click does nothing).
+ * So the map is not inventing an interaction; it is offering the one the game
+ * already has, on a view where you can see where you are sending it. */
+function wirePlanClick() {
+  const node = $("cam-plan");
+  node.addEventListener("click", (event) => {
+    if (!planTransform || !previewPose) return;
+    const t = planTransform;
+    const rect = node.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    /* The SVG is letterboxed by `max-height` and `xMidYMid meet`, so the
+     * displayed box is not the element box. Work out the drawn rectangle
+     * before inverting, or a click lands offset by the letterbox. */
+    const scale = Math.min(rect.width / t.w, rect.height / t.h);
+    const drawnW = t.w * scale, drawnH = t.h * scale;
+    const ox = (rect.width - drawnW) / 2, oy = (rect.height - drawnH) / 2;
+    const u = (event.clientX - rect.left - ox) / scale;
+    const v = (event.clientY - rect.top - oy) / scale;
+    if (u < 0 || v < 0 || u > t.w || v > t.h) return;
+    const x = t.x0 + (u / t.w) * (t.x1 - t.x0);
+    const z = t.z0 + (v / t.h) * (t.z1 - t.z0);
+    previewPose = [x, z, previewPose[2], previewPose[3], previewPose[4]];
+    $("cam-hover").textContent =
+      "looking at (" + x.toFixed(1) + ", " + z.toFixed(1) + ")";
+    requestView({ kind: "none", dx: 0, dy: 0, ticks: 0 });
+  });
+}
+
+function wirePreview() {
+  const canvas = previewCanvas();
+  let dragging = null;
+  let last = null;
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (!previewPose) return;
+    canvas.setPointerCapture(event.pointerId);
+    canvas.classList.add("is-dragging");
+    dragging = (event.shiftKey || event.button === 2) ? "pan" : "orbit";
+    last = [event.clientX, event.clientY];
+    event.preventDefault();
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!dragging) {
+      /* Not a drag: say what is under the cursor. This is the only place the
+       * page uses the per-face building index, and it is why `render` bothers
+       * to send one. */
+      if (!previewLast) return;
+      const rect = canvas.getBoundingClientRect();
+      const k = previewDragScale();
+      const f = faceUnder(previewLast,
+                          (event.clientX - rect.left) * k,
+                          (event.clientY - rect.top) * k);
+      $("cam-hover").textContent = describeBuilding(
+        f ? (previewLast.buildings || [])[f.b] : null);
+      return;
+    }
+    const k = previewDragScale();
+    const dx = Math.round((event.clientX - last[0]) * k);
+    const dy = Math.round((event.clientY - last[1]) * k);
+    if (!dx && !dy) return;
+    last = [event.clientX, event.clientY];
+    requestView({ kind: dragging, dx: dx, dy: dy, ticks: 0 });
+  });
+  for (const done of ["pointerup", "pointercancel", "pointerleave"]) {
+    canvas.addEventListener(done, () => {
+      dragging = null;
+      canvas.classList.remove("is-dragging");
+    });
+  }
+  /* Right-drag pans, so the context menu has to go -- the same gesture the
+   * game uses for a precise pan. */
+  canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+  canvas.addEventListener("wheel", (event) => {
+    if (!previewPose) return;
+    event.preventDefault();
+    requestView({ kind: "scroll", dx: 0, dy: 0,
+                  ticks: event.deltaY > 0 ? -1 : 1 });
+  }, { passive: false });
+}
+
+async function driveCamera() {
+  if (!previewPose) return;
+  const at = ["cam-at-fx", "cam-at-fz", "cam-at-dist", "cam-at-yaw",
+              "cam-at-pitch"].map((id) => $(id).value.trim());
+  if (at.some((v) => v === "")) {
+    $("cam-drive-note").textContent =
+      "Fill in \"where the camera is now\" first -- every move is relative, " +
+      "so there is nothing to plan from.";
+    return;
+  }
+  $("cam-drive-note").textContent = "driving...";
+  try {
+    const out = await postJSON("/api/camera/drive", {
+      at: at.map(Number),
+      pose: previewPose,
+      width: Number($("cam-width").value),
+      height: Number($("cam-height").value),
+    });
+    $("cam-drive-note").textContent = out.text;
+    /* The game is now where the plan said it would be, near enough, so the
+     * "camera is now" fields follow -- otherwise the next drive would plan
+     * from a pose two moves stale. This is dead reckoning and it says so:
+     * read the camera back with camera_read.py to re-anchor. */
+    if (out.landed) {
+      const e = out.landed;
+      $("cam-at-fx").value = e.fx;
+      $("cam-at-fz").value = e.fz;
+      $("cam-at-dist").value = e.dist;
+      $("cam-at-yaw").value = e.yaw;
+      $("cam-at-pitch").value = e.pitch;
+    }
+  } catch (err) {
+    $("cam-drive-note").textContent = "failed: " + (err.message || err);
+  }
+}
