@@ -310,6 +310,58 @@
    "recorded": "2026-08-27T11:14:16",
    "disposable": true,
    "note": ""
+  },
+  "Unknown Realm 3": {
+   "board": "Unknown Realm 3",
+   "holds": "probe",
+   "source": "out/gable-1.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-28T20:29:29",
+   "disposable": true,
+   "note": "gable probe, FIRST CUT -- shell built with place_tile on a 2-cell panel, so the walls doubled. Superseded by Unknown Realm 4."
+  },
+  "Unknown Realm 4": {
+   "board": "Unknown Realm 4",
+   "holds": "probe",
+   "source": "out/gable-1.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-28T20:29:30",
+   "disposable": true,
+   "note": "gable probe, 1-cell span, 4 end treatments. THE FINDING: every gabled end is an open trough, because both end pieces are double-course and the roof is single-course."
+  },
+  "Unknown Realm 5": {
+   "board": "Unknown Realm 5",
+   "holds": "probe",
+   "source": "out/cross.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-28T20:29:30",
+   "disposable": true,
+   "note": "market cross sweep, 4 shafts x 4 heads on 3 steps. Pinnacle-on-drum wins; steps read; null column proves the shaft works."
+  },
+  "Unknown Realm 6": {
+   "board": "Unknown Realm 6",
+   "holds": "probe",
+   "source": "out/aisle.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-28T20:29:31",
+   "disposable": true,
+   "note": "barn aisle posts, 4 treatments at a 20 ft eaves. Neither beam nor pillar survives; the blank tall wall reads as a fortress."
   }
  }
 }
