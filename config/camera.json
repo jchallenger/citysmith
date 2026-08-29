@@ -1,0 +1,78 @@
+{
+  "config_version": 1,
+  "measured_under": {
+    "note": "Every sensitivity below is CONDITIONAL on these, and they are settings a user can change. F9 opens Cutscene Mode's camera editor, which shows them; both read 1.0 when this was calibrated on 2026-08-28. Change either and the constants scale with it -- re-run tools/camera_calib.ps1.",
+    "camera_speed": 1.0,
+    "rotation_sensitivity": 1.0,
+    "client": [
+      1920,
+      1080
+    ],
+    "refresh_rate_setting": 25
+  },
+  "constants": {
+    "fov_v_deg": {
+      "value": 30.028,
+      "source": "measured 2026-08-28: median over 20 shots whose two independent focal-length readings agreed, spread 1.94 deg",
+      "measured": true,
+      "residual": 1.936
+    },
+    "yaw_deg_per_px": {
+      "value": 0.18761,
+      "source": "measured 2026-08-28: 3 consecutive step(s) against the target in tools/camera_probe.py",
+      "measured": true,
+      "residual": 0.00058
+    },
+    "pitch_deg_per_px": {
+      "value": 0.16893,
+      "source": "measured 2026-08-28: 2 consecutive step(s) against the target in tools/camera_probe.py",
+      "measured": true,
+      "residual": 3e-05
+    },
+    "pitch_min_deg": {
+      "value": 5.0,
+      "source": "assumed; CLAUDE.md records only that the pitch clamps at both ends and that a drag against the clamp looks like a dead input",
+      "measured": false
+    },
+    "pitch_max_deg": {
+      "value": 78.072,
+      "source": "measured 2026-08-28: walked into the top of the pitch range until it stopped responding -- pitchstop_3, pitchstop_4, pitchstop_5 agreed within 0.01 (residuals 9.5, 9.3, 9.0 px)",
+      "measured": true,
+      "residual": 0.007
+    },
+    "dist_scale_per_tick": {
+      "value": 0.87206,
+      "source": "measured 2026-08-28: 2 consecutive step(s) against the target in tools/camera_probe.py",
+      "measured": true,
+      "residual": 0.01074
+    },
+    "dist_max": {
+      "value": 49.754,
+      "source": "measured 2026-08-28: walked into the top of Ctrl+scroll until it stopped responding -- diststop_2, diststop_3, diststop_4 agreed within 0.04 (residuals 1.2, 1.4, 1.4 px)",
+      "measured": true,
+      "residual": 0.043
+    },
+    "dist_min": {
+      "value": 5.0,
+      "source": "assumed",
+      "measured": false
+    },
+    "pan_gain": {
+      "value": 0.53,
+      "source": "measured: a 462 px right-drag moved the world 245 px (CLAUDE.md, Tiling)",
+      "measured": false
+    },
+    "fly_speed_max": {
+      "value": 21.449,
+      "source": "measured 2026-08-28: 3 WASD holds, 0.08s->1.4t, 0.14s->2.2t, 0.14s->2.9t -- over holds of 0.08-0.14 s only; do NOT extrapolate",
+      "measured": true,
+      "residual": 0.303
+    },
+    "fly_ramp_tau": {
+      "value": 0.02,
+      "source": "measured 2026-08-28: fitted with fly_speed_max over the same holds -- over holds of 0.08-0.14 s only; do NOT extrapolate",
+      "measured": true,
+      "residual": 0.303
+    }
+  }
+}
