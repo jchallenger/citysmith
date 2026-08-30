@@ -87,13 +87,16 @@ WALL_STAIR = _asset("t", "Castle Ruins Stair", "tile", 1.0, 1.0, 1.0, "stairs")
 #: stub of a different width would make the hang silently not happen, which
 #: is precisely what the test using it exists to catch.
 GATE = _asset("u", "Door - Portcullis double", "tile", 4.0, 3.75, 0.5, "door")
+#: Trodden earth for the lane role. Thinner than the grass, like the real
+#: gravel, so laying it exercises the same top-alignment rule as the street.
+LANE_TILE = _asset("4", "gravel_1x1_01", "tile", 1.0, 0.25, 1.0, "floor")
 
 
 class StubCatalog:
     assets = [FLOOR, UPPER, WALL, INNER, DOOR, STAIRS, STOOL, MARK, GROUND, STREET,
               CIVIC_WALL, CIVIC_WINDOW, CIVIC_DOOR, CIVIC_CORNER, CIVIC_FLOOR,
               UTIL_WALL, UTIL_CORNER, CORNER, WINDOW,
-              WALL_CORE, WALL_CAP, WALL_WALK, WALL_STAIR, GATE]
+              WALL_CORE, WALL_CAP, WALL_WALK, WALL_STAIR, GATE, LANE_TILE]
 
 
 class StubPalette:
@@ -103,7 +106,7 @@ class StubPalette:
         "floor": FLOOR, "floor_upper": UPPER, "wall": WALL,
         "wall_interior": INNER, "door": DOOR, "stairs": STAIRS,
         "party_mark": MARK, "ground": GROUND, "street": STREET,
-        "wall_window": WINDOW, "wall_corner": CORNER,
+        "wall_window": WINDOW, "wall_corner": CORNER, "lane": LANE_TILE,
         "wall_civic": CIVIC_WALL, "wall_window_civic": CIVIC_WINDOW,
         "door_civic": CIVIC_DOOR, "wall_corner_civic": CIVIC_CORNER,
         "floor_civic": CIVIC_FLOOR,

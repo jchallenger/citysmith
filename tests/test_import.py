@@ -417,6 +417,84 @@ def test_trails_are_not_thoroughfares():
     assert "trail" in raster.NOT_THOROUGHFARES
 
 
+def _trail_across_field_and_water() -> Layout:
+    """One trail crossing open ground, a wheat field and a stream in turn.
+    The polyline runs along cell-centre row z=5, so the 1-tile stroke stays
+    one row wide instead of straddling two."""
+    from citysmith.layout import LayoutArea, LayoutRoad
+
+    layout = Layout(name="path", source="ftg", width=20.0, depth=10.0)
+    layout.areas = [
+        LayoutArea("field", [(4.0, 0.0), (8.0, 0.0), (8.0, 10.0), (4.0, 10.0)]),
+        LayoutArea("water", [(12.0, 0.0), (15.0, 0.0), (15.0, 10.0), (12.0, 10.0)]),
+    ]
+    layout.roads = [LayoutRoad([(0.0, 5.5), (20.0, 5.5)], 1.0, "trail")]
+    return layout
+
+
+def test_a_trail_rasterises_as_a_trodden_path_not_a_street():
+    """A TRAIL used to fall through the road loop's else branch and get laid
+    as STREET -- cobble, on a footpath the export drew 1.5 m wide. It is LANE
+    now (trodden earth), it carries no street class (a footpath owes nobody
+    two abreast), and it does not bridge: where it meets water the cells stay
+    WATER and the path resumes on the far bank. Before this, a trail crossing
+    a stream was paved straight over it as a cobble ford at grade with
+    nothing beneath."""
+    from citysmith import raster
+
+    tm = raster.rasterize(_trail_across_field_and_water(), bridges=False)
+    assert tm.surface[5][2] == raster.LANE, "trodden earth over open ground"
+    assert tm.surface[5][6] == raster.LANE, "a footpath crosses the wheat"
+    for x in (12, 13, 14):
+        assert tm.surface[5][x] == raster.WATER, "a footpath does not bridge"
+    assert tm.surface[5][17] == raster.LANE, "the path resumes on the far bank"
+    for x in range(tm.width):
+        assert tm.street_class[5][x] == "", (
+            "no class: the width check would demand two abreast of a footpath")
+
+
+def test_a_carriageway_paves_over_the_footpath_it_crosses():
+    """At a junction the busier way wins the cell, the same rule street
+    classes settle their own collisions by -- a cart road with a one-tile
+    dirt gap where a path crosses would read as a pothole."""
+    from citysmith import raster
+    from citysmith.layout import LayoutRoad
+
+    layout = Layout(name="junction", source="ftg", width=20.0, depth=20.0)
+    layout.roads = [
+        LayoutRoad([(0.0, 10.5), (20.0, 10.5)], 1.0, "trail"),
+        LayoutRoad([(10.5, 0.0), (10.5, 20.0)], 3.0, "road"),
+    ]
+    tm = raster.rasterize(layout, bridges=False)
+    assert tm.surface[10][10] == raster.STREET, "the road takes the junction"
+    assert tm.surface[10][2] == raster.LANE, "the path goes on either side"
+    assert tm.surface[10][17] == raster.LANE
+
+
+def test_a_trail_cell_builds_with_the_lane_role(catalog_palette):
+    """The point of the surface class: LANE lays trodden earth by its top, so
+    the path meets the grass flush instead of arriving as laid cobble."""
+    import math
+
+    from citysmith import raster
+    from citysmith.build import Builder, _lay_terrain
+
+    tm = raster.rasterize(_trail_across_field_and_water(), bridges=False)
+    palette = catalog_palette
+    b = Builder(palette, 0)
+    grade = palette.require("floor").size_y
+    # The same surface->role mapping build_from_tilemap uses for these cells.
+    _lay_terrain(b, tm, {raster.GROUND: "ground", raster.LANE: "lane",
+                         raster.FIELD: "ground"}, grade=grade, taper={})
+
+    lane = palette.require("lane")
+    here = [p for p in b.placements
+            if (int(math.floor(p.x + 1e-6)), int(math.floor(p.z + 1e-6))) == (2, 5)]
+    assert [p.asset_id for p in here] == [lane.id], "one lane tile, nothing else"
+    assert abs(here[0].y + lane.size_y - grade) < 1e-6, (
+        "laid by its top: trodden earth flush with the grass beside it")
+
+
 # -- authored bridges ---------------------------------------------------------
 
 def _channel_and_bridge() -> Layout:

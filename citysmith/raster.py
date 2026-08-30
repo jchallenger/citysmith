@@ -616,12 +616,29 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
             paint(cells, WATER)
         elif road.kind == "plank":
             paint(cells, PIER)
+        elif road.kind == "trail":
+            # A trail is trodden earth, not laid cobble -- FTG draws it 1.5 m
+            # wide, exactly one tile, and the else branch below was paving it
+            # as STREET. LANE is the surface that already means "worn ground
+            # people walk" (`_trace_lanes` makes the same class between back
+            # gardens, and the two cannot fight: the tracer only seeds and
+            # grows over GROUND, so an imported trail cell is simply already
+            # done). No class is set: a footpath owes nobody two abreast, and
+            # a classed cell would be held to the carriageway standard.
+            # And no WATER in the over set -- a footpath does not bridge.
+            # Before this a trail crossing a stream was paved straight over
+            # it, a cobble ford at grade with nothing beneath; now the cells
+            # stay water and the path resumes on the far bank. (Trails rank
+            # with planks in the paint order, so a later road may still pave
+            # its own junction over the path -- the busier way wins the cell,
+            # same rule the street classes settle collisions by.)
+            paint(cells, LANE, over=frozenset({GROUND, FIELD}))
         else:
             # MARSH is in this set so a causeway or a reedcutters' track can
             # cross the fen. Leave it out and every way into a wetland stops
             # dead at its edge, which is the "silently dropped feature" shape
             # this project keeps rediscovering.
-            paint(cells, STREET, over=frozenset({GROUND, FIELD, MARSH, WATER}))
+            paint(cells, STREET, over=frozenset({GROUND, FIELD, MARSH, WATER, LANE}))
             for x, z in cells:
                 if (tm.inside(x, z) and tm.surface[z][x] == STREET
                         and _CLASS_RANK[cls] > _CLASS_RANK[tm.street_class[z][x]]):
