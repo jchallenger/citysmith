@@ -158,10 +158,11 @@ DEFAULT_WALL_THICKNESS_M = 4.5
 #: of the canvas on all three exports), and the rasteriser already lays ground
 #: everywhere. Recording it would be 74 polygons saying "grass is grass".
 #:
-#: ``forest``, ``pasture`` and ``lawn`` are carried but not yet built: all three
-#: are grass underfoot, and the rasteriser paints them as ground. Keeping them
-#: distinct in the layout is what lets a later pass modulate tree density by the
-#: forest outline instead of scattering across every open cell.
+#: ``forest``, ``pasture`` and ``lawn`` are all grass underfoot, and the
+#: rasteriser leaves them as ground. ``forest`` additionally lands in
+#: ``TileMap.forest``, the mask the tree scatter reads to close the canopy
+#: inside the authored outline and thin it outside; ``pasture`` and ``lawn``
+#: are carried but not yet read by anything past the reference SVG.
 BACKGROUND_AREAS: dict[str, str | None] = {
     "GRASS": None,
     "LAWN_TEXTURE_TYPE": "lawn",

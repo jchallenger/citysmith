@@ -1,11 +1,12 @@
 # Fantasy Town Generator import — format reference and plan
 
-Status, 2026-08-23: **stages 1-4 are done and Pelvesthollow is on a board.**
-`citysmith/importers.py` sniffs the format, `citysmith/ftg.py` reads it, and
-`citysmith import` dispatches between the two readers. Stage 5 (fences, town
-wall, bridges, forest-driven tree density) and stage 6 (Graybank, East
-Tradebourne) are not started. §2 is the format reference and is the durable
-part of this file; §6 tracks the work.
+Status, 2026-08-30: **stages 1-4 and 6 are done — all three towns are on
+boards — and stage 5 is built.** `citysmith/importers.py` sniffs the format,
+`citysmith/ftg.py` reads it, and `citysmith import` dispatches between the two
+readers. The stage-5 extras (fences, town wall, authored bridges,
+forest-driven tree density, trails) are all constructed and under test; what
+remains of stage 5 is the in-game orbit of the three newest (§6). §2 is the
+format reference and is the durable part of this file; §6 tracks the work.
 
 Companion docs: `CLAUDE.md` (engineering notes), `docs/asset-conventions.md`
 (footprints and roles), `docs/pasting-into-talespire.md` (the paste procedure
@@ -172,10 +173,10 @@ the project with a documented real-world scale; take it.
 | `name` | **new** `LayoutBuilding.name` field |
 | `material: STONE_BRICK` | select the existing `wall_civic` / `door_civic` / `wall_corner_civic` roles |
 | `WATER` polygon | `LayoutArea("water")` |
-| `BACKGROUND: FOREST` | `LayoutArea("park")` today; wants a `forest` kind |
+| `BACKGROUND: FOREST` | `LayoutArea("forest")` → the `TileMap.forest` mask the tree scatter reads |
 | `BACKGROUND: WHEAT/GRAIN/TILLED` | `LayoutArea("field")` |
-| `BACKGROUND: SHEEP/PIGS/CATTLE` | `LayoutArea("field")` today; wants a `pasture` kind |
-| `BACKGROUND: LAWN` | `LayoutArea("park")` |
+| `BACKGROUND: SHEEP/PIGS/CATTLE` | `LayoutArea("pasture")` — grass underfoot; nothing reads it past the SVG yet |
+| `BACKGROUND: LAWN` | `LayoutArea("lawn")` — same |
 | `BACKGROUND: GRASS` | nothing — it is the base sheet `raster.py` already lays |
 | `BACKGROUND: ROAD_TEXTURE_TYPE`, `raised: false` | `LayoutArea("plaza")` |
 | `BACKGROUND: ROAD_TEXTURE_TYPE`, `raised: true` | bridge deck — `bridge_deck` role, already pinned to `Harbor Middle 06` |
@@ -299,12 +300,11 @@ should be the first target.
 3. **`import` sniffs — SETTLED.** `citysmith import` reads the file to decide,
    with `--format mfcg|ftg` to override. A wrong override is loud: forcing
    `--format ftg` on an MFCG file reports that it has no BUILDING features.
-4. **New area kinds — SETTLED, carried but not yet built.** `forest`, `pasture`
-   and `lawn` are recorded in the layout and drawn on the reference SVG. The
-   rasteriser leaves them as ground, which is *correct* — all three are grass
-   underfoot — and trees already scatter across open ground, so a forest reads
-   as a forest today. What the distinction buys is stage 5: modulating tree
-   density by the forest outline instead of across every open cell.
+4. **New area kinds — SETTLED.** `forest`, `pasture` and `lawn` are recorded
+   in the layout and drawn on the reference SVG. The rasteriser leaves all
+   three as ground, which is *correct* — they are grass underfoot. `forest`
+   now also lands in `TileMap.forest`, the mask the tree scatter reads (stage
+   5, §6); `pasture` and `lawn` are still carried for nothing past the SVG.
 
 ## 6. Staged work
 
@@ -348,15 +348,43 @@ more than one 64-tile chunk with no step anywhere in them. That plus
 `verify.chunk_datum` passing is strong, but it is not the copy-out measurement
 that settled the tiling rules in the first place.
 
-**Stage 5 — the extras. NOT STARTED.** `STONE_FENCE` as `field_wall` (capped),
-`STONE_WALL` as open wall polylines, `raised` ROAD_TEXTURE quads as bridge
-decks, tree density driven by the FOREST outline, `TRAIL` as a 1-tile path.
-The importer already reads all of these into the layout —
-`Layout.fences`, open `Layout.walls`, `LayoutArea("bridge"|"forest")`,
-`LayoutRoad(kind="trail")` — so this stage is entirely about building them.
-*Accepts when:* each is visible on a board and orbited from four sides — the
-drystone piece in particular is a wall asset, and `CLAUDE.md` records three bad
-wall picks in a row chosen from a single camera angle.
+**Stage 5 — the extras. BUILT; in-game orbit outstanding.** The five items,
+and where each landed:
+
+- `STONE_FENCE` as `field_wall` — built separately, `docs/fencing.md`
+  (`build._lay_fences`; `TileMap.fences` carries the clipped polylines).
+- `STONE_WALL` as open wall polylines — built with stage 6; East Tradebourne's
+  2,367-cell rampart below is that work.
+- **`raised` quads as bridge decks.** The raster paints a
+  `LayoutArea("bridge")` ring as PIER and the plank machinery does the rest:
+  `_lay_terrain` runs the channel on beneath, `_lay_bridges` lays the deck by
+  its top at grade and rails the sides facing open water. Only cells already
+  WATER convert — the authored quad overhangs its banks, and the overhang
+  stays bank rather than becoming a timber platform on grass; the deck meets
+  it flush. Painted after the road loop, so an MFCG river (a *road* there)
+  cannot erase it, and a road that already claimed its own crossing keeps it.
+- **Tree density follows the FOREST outline.** The rings land in
+  `TileMap.forest` (a mask, not a surface — forest floor stays GROUND;
+  translated and filtered in `TileMap.crop` like the gates). Inside the line
+  the canopy field is lifted (`t + 0.55·(1−t)`), outside damped (`t · 0.40`),
+  both only when a mask exists at all: an unmasked (MFCG) map scatters
+  **bit-identically** to before the field existed, proven by digest on the old
+  and new code. Redistributed, not raised — on the Pelvesthollow corner
+  fixture, tree pieces inside the rings went 72 → 138, outside 390 → 146.
+- **`TRAIL` as a 1-tile path.** A trail arm in the road loop paints LANE
+  (trodden earth) over ground and field only — never water, because a footpath
+  does not bridge: the path stops at the bank and resumes on the far side,
+  where it used to be paved straight over the stream as a cobble ford. No
+  street class, so verify never demands two abreast of it; a carriageway
+  crossing the path takes the junction cell.
+
+*Still owed:* the in-game pass — each of the three new builds visible on a
+board and orbited from four sides (`review.ps1 360`). Look for East
+Tradebourne's five authored crossings decked in harbour planking flush with
+their banks; Pelvesthollow's three forest rings reading as closed stands with
+thinned pasture outside; and any TRAIL leaving town as a one-tile gravel line
+that vanishes at the stream bank. The drystone fencing keeps its own probe
+discipline in `docs/fencing.md`.
 
 **Stage 6 — scale up. DONE for all three.** Each town has its own board in one
 campaign, pasted with `review.ps1 tiled`. Per-town numbers below.
@@ -399,9 +427,11 @@ importer got *built* for the first time:
 - **The market square is a plaza**, not a roofed box — 631 plaza tiles where
   the export says `MARKET` / `PAVEMENT`. The rule works on the file it was
   written for.
-- **Five `raised` bridge quads** import as `LayoutArea("bridge")` and are still
-  not built; the three bridges the board does have are the rasteriser's own,
-  added to join districts split by water.
+- **Five `raised` bridge quads** import as `LayoutArea("bridge")`; at the time
+  of this build they were not yet constructed, and the three bridges that board
+  has are the rasteriser's own, added to join districts split by water. Stage 5
+  has since taught the raster to deck them (the quad's water cells become PIER)
+  — the next paste of this town gets its authored crossings.
 
 **Chunk size stops mattering once `--max-assets` binds.** At 112 tiles it is
 114 chunks / 23,085 bytes; at 80 tiles, 146 / 23,070; at 160 tiles, 137 /

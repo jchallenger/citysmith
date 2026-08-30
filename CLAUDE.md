@@ -144,7 +144,17 @@ What FTG gives that MFCG does not, and what follows from it:
   records four other times.
 - **`raised: true` means bridge.** Across all three exports it is true for
   exactly five features, and every one is a ~20x20 m `ROAD_TEXTURE_TYPE` quad
-  over water.
+  over water. Built: the raster paints the quad's *water* cells PIER after the
+  road loop and the plank machinery decks them; the overhang stays bank -- the
+  quad is wider than its stream, and a pier tile over grass is a platform on a
+  lawn.
+- **A mask that modulates a shared scatter must be neutral by default,
+  bit-for-bit.** `TileMap.forest` reshapes the canopy field only when
+  non-empty, *before* the probability bands, with no extra rng draws -- so an
+  unmasked (MFCG) map digests identically to before the field existed
+  (measured, sha-for-sha). Modulating after the roll, or drawing per cell,
+  rebuilds every MFCG board differently the day the feature lands, and the
+  suite cannot see it without the digest comparison.
 
 `docs/ftg-geojson-import.md` is the full schema, the measurements behind each of
 these, and the remaining stages. Built and pasted on all three exports:
