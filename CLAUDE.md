@@ -15,6 +15,7 @@ This file is the internal engineering notes. User-facing docs:
 `docs/building-massing.md` (storeys, footprints and yards by settlement size),
 `docs/great-buildings.md` (markets, warehouses, churches and the halls --
   designed, not built),
+`docs/market-squares.md` (the grown plaza and its market; stall pick pending the probe),
 `docs/fencing.md` (field walls, and why they are not on the grid),
 `docs/roofscape.md` (roofing, chimney placement and rooftop terraces --
   the roofing and the chimneys are built; the terraces are still design),
@@ -1763,6 +1764,12 @@ fine while the board was visibly broken:
    read as one**: two styles that share no piece cannot fail the same way about
    their own pieces. Corrected, 0 pieces intrude on any style, and the map
    check's off-map pair on the Pinfold golden were inside it all along.
+9. The market dressing's keep-clear set guarded the *anchor* cell of each
+   stall while the stall's box -- wider than its pitch -- stood on cells the
+   plan never looked at: three abreast sealed 8 cells of Forest Church's
+   square against its own frontage. `verify.market_square_open` reads the
+   emitted boxes and caught it on the first real town; the pass now floods
+   connectivity before anything stands (`docs/market-squares.md`).
 
 `verify.check_placements` and `verify.enclosed_voids` measure emitted boxes and
 the written chunk plan respectively. **New checks go there, not into the
