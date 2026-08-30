@@ -28,6 +28,15 @@ def q(*terms: str, **kwargs) -> Query:
 #: Roles every style must be able to resolve for building generation to work.
 REQUIRED_ROLES = ("floor", "wall", "door", "roof")
 
+#: Roles a style may declare *speculatively*: the queries are structured
+#: guesses at a vocabulary no local catalog has confirmed, and the one pass
+#: that reads each of them degrades cleanly when it resolves to nothing
+#: (`_dress_market` swaps a missing stall for a goods cluster and simply
+#: omits a missing well). ``validate()`` therefore does not fail a style for
+#: declaring one it cannot resolve -- that check exists for roles whose
+#: absence leaves a silent hole in the geometry, and these leave none.
+OPTIONAL_ROLES = frozenset({"market_stall", "plaza_well"})
+
 #: Roles placed into a wall segment; all must share the wall's footprint.
 WALL_SEGMENT_ROLES = ("door", "wall_window", "wall_interior")
 
@@ -634,6 +643,31 @@ MEDIEVAL = Style(
             _prop(name=("Crate - Large", "Baskets", "Apple Basket",
                         "Barrels", "Sack", "Bench -Shabby"), **_MED),
         ],
+        # The stall itself: the covered booth a market row is built from.
+        # **Speculative queries, deliberately** (`OPTIONAL_ROLES`): no catalog
+        # on the machine this was written on could confirm what the Medieval
+        # Fantasy pack calls a stall, so nothing is pinned by name -- a
+        # fabricated name would resolve to nothing forever while *looking*
+        # pinned. Structured filters only, broadest last; whatever they find
+        # goes through `tools/market_probe.py` before it is trusted, the same
+        # gauntlet every wall and roof piece ran. `_dress_market` builds the
+        # row from goods clusters when this resolves to nothing, so a miss
+        # costs canvas roofs, never a build.
+        "market_stall": [
+            _prop(group=("stall", "market stall", "market stand", "stand"),
+                  exclude_tags=_OFF_THEME, exclude=_WRONG_SETTING,
+                  max_height=3.5, **_MED),
+            _prop(any_tags=("stall", "market"), exclude_tags=_OFF_THEME,
+                  exclude=_WRONG_SETTING + ("sign",), max_height=3.5, **_MED),
+        ],
+        # The square's focal point. The name pin is the asset the street
+        # dressing has always placed, so it is a known-good name, not a guess;
+        # the group query behind it is for installs that lack it.
+        "plaza_well": [
+            _prop(name="Well 01", **_MED),
+            _prop(group="well", exclude_tags=_OFF_THEME,
+                  exclude=_WRONG_SETTING, **_MED),
+        ],
         # A yard is a working back-of-house, not a park: firewood, a barrow,
         # something being mended. Cut from the same corner the notch opened.
         "yard_clutter": [
@@ -1191,7 +1225,11 @@ class Palette:
 
         # A role the style *declares* but cannot resolve is a silent hole: the
         # builder skips those cells and the map comes out with gaps in it.
+        # ``OPTIONAL_ROLES`` are exempt -- their passes degrade by design, so
+        # an install without a matching asset still builds a whole map.
         for role in self.style.roles:
+            if role in OPTIONAL_ROLES:
+                continue
             if self.resolve(role) is None:
                 problems.append(f"role {role!r} is declared but resolves to nothing")
 

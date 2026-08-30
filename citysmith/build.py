@@ -7680,6 +7680,8 @@ def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
     leans on the wall rather than floating in the road, and capped at a few
     per building so a workshop reads as busy rather than barricaded.
     """
+    from . import raster as R
+
     placed = 0
     for bid, cells in sorted(tm.perimeter.items()):
         b.group = bid
@@ -7695,6 +7697,13 @@ def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
             if tm.building[oz][ox] or tm.wall[oz][ox]:
                 continue
             if taper.get((ox, oz), 0.0) is None:
+                continue
+            # A frontage on the market square can sit right on the through
+            # route crossing it. A crate against the wall there stands in the
+            # one lane a cart has -- and `verify` measures the square at cell
+            # granularity, so the pile goes one cell along instead.
+            if (tm.surface[oz][ox] == R.PLAZA
+                    and tm.street_class[oz][ox] in ("main", "cart")):
                 continue
             if (ox, oz, side) in [(dx_, dz_, s_) for dx_, dz_, s_ in
                                   tm.doors.get(bid, [])]:
@@ -7847,6 +7856,337 @@ def _hang_signs(b: Builder, tm, scatter: "Scatter", grade: float,
         scatter.one(sign, cx, cz, grade - drop + 1.4, _SIDE_ROT[side])
 
 
+#: A stall row repeats every third line across the square: one line of
+#: stalls, then a two-cell walking aisle. Two cells is the project's own
+#: pedestrian floor (`raster.LANE_TILES`): a market lane that two people
+#: cannot pass abreast in is a queue, not a lane. A stall deeper than one
+#: cell widens the period by its extra depth, so the aisle never shrinks.
+MARKET_ROW_PERIOD = 3
+
+#: A prop shorter than this blocks nothing -- a basket is stepped over, a
+#: stall or a crate is stood behind. Shared with
+#: `verify.market_square_open`, which measures the same threshold on the
+#: emitted boxes, so the pass and the check cannot disagree about what an
+#: obstacle is.
+MARKET_BLOCKS_ABOVE = 0.5
+
+#: Share of eligible stall pitches that get a stall; the rest carry loose
+#: goods, so a row reads as a working market with gaps rather than a terrace
+#: of identical booths.
+MARKET_STALL_RATE = 0.75
+
+#: Stalls standing shoulder to shoulder before a cross-gap is forced. Two
+#: stalls at a two-cell pitch is a 20 ft counter; the first build without
+#: this put three in a run on Forest Church and the 30 ft wall of counters
+#: sealed 8 cells of the square against its own frontage -- caught by
+#: `verify.market_square_open`, on the first real town it ran on.
+MARKET_MAX_STALL_RUN = 2
+
+#: Measured on 2,382 hand-placed props from community interiors
+#: (`docs/interior-slabs.md`): 84% sit on a quarter turn and 0.1% on a cell
+#: centre -- against this generator's old uniform-random-of-24 at dead
+#: centre, which is a prop version of the shape-assumption bug. Goods follow
+#: the measured distribution; stalls are always on quarter turns, because a
+#: row is a deliberate structure.
+MARKET_QUARTER_TURN_RATE = 0.84
+
+
+def _plaza_components(tm) -> list[list[tuple[int, int]]]:
+    """Connected plaza regions, largest first, everything in scan order."""
+    from . import raster as R
+
+    cells = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+             if tm.surface[z][x] == R.PLAZA}
+    comps: list[list[tuple[int, int]]] = []
+    left = set(cells)
+    while left:
+        start = min(left)
+        comp = {start}
+        queue = collections.deque([start])
+        while queue:
+            x, z = queue.popleft()
+            for dx, dz in NEIGHBOURS:
+                n = (x + dx, z + dz)
+                if n in left and n not in comp:
+                    comp.add(n)
+                    queue.append(n)
+        left -= comp
+        comps.append(sorted(comp))
+    comps.sort(key=lambda c: (-len(c), c[0]))
+    return comps
+
+
+def _market_axis(comp: list[tuple[int, int]]) -> str:
+    """Which way the stall rows run: along the square's longer spread."""
+    n = len(comp)
+    mx = sum(c[0] for c in comp) / n
+    mz = sum(c[1] for c in comp) / n
+    vx = sum((c[0] - mx) ** 2 for c in comp)
+    vz = sum((c[1] - mz) ** 2 for c in comp)
+    return "x" if vx >= vz else "z"
+
+
+def _stall_rotation(stall: Asset, axis: str, face: int) -> int:
+    """Quarter turn that lays the stall along its row, front to the aisle.
+
+    The stall's long side runs along the row, read off the asset's own
+    footprint the way :func:`place_wall` does -- assuming the mesh's axis is
+    the third wall-piece lesson in CLAUDE.md waiting to repeat. Which quarter
+    turn is the mesh's *front* is per-asset and cannot be known without the
+    probe (`tools/market_probe.py` lays a facing row per candidate); a wrong
+    reading here shows as every stall turning its back on the aisle and is
+    one constant away from right.
+    """
+    rot = ROT_S if face > 0 else ROT_N
+    if axis == "z":
+        rot = (rot + _QUARTER) % 24
+    if stall.size_z > stall.size_x:
+        rot = (rot + _QUARTER) % 24
+    return rot
+
+
+def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
+                  taper: dict[tuple[int, int], float | None]) -> bool:
+    """Lay out the market on the plaza: stall rows, aisles, a well, goods.
+
+    The old dressing scattered goods at p=0.16 per plaza cell and called it a
+    market. Uniform scatter is exactly what hand-built boards do not do
+    (`docs/interior-slabs.md`): people place props in runs and clusters, on
+    quarter turns, at densities three to five times ours. So the square gets
+    structure instead: rows of stalls along its long axis with two-cell
+    aisles between them, goods clustered in and around the rows, one well as
+    the focal point -- and nothing at all on the cells that have a job:
+
+    - the through route (`street_class` main/cart) stays open for carts;
+    - the frontage strip -- any cell against a building or the town wall --
+      stays clear, because doors open onto the square and the trade-goods
+      pass leans its wares there;
+    - the mouths of the streets and lanes entering the square stay clear,
+      so the market never reads as a barricade across an entrance.
+
+    Returns True when a well was placed, so the street dressing does not
+    stand a second one somewhere else in town. Degrades role by role: no
+    stall asset means goods clusters where the stalls would stand, no goods
+    means bare gaps, no well means no well -- never an error, because every
+    one of these roles is speculative until probed (`palette.OPTIONAL_ROLES`).
+    """
+    from . import raster as R
+
+    comps = _plaza_components(tm)
+    if not comps:
+        return False
+
+    stall = b.palette.resolve("market_stall")
+    goods = [g for g in (b.palette.resolve("market_goods", v) for v in range(4))
+             if g is not None]
+    well = b.palette.resolve("plaza_well")
+    if stall is None and not goods and well is None:
+        return False
+
+    door_fronts: set[tuple[int, int]] = set()
+    for bid in sorted(tm.doors):
+        for x, z, side in tm.doors[bid]:
+            dx, dz = next((d, e) for s, d, e in SIDE_OFFSETS if s == side)
+            door_fronts.add((x + dx, z + dz))
+
+    well_placed = False
+    for comp in comps:
+        # Seeded per square from its own lowest cell, the same way
+        # `_notch_buildings` seeds per building -- so a rebuild lays the same
+        # market and a second square on the same map lays a different one.
+        rng = random.Random(zlib.crc32(f"market:{comp[0]}".encode()))
+
+        keep: set[tuple[int, int]] = set()
+        for x, z in comp:
+            if tm.street_class[z][x] in ("main", "cart"):
+                keep.add((x, z))
+            elif any(tm.inside(x + dx, z + dz)
+                     and (tm.building[z + dz][x + dx] or tm.wall[z + dz][x + dx])
+                     for dx, dz in NEIGHBOURS):
+                keep.add((x, z))
+            elif any(tm.inside(x + dx, z + dz)
+                     and not tm.building[z + dz][x + dx]
+                     and tm.surface[z + dz][x + dx] in (R.STREET, R.LANE)
+                     for dx, dz in NEIGHBOURS):
+                keep.add((x, z))
+            elif any((x + dx, z + dz) in door_fronts
+                     for dx in (-1, 0, 1) for dz in (-1, 0, 1)):
+                keep.add((x, z))
+
+        cellset = set(comp)
+
+        def clear(c: tuple[int, int]) -> bool:
+            return c not in keep and taper.get(c, 0.0) is not None
+
+        def ground(c: tuple[int, int]) -> float:
+            return grade - (taper.get(c, 0.0) or 0.0)
+
+        blocked: set[tuple[int, int]] = set()
+
+        def covered(asset: Asset, cx: float, cz: float, rot: int
+                    ) -> set[tuple[int, int]]:
+            """Cells this box would block: centre-of-cell coverage, the same
+            measure `verify.market_square_open` applies to the emitted boxes,
+            so the plan and the check cannot disagree."""
+            if asset.size_y < MARKET_BLOCKS_ABOVE:
+                return set()
+            sx, sz = rotated_footprint(asset, rot)
+            x0, z0 = cx - sx / 2, cz - sz / 2
+            x1, z1 = cx + sx / 2, cz + sz / 2
+            return {
+                (gx, gz)
+                for gx in range(int(math.floor(x0)), int(math.ceil(x1)))
+                for gz in range(int(math.floor(z0)), int(math.ceil(z1)))
+                if x0 <= gx + 0.5 <= x1 and z0 <= gz + 0.5 <= z1
+            }
+
+        def may_stand(cover: set[tuple[int, int]]) -> bool:
+            """A blocker may stand where every cell it blocks is square and
+            free, and where the room it leaves is still one room.
+
+            The keep-clear set guards the *anchor* cell; the box is what
+            actually stands on the ground, and an asset wider than its pitch
+            reaches cells the plan never looked at. The connectivity flood is
+            the plan-side twin of `verify.market_square_open`: on the first
+            real town this ran on, two stalls and a neighbour sealed 8 cells
+            of the square against its own frontage, and only the emitted-box
+            check saw it. Now nothing is placed that would do it.
+            """
+            if not cover:
+                return True
+            if any(c not in cellset or c in keep for c in cover):
+                return False
+            open_cells = cellset - blocked - cover
+            if not open_cells:
+                return False
+            start = min(open_cells)
+            seen = {start}
+            queue = collections.deque([start])
+            while queue:
+                x, z = queue.popleft()
+                for dx, dz in NEIGHBOURS:
+                    n = (x + dx, z + dz)
+                    if n in open_cells and n not in seen:
+                        seen.add(n)
+                        queue.append(n)
+            return len(seen) == len(open_cells)
+
+        # The well: the square's one landmark, at the middle of the biggest
+        # square in town and nowhere else. Placed first so the rows keep a
+        # ring of standing room around it.
+        if not well_placed and well is not None:
+            n = len(comp)
+            cx = sum(c[0] for c in comp) / n
+            cz = sum(c[1] for c in comp) / n
+            for x, z in sorted(
+                    (c for c in comp if clear(c)),
+                    key=lambda c: ((c[0] + 0.5 - cx) ** 2
+                                   + (c[1] + 0.5 - cz) ** 2, c)):
+                rot = _QUARTER * rng.randrange(4)
+                cover = covered(well, x + 0.5, z + 0.5, rot)
+                if (may_stand(cover)
+                        and scatter.one(well, x + 0.5, z + 0.5,
+                                        ground((x, z)), rot)):
+                    well_placed = True
+                    blocked |= cover
+                    for dx in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            keep.add((x + dx, z + dz))
+                    break
+
+        axis = _market_axis(comp)
+        if axis == "x":
+            line_of, along = (lambda c: c[1]), (lambda c: c[0])
+        else:
+            line_of, along = (lambda c: c[0]), (lambda c: c[1])
+        lines = sorted({line_of(c) for c in comp})
+
+        def drop_goods(x: int, z: int, count: int) -> None:
+            for _ in range(count):
+                g = goods[rng.randrange(len(goods))]
+                if max(g.size_x, g.size_z) > 0.9:
+                    # A bench or a cart is row-scale: it lies *along* the
+                    # row, so its length reaches into the next pitch and
+                    # never across an aisle.
+                    lengthwise = (g.size_x >= g.size_z) == (axis == "x")
+                    rot = (0 if lengthwise else _QUARTER) \
+                        + 2 * _QUARTER * rng.randrange(2)
+                else:
+                    rot = (_QUARTER * rng.randrange(4)
+                           if rng.random() < MARKET_QUARTER_TURN_RATE
+                           else rng.randrange(24))
+                sx, sz = rotated_footprint(g, rot)
+                # Jittered off the cell centre -- 0.1% of hand-placed props
+                # sit on one -- but clamped so the box cannot reach a
+                # neighbouring cell's centre and block an aisle by accident.
+                jx = rng.uniform(-1, 1) * min(0.28, max(0.0, 0.95 - sx / 2))
+                jz = rng.uniform(-1, 1) * min(0.28, max(0.0, 0.95 - sz / 2))
+                gx, gz = x + 0.5 + jx, z + 0.5 + jz
+                cover = covered(g, gx, gz, rot)
+                if may_stand(cover) and scatter.one(g, gx, gz,
+                                                    ground((x, z)), rot):
+                    blocked.update(cover)
+
+        # A stall deeper than a cell eats lines behind its counter, so the
+        # period stretches to keep two clear aisle lines whatever the asset
+        # measures -- the depth is data, not an assumption.
+        if stall is not None:
+            probe_rot = _stall_rotation(stall, axis, 1)
+            psx, psz = rotated_footprint(stall, probe_rot)
+            deep = max(1, math.ceil(psz if axis == "x" else psx))
+        else:
+            deep = 1
+        period = max(MARKET_ROW_PERIOD, 2 + deep)
+
+        for k, ln in enumerate(ln for i, ln in enumerate(lines)
+                               if i % period == 1):
+            face = 1 if k % 2 == 0 else -1
+            rot = _stall_rotation(stall, axis, face) if stall is not None else 0
+            if stall is not None:
+                sx, sz = rotated_footprint(stall, rot)
+                pitch = max(1, math.ceil(sx if axis == "x" else sz))
+                cross = sz if axis == "x" else sx
+            else:
+                pitch = 1
+
+            row = sorted((c for c in comp if line_of(c) == ln and clear(c)),
+                         key=along)
+            pos = 0
+            in_run = 0
+            while pos < len(row):
+                c = row[pos]
+                run = [row[pos + j] for j in range(pitch)
+                       if pos + j < len(row)
+                       and along(row[pos + j]) == along(c) + j]
+                if (stall is not None and len(run) == pitch
+                        and in_run < MARKET_MAX_STALL_RUN
+                        and rng.random() < MARKET_STALL_RATE):
+                    # Front edge on the aisle boundary, depth reaching back
+                    # -- a counter is stood behind, not centred on a line.
+                    front = ln + 1 - cross / 2.0 if face > 0 else ln + cross / 2.0
+                    if axis == "x":
+                        mx, mz = c[0] + pitch / 2.0, front
+                    else:
+                        mx, mz = front, c[1] + pitch / 2.0
+                    cover = covered(stall, mx, mz, rot)
+                    if (may_stand(cover)
+                            and scatter.one(stall, mx, mz, ground(c), rot)):
+                        blocked |= cover
+                        in_run += 1
+                        pos += pitch
+                        continue
+                # A gap in the row -- a pitch nobody took, a stall the
+                # collision test refused, or the cross-gap forced after
+                # `MARKET_MAX_STALL_RUN` stalls so a row is never one long
+                # counter -- carries the loose goods, so the clutter clusters
+                # along the rows instead of misting the whole square.
+                in_run = 0
+                if goods and rng.random() < 0.6:
+                    drop_goods(c[0], c[1], 1 + (rng.random() < 0.35))
+                pos += 1
+    return well_placed
+
+
 def _dress_districts(b: Builder, tm, grade: float,
                      taper: dict[tuple[int, int], float | None],
                      storeys: int = 3,
@@ -7910,9 +8250,13 @@ def _dress_districts(b: Builder, tm, grade: float,
         _hang_signs(b, tm, scatter, grade, taper)
         _hang_lanterns(b, tm, scatter, grade, taper, storeys)
         b.group = ""
+    # The market square gets a laid-out market, not scatter -- rows, aisles,
+    # a well (`_dress_market`). Before the trees so nothing sprouts in a
+    # spot a stall was about to take, and the scatter keeps everything else
+    # clear of the stalls afterwards.
+    with b.layer(LANDSCAPE):
+        plaza_dressed = _dress_market(b, tm, scatter, grade, taper)
     near_town = building_distance(tm)
-    market = [b.palette.resolve("market_goods", v) for v in range(4)]
-    market = [m for m in market if m is not None]
     yard = [b.palette.resolve("yard_clutter", v) for v in range(4)]
     yard = [y for y in yard if y is not None]
     reeds = [b.palette.resolve("marsh_reed", v) for v in range(6)]
@@ -7956,7 +8300,6 @@ def _dress_districts(b: Builder, tm, grade: float,
                         return True
         return False
 
-    plaza_dressed = False
     for z in range(tm.depth):
         for x in range(tm.width):
             surf = tm.surface[z][x]
@@ -8106,18 +8449,8 @@ def _dress_districts(b: Builder, tm, grade: float,
                                 z + 0.5 + rng.uniform(-0.2, 0.2),
                                 here, rng.randrange(24))
 
-            elif surf == R.PLAZA:
-                # A square with nothing on it is worse than no square. Goods
-                # cluster loosely, leaving room in the middle for the crowd --
-                # and for whatever the party is about to do in it.
-                if market and rng.random() < 0.16 * detail:
-                    scatter.one(market[rng.randrange(len(market))],
-                                x + 0.5 + rng.uniform(-0.2, 0.2),
-                                z + 0.5 + rng.uniform(-0.2, 0.2),
-                                here, rng.randrange(24))
-                elif well is not None and not plaza_dressed and rng.random() < 0.06:
-                    if scatter.one(well, x + 0.5, z + 0.5, here, rng.randrange(24)):
-                        plaza_dressed = True
+            # PLAZA is deliberately absent here: the square is laid out by
+            # `_dress_market` above -- rows and aisles, not a per-cell roll.
 
             elif surf == R.LANE:
                 # Lanes are where things get left, sparsely and against a wall.
@@ -8126,10 +8459,11 @@ def _dress_districts(b: Builder, tm, grade: float,
                                 x + 0.5, z + 0.5, here, rng.randrange(24))
 
             elif surf == R.STREET:
-                # This export has no plaza cells (MFCG's squares came through
-                # empty), so market clutter leans against buildings along the
-                # streets instead: barrels and carts where a street cell
-                # touches a wall, and one well at the busiest such spot.
+                # Street clutter leans against buildings: barrels and carts
+                # where a street cell touches a wall. The well lands here only
+                # on a town that ended up with no plaza at all (the carve is a
+                # fallback and can find nothing) -- otherwise `_dress_market`
+                # already stood it in the square.
                 if not near(x, z, frozenset()):  # building adjacency only
                     continue
                 # Only the street cells that *touch* a building are eligible,

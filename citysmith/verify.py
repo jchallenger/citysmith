@@ -468,6 +468,95 @@ def check_placements(builder, tm) -> list[str]:
     problems.extend(_prop_collisions(builder))
     problems.extend(_boundaries_stay_on_the_map(builder, tm))
     problems.extend(_boundaries_do_not_block_a_way(builder, tm))
+    problems.extend(market_square_open(builder, tm))
+    return problems
+
+
+def market_square_open(builder, tm) -> list[str]:
+    """The market must leave the square one walkable room, off the cart route.
+
+    Measured on the *emitted boxes*, not on the dressing pass's intentions,
+    per this project's metrics rule: the pass can believe its keep-clear set
+    and still be wrong -- a stall footprint wider than its pitch, or a goods
+    cluster jittered across a cell line, blocks a cell no plan recorded.
+    A prop's box blocks a cell when it covers the cell's centre and stands
+    taller than :data:`_MARKET_BLOCKS_ABOVE`.
+
+    Two claims, per plaza region: the unblocked cells stay one connected
+    room (a stall row must never wall off a corner of the square), and no
+    cell of the through route crossing the square (`street_class` main/cart)
+    is blocked at all -- that is the lane the carts have. A prop shorter
+    than `build.MARKET_BLOCKS_ABOVE` blocks nothing: a basket is stepped
+    over, a stall or a crate is stood behind.
+    """
+    from .build import MARKET_BLOCKS_ABOVE, placed_bounds
+
+    plaza = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+             if tm.surface[z][x] == PLAZA}
+    if not plaza:
+        return []
+
+    catalog = builder.palette.catalog
+    blocked: set[tuple[int, int]] = set()
+    for p in builder.placements:
+        asset = catalog.by_id(p.asset_id)
+        if asset is None or asset.kind != "prop":
+            continue
+        if asset.size_y < MARKET_BLOCKS_ABOVE:
+            continue
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        for cx in range(int(math.floor(x0)), int(math.ceil(x1))):
+            for cz in range(int(math.floor(z0)), int(math.ceil(z1))):
+                if (cx, cz) in plaza and x0 <= cx + 0.5 <= x1 and z0 <= cz + 0.5 <= z1:
+                    blocked.add((cx, cz))
+
+    problems: list[str] = []
+
+    routed = sorted(c for c in blocked
+                    if tm.street_class[c[1]][c[0]] in ("main", "cart"))
+    if routed:
+        problems.append(
+            f"{len(routed)} market placements stand on the through route "
+            f"crossing the square (first at x={routed[0][0]}, z={routed[0][1]}) "
+            "-- that is the lane the carts have")
+
+    # Each plaza region separately: an FTG town can author several squares.
+    left = set(plaza)
+    while left:
+        start = min(left)
+        comp = {start}
+        queue = [start]
+        while queue:
+            x, z = queue.pop()
+            for _, dx, dz in SIDES:
+                n = (x + dx, z + dz)
+                if n in left and n not in comp:
+                    comp.add(n)
+                    queue.append(n)
+        left -= comp
+
+        open_cells = comp - blocked
+        if not open_cells:
+            problems.append(
+                f"the {len(comp)}-cell square at {min(comp)} is completely "
+                "covered by market dressing -- there is no room to stand")
+            continue
+        seen = {min(open_cells)}
+        queue = [min(open_cells)]
+        while queue:
+            x, z = queue.pop()
+            for _, dx, dz in SIDES:
+                n = (x + dx, z + dz)
+                if n in open_cells and n not in seen:
+                    seen.add(n)
+                    queue.append(n)
+        if seen != open_cells:
+            cut = min(open_cells - seen)
+            problems.append(
+                f"market dressing walls off {len(open_cells) - len(seen)} of "
+                f"{len(open_cells)} open cells in the square at {min(comp)} "
+                f"(first stranded cell x={cut[0]}, z={cut[1]}) -- the square "
+                "must stay one walkable room")
     return problems
 
 
