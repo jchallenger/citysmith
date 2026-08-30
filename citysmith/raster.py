@@ -1448,8 +1448,16 @@ GATE_SAMPLE = 6
 #: wall that a mural tower needs to stand on.
 GATE_APPROACH = 4
 
+#: What a successful carve hands back: the cells cut, the passage direction,
+#: the across-the-passage direction, and the ``(lo, width)`` of the strip --
+#: everything `_add_second_gate` needs to pave the approach along the same
+#: line. ``None`` means nothing was cut, and it is the *only* failure value.
+GateCut = tuple[
+    list[tuple[int, int]], tuple[int, int], tuple[int, int], tuple[int, int]
+]
 
-def _carve_gate(tm: TileMap, cx: int, cz: int, road_width: float) -> bool:
+
+def _carve_gate(tm: TileMap, cx: int, cz: int, road_width: float) -> GateCut | None:
     """Cut a straight, axis-aligned passage through the wall band.
 
     **The passage has to be square, or the gate can never have doors.** The
@@ -1471,7 +1479,10 @@ def _carve_gate(tm: TileMap, cx: int, cz: int, road_width: float) -> bool:
             for x in range(max(0, cx - GATE_SAMPLE), min(tm.width, cx + GATE_SAMPLE + 1))
             if tm.wall[z][x]]
     if not band:
-        return False
+        # None, not False: `_add_second_gate` tests ``carved is None`` and
+        # then unpacks, so a bare False here was a latent TypeError -- the
+        # annotation said bool while the success path returned a tuple.
+        return None
 
     # Principal axis of the band = the direction the wall runs. The passage
     # goes across it, snapped to a cardinal so the jambs come out straight.

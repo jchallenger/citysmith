@@ -2473,6 +2473,27 @@ def test_a_gate_passage_is_square_so_a_door_can_hang_in_it():
     assert all((x, z) in tm.gates and not tm.wall[z][x] for x, z in cut)
 
 
+def test_a_gate_point_with_no_wall_in_reach_carves_nothing_and_returns_none():
+    """The empty-band path used to return a bare ``False`` from a function
+    annotated ``-> bool`` whose success path returns a tuple. Every caller
+    that checks at all checks ``is None`` -- `_add_second_gate` does, and then
+    unpacks -- so a ``False`` slipping through the check is a TypeError at the
+    unpack. One failure sentinel, not two."""
+    from citysmith.raster import GATE_SAMPLE, MAIN_STREET_TILES, _carve_gate
+
+    tm = _ring_map()
+    # The centre of the ring is further than GATE_SAMPLE from the band, so
+    # the carve finds no wall at all. Prove the premise before the claim.
+    assert not any(tm.wall[z][x]
+                   for z in range(17 - GATE_SAMPLE, 17 + GATE_SAMPLE + 1)
+                   for x in range(17 - GATE_SAMPLE, 17 + GATE_SAMPLE + 1))
+    carved = _carve_gate(tm, 17, 17, MAIN_STREET_TILES)
+    assert carved is None, (
+        f"empty-band carve returned {carved!r}; _add_second_gate tests "
+        "`is None` before unpacking, so any other sentinel is a latent crash")
+    assert not tm.gates, "nothing was cut, so no cell should be a gate"
+
+
 def test_a_one_gate_circuit_gets_a_postern_opposite():
     """A walled town with a single entrance is a cul-de-sac: every approach,
     sortie and chase funnels through the same arch."""
