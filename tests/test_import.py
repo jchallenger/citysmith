@@ -417,6 +417,82 @@ def test_trails_are_not_thoroughfares():
     assert "trail" in raster.NOT_THOROUGHFARES
 
 
+# -- authored bridges ---------------------------------------------------------
+
+def _channel_and_bridge() -> Layout:
+    """A water channel four tiles wide, with an authored bridge quad across it
+    that overhangs both banks by two tiles -- the shape FTG's ``raised``
+    ROAD_TEXTURE quads actually have (a ~20x20 m quad is wider than the
+    stream it crosses, so its abutments land on dry ground)."""
+    from citysmith.layout import LayoutArea
+
+    layout = Layout(name="crossing", source="ftg", width=20.0, depth=12.0)
+    layout.areas = [
+        LayoutArea("water", [(8.0, 0.0), (12.0, 0.0), (12.0, 12.0), (8.0, 12.0)]),
+        LayoutArea("bridge", [(6.0, 4.0), (14.0, 4.0), (14.0, 8.0), (6.0, 8.0)]),
+    ]
+    return layout
+
+
+def test_an_authored_bridge_decks_the_water_and_only_the_water():
+    """`LayoutArea("bridge")` cells become PIER exactly where the surface was
+    WATER. The overhang stays bank: a pier tile over grass is a timber
+    platform on dry land, and the bank itself is the approach -- the deck is
+    laid by its top at grade, so it meets the bank flush with nothing added."""
+    from citysmith import raster
+
+    tm = raster.rasterize(_channel_and_bridge(), bridges=False)
+    for z in range(4, 8):
+        for x in range(8, 12):
+            assert tm.surface[z][x] == raster.PIER, (x, z)
+        for x in (6, 7, 12, 13):
+            assert tm.surface[z][x] == raster.GROUND, (
+                f"overhang at {(x, z)} must stay bank, not become deck over grass")
+    for z in (0, 3, 8, 11):
+        for x in range(8, 12):
+            assert tm.surface[z][x] == raster.WATER, (x, z)
+
+
+def test_the_channel_runs_on_under_an_authored_deck(catalog_palette):
+    """An authored bridge cell is a plank cell once the raster paints it PIER:
+    `_lay_terrain` beds and fills it like the water either side, and
+    `_lay_bridges` lays the deck by its top, flush with the bank."""
+    import math
+
+    from citysmith import raster
+    from citysmith.build import (
+        WATER_SURFACE_DROP, Builder, _lay_bridges, _lay_terrain,
+    )
+
+    tm = raster.rasterize(_channel_and_bridge(), bridges=False)
+    palette = catalog_palette
+    b = Builder(palette, 0)
+    grade = palette.require("floor").size_y
+    _lay_terrain(b, tm, {raster.GROUND: "ground", raster.STREET: "street"},
+                 grade=grade, taper={})
+    laid = _lay_bridges(b, tm, grade=grade, taper={})
+    assert laid == 16, "one deck per pier cell"
+
+    # The stub has no bridge_deck pin, so the deck falls back to the street
+    # role -- the fallback `_lay_bridges` documents.
+    deck = palette.require("street")
+    ground = palette.require("ground")
+
+    def at_cell(x: int, z: int):
+        return [p for p in b.placements
+                if (int(math.floor(p.x + 1e-6)),
+                    int(math.floor(p.z + 1e-6))) == (x, z)]
+
+    decks = [p for p in at_cell(10, 5) if p.asset_id == deck.id]
+    assert len(decks) == 1, "one deck tile on the pier cell"
+    assert abs(decks[0].y + deck.size_y - grade) < 1e-6, (
+        "the deck's top is the bank's top")
+    beds = [p for p in at_cell(10, 5) if p.asset_id == ground.id]
+    assert beds, "the channel is bedded under the deck"
+    assert all(p.y + ground.size_y <= grade - WATER_SURFACE_DROP + 1e-6
+               for p in beds), "the bed sits below the water column, not at grade"
+
+
 # -- the town wall ------------------------------------------------------------
 
 def test_the_wall_band_is_thick_enough_to_have_a_core(village: Layout):

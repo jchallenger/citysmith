@@ -615,6 +615,27 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
                         and _CLASS_RANK[cls] > _CLASS_RANK[tm.street_class[z][x]]):
                     tm.street_class[z][x] = cls
 
+    # Authored bridges: FTG's `raised` quads arrive as LayoutArea("bridge")
+    # and become PIER, which is all `_lay_bridges` needs -- the deck, the
+    # rails and the channel bedded on beneath all follow from the surface
+    # class, exactly as they do for the planks MFCG draws. Two rules:
+    #
+    # * **Only water becomes deck.** The authored quad overhangs its banks --
+    #   a ~20x20 m quad is wider than the stream it crosses, so its abutments
+    #   land on dry ground -- and a pier tile over grass is a timber platform
+    #   on a lawn. The overhang simply stays whatever the bank is; the deck is
+    #   laid by its top at grade (`_lay_bridges`), so it meets that bank flush
+    #   with nothing added.
+    # * **Painted after the roads**, because rivers arrive as *roads* on MFCG
+    #   maps and the road loop paints them unconditionally -- PIER laid before
+    #   it would be erased by the very channel it is meant to cross. After the
+    #   loop, `over={WATER}` reads the finished water extent, and a road that
+    #   already claimed its own crossing (STREET paints over WATER; that is
+    #   today's road bridge) keeps it -- the quad decks the water around it.
+    for area in layout.areas_of("bridge"):
+        paint(_fill_polygon(shift(area.ring), width, depth), PIER,
+              over=frozenset({WATER}))
+
     for area in layout.areas_of("plaza"):
         paint(_fill_polygon(shift(area.ring), width, depth), PLAZA)
     for area in layout.areas_of("park"):
