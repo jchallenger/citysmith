@@ -9,6 +9,8 @@ physics and a token dropped in a door is a door that does not open.
 
 from __future__ import annotations
 
+import pytest
+
 from citysmith import npcs as N
 from citysmith import raster as R
 from citysmith.layout import Layout, LayoutBuilding, LayoutRoad, settlement_band
@@ -47,6 +49,24 @@ def _town(*, houses=8, trades=(), width=80, depth=80, walls=(), gates=()):
 def _pop(layout, **kw):
     tm = R.rasterize(layout)
     return tm, N.posts(tm, layout, **kw)
+
+
+@pytest.fixture(scope="module")
+def big_town():
+    """A 302-building town, rasterised ONCE for the whole module.
+
+    Rasterising 460x460 costs 7.5 s and `N.posts` costs 0.9 s, so the two tests
+    that want a town were spending 26 s of this suite's 134 to ask two
+    questions that share an input -- and `test_the_budget_keeps_guards_before_idlers`
+    paid for it twice on its own, calling `_pop` once for the full population
+    and again for the capped one.
+
+    Safe to share because `N.posts` only reads the TileMap; nothing in
+    `npcs.py` assigns to one. Module scope rather than session so a failure
+    here cannot be a fixture some other file left dirty.
+    """
+    layout = _town(houses=300, trades=("smithy", "tavern"), width=460, depth=460)
+    return layout, R.rasterize(layout)
 
 
 def test_nobody_stands_in_a_doorway():
@@ -90,13 +110,12 @@ def test_a_hamlet_gets_no_street_watch():
     assert pop.of(N.GUARD) == []
 
 
-def test_a_town_gets_a_watch_on_its_main_street():
-    layout = _town(houses=300, width=460, depth=460)
+def test_a_town_gets_a_watch_on_its_main_street(big_town):
+    layout, tm = big_town
     assert settlement_band(len(layout.buildings)) == "town"
-    tm, pop = _pop(layout, seed=1)
+    pop = N.posts(tm, layout, seed=1)
     if not any(tm.street_class[z][x] == R.MAIN_ROAD
                for z in range(tm.depth) for x in range(tm.width)):
-        import pytest
         pytest.skip("fixture produced no main street to patrol")
     assert pop.of(N.GUARD), "a town with a main street should have a watch on it"
 
@@ -138,15 +157,14 @@ def test_an_off_duty_person_is_not_standing_at_their_own_building():
         )
 
 
-def test_the_budget_keeps_guards_before_idlers():
+def test_the_budget_keeps_guards_before_idlers(big_town):
     """A cap has to drop the least load-bearing first: an off-duty drinker is
     scenery, a gate guard is the reason the party stops."""
-    layout = _town(houses=300, trades=("smithy", "tavern"), width=460, depth=460)
-    _, full = _pop(layout, seed=1)
+    layout, tm = big_town
+    full = N.posts(tm, layout, seed=1)
     if len(full.posts) < 10:
-        import pytest
         pytest.skip("fixture too sparse to trim")
-    _, capped = _pop(layout, seed=1, budget=5)
+    capped = N.posts(tm, layout, seed=1, budget=5)
     assert len(capped.posts) == 5
     assert len(capped.of(N.GUARD)) >= min(5, len(full.of(N.GUARD)))
 
