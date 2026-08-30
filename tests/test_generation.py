@@ -2510,8 +2510,9 @@ def test_a_straight_jammed_gate_gets_its_grille_hung(catalog_palette):
     assert zs[0] <= p.z <= zs[-1] + 1, (
         f"grille at z={p.z} is outside the passage rows {zs}")
     # Seated like a wall: the stored corner on the half-tile lattice. Its
-    # first seating centred it on a cell boundary, which put the one tile on
-    # the whole board at z=x4.75 -- exactly what the off-grid canary guards.
+    # first seating centred it on a cell boundary, which on Forest Church put
+    # the one off-grid tile on the whole board at z=84.75 -- exactly what the
+    # off-grid canary guards.
     assert round(p.x * 100) % 50 == 0 and round(p.z * 100) % 50 == 0, (
         f"grille corner ({p.x}, {p.z}) is off the half-tile lattice")
     assert p.y == pytest.approx(top), "the grille should stand on the wall base"
