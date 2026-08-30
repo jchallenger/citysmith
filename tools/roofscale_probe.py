@@ -6,25 +6,30 @@ roof with ships a full 2x2 set. Measured, and the relationship is exact:
     1x1 slope / corner   1.0 tall        2x2 slope / corner   2.0 tall
     1x1 flat cap         0.5 tall        2x2 flat cap         0.5 tall
 
-So **a 2x2 slope is exactly two courses of the 1x1 field** -- two cells deep
-and two rises tall. That is the same scale relationship `END_PIECE_CELLS`
-already records for the gable end piece, and it is what makes the two sizes
-mixable at all rather than merely both present.
+So a 2x2 piece is exactly two courses of the 1x1 field -- two cells deep and
+two rises tall.
 
-Where a 2x2 goes, therefore: over a 2x2 block of cells spanning rings ``r`` and
-``r+1``, seated at ring ``r``'s course. It replaces four 1x1 placements with
-one, and the ring it lands on has to be even for the pairing to reach the
-ridge without a leftover half-course.
+**Two things were refuted before this got anywhere, and both are worth keeping.**
 
-**Seating comes from `build.place_roof_piece`, not from this file.** Five
-review rounds went into a chimney probe that re-derived it and got it wrong
-twice -- a cap by its base, a combination by its top. This probe asks a
-question about SCALE; it has no business having an opinion about height.
+First, the wide family does not share its kit's 1x1 rotation. Rural and Tavern
+both close at (12, 12) while their small conventions are (0, 0) and (6, 6), so
+no rule takes one table to the other -- `ROOF_ROT_OFFSET_WIDE`, swept with
+`roofrot_probe.py --hips --footprint wide`.
 
-    1  1x1 only, the shipped roof            -- the control
-    2  2x2 where a full block fits, 1x1 rest
-    3  2x2, on a roof one ring deeper        -- does the pairing reach the ridge
-    4  2x2 corners only, 1x1 straight runs   -- corners are where a hip reads
+Second, and this is the shape of the answer: **mixing the scales inside one
+roof does not work even with the right turn.** Dropping 2x2 blocks into a 1x1
+ring layout leaves holes wherever the coarse piece and the fine ring structure
+disagree, which is most places. But the rotation sweep also showed a hip built
+ENTIRELY at 2x2 on a coarse grid closing perfectly. So the unit of choice is
+the ROOF, not the cell: a wing whose footprint is even in both dimensions can
+be built wholly at the double scale, and one that is not stays wholly at the
+single one.
+
+    1  1x1, 8x8      the shipped roof, control
+    2  2x2, 8x8      the same roof built wholly on a 4x4 coarse grid
+    3  1x1, 10x10    control
+    4  2x2, 10x10    coarse, 5x5 -- an odd coarse grid, so its ridge is a cell
+                     rather than a line and the comparison is the harder one
 
     python tools/roofscale_probe.py > out/roofscale.slab.txt
 """
@@ -36,9 +41,9 @@ import sys
 sys.path.insert(0, ".")
 
 from citysmith.build import (
-    ROOF_CORNER_ROT, ROOF_EDGE_ROT, SIDE_OFFSETS, _is_reflex,
+    CORNER_BY_SIDES, ROOF_CORNER_ROT, ROOF_EDGE_ROT, SIDE_OFFSETS, _is_reflex,
     _normalized_whole_tiles, _roof_piece, _roof_rings, place_roof_piece,
-    place_tile, place_wall, roof_offsets,
+    place_tile, place_wall, roof_offsets, roof_offsets_wide,
 )
 from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
@@ -50,10 +55,10 @@ STOREYS = 2
 
 #: (label, box, mode). `mode` is "1x1", "2x2" or "corners".
 TREATMENTS = [
-    ("1x1 only, shipped", (8, 8), "1x1"),
-    ("2x2 where a block fits", (8, 8), "2x2"),
-    ("1x1 only, deeper roof", (10, 10), "1x1"),
-    ("2x2, deeper roof", (10, 10), "2x2"),
+    ("1x1, 8x8 (control)", (8, 8), "1x1"),
+    ("2x2 coarse, 8x8", (8, 8), "coarse"),
+    ("1x1, 10x10 (control)", (10, 10), "1x1"),
+    ("2x2 coarse, 10x10", (10, 10), "coarse"),
 ]
 
 
@@ -110,6 +115,7 @@ def main() -> None:
 
     side2 = partner(side1)
     corner2 = partner(corner1) if corner1 else None
+    cap2 = partner(cap1, want_h=cap1.size_y) if cap1 else None
     for nm, a in (("1x1 slope", side1), ("2x2 slope", side2),
                   ("1x1 corner", corner1), ("2x2 corner", corner2)):
         print(f"  {nm:12s} {a.name if a else '(none)'}", file=sys.stderr)
@@ -147,29 +153,59 @@ def main() -> None:
         roof_y = top + STOREYS * storey_h
         rings = _roof_rings(cells)
         edge_off, corner_off = roof_offsets(side1)
+        # **The wide family has its own turn.** Measured with
+        # `roofrot_probe.py --hips --footprint wide`: Rural and Tavern both
+        # close at (12, 12) while their 1x1 conventions are (0, 0) and (6, 6).
+        # The first run of this probe used the 1x1 offsets and produced
+        # misaligned planes; that was the bug, not the packing.
+        wide_off = roof_offsets_wide(side1)
         top_ring = max(rings.values())
 
         taken: set[tuple[int, int]] = set()
-        if mode == "2x2":
-            blocks, taken = two_by_two(cells, rings, top_ring)
-            for (bx, bz, r) in blocks:
-                quad = [(bx, bz), (bx + 1, bz), (bx, bz + 1), (bx + 1, bz + 1)]
-                # Which way the block falls: the side its lower ring faces.
-                low = [c for c in quad if rings[c] == r]
+        if mode == "coarse" and wide_off is None:
+            print(f"#    {side1.folder}: no wide turn measured -- 1x1 only",
+                  file=sys.stderr)
+        elif mode == "coarse":
+            # **The whole roof at the double scale, on its own grid.** Rings
+            # are computed over super-cells, a piece covers a 2x2 block, and a
+            # course rises by the piece's own 2.0. This is `lay_hip_wide`'s
+            # algorithm, which the rotation sweep showed closes cleanly -- and
+            # it is the thing that mixing scales cell by cell could not do.
+            wedge, wcorner = wide_off
+            gw, gd = bw // 2, bd // 2
+            coarse = {(gx, gz) for gx in range(gw) for gz in range(gd)}
+            grings = _roof_rings(coarse)
+            wrise = side2.size_y
+            for (gx, gz) in sorted(coarse):
+                r = grings[(gx, gz)]
+                y = roof_y + r * wrise
                 fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
-                             if any(rings.get((c[0] + dx, c[1] + dz), -1) < r
-                                    for c in low))
+                             if grings.get((gx + dx, gz + dz), -1) < r)
                 if len(fall) == 1:
                     piece = side2
-                    rot = (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24
+                    rot = (ROOF_EDGE_ROT[fall[0]] + wedge) % 24
                 elif len(fall) == 2 and corner2 is not None:
                     piece = corner2
-                    rot = (ROOF_CORNER_ROT.get("".join(sorted(fall)), 0)
-                           + corner_off) % 24
+                    # **Key the corner on a frozenset, not a sorted join.**
+                    # sorted(("n","e")) is ["e","n"] -> "en", which is not a
+                    # key, so `.get(..., 0)` silently returned rotation 0 on
+                    # the north-east and south-east corners -- half of them --
+                    # and the roof came out holed. `CORNER_BY_SIDES` exists
+                    # for this.
+                    rot = (ROOF_CORNER_ROT[CORNER_BY_SIDES[frozenset(fall)]]
+                           + wcorner) % 24
+                elif not fall:
+                    piece, rot = cap2 or cap1, 0
                 else:
                     piece, rot = side2, 0
-                out.append(place_roof_piece(piece, ox + bx, oz + bz,
-                                            roof_y + r * rise, rot, rise=rise))
+                if piece is not None:
+                    out.append(place_roof_piece(piece, ox + 2 * gx,
+                                                oz + 2 * gz, y, rot,
+                                                rise=wrise))
+            # Any odd row or column the coarse grid could not reach keeps the
+            # single scale, which is what an odd footprint gets everywhere.
+            taken = {(2 * gx + dx, 2 * gz + dz) for (gx, gz) in coarse
+                     for dx in (0, 1) for dz in (0, 1)}
 
         for (x, z) in sorted(cells):
             if (x, z) in taken:
@@ -185,7 +221,7 @@ def main() -> None:
                                             roof_y + r * rise, rot, rise=rise))
 
         print(f"# {i + 1}: r{i // COLS}c{i % COLS}  {label}  "
-              f"({bw}x{bd}, {len(taken) // 4} 2x2 block(s))", file=sys.stderr)
+              f"({bw}x{bd}, {len(taken) // 4} wide cell(s))", file=sys.stderr)
 
     byid = {a.id: a for a in palette.catalog.assets}
     print(encode(_normalized_whole_tiles(Slab(out), byid)))

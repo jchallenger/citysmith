@@ -272,6 +272,45 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale-*"
   },
+  "PROBE roof 2x2 correct turn": {
+   "board": "PROBE roof 2x2 correct turn",
+   "holds": "probe",
+   "source": "out\\roofscale.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T09:55:26",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale2-*"
+  },
+  "PROBE roof coarse 2x2": {
+   "board": "PROBE roof coarse 2x2",
+   "holds": "probe",
+   "source": "out\\roofscale.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T09:57:16",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale3-*"
+  },
+  "PROBE roof coarse 2x2 fixed": {
+   "board": "PROBE roof coarse 2x2 fixed",
+   "holds": "probe",
+   "source": "out\\roofscale.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T09:59:07",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale4-*"
+  },
   "PROBE wall bond stagger": {
    "board": "PROBE wall bond stagger",
    "holds": "probe",
