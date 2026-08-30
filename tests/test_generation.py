@@ -2473,6 +2473,50 @@ def test_a_gate_passage_is_square_so_a_door_can_hang_in_it():
     assert all((x, z) in tm.gates and not tm.wall[z][x] for x, z in cut)
 
 
+def test_a_straight_jammed_gate_gets_its_grille_hung(catalog_palette):
+    """The square passage was pinned by the test above, but nothing failed if
+    `_hang_portcullises` never hung anything in it -- and that function has
+    three silent-skip branches (no `city_gate` in the palette, ambiguous
+    jambs, a width mismatch), each of which leaves the gate standing open
+    with no report. So carve a gate the raster's own way, build the wall,
+    and demand the grille placement itself.
+    """
+    from citysmith.build import Builder, TOWN_WALL_TILES, _lay_town_wall
+    from citysmith.raster import MAIN_STREET_TILES, _carve_gate
+
+    palette = catalog_palette
+    tm = _ring_map()
+    carved = _carve_gate(tm, 17, 6, MAIN_STREET_TILES)
+    assert carved is not None, "the fixture gate did not cut"
+    top = 0.5
+    b = Builder(palette, 0)
+    _lay_town_wall(b, tm, palette.require("city_wall"), top, TOWN_WALL_TILES)
+
+    grille = palette.require("city_gate")
+    hung = [p for p in b.placements if p.asset_id == grille.id]
+    assert len(hung) == 1, (
+        f"{len(hung)} grille placements for one gate -- the hang silently "
+        "skipped (or doubled) and the passage stands open")
+    p = hung[0]
+    cut, _, _, _ = carved
+    xs = sorted({c[0] for c in cut})
+    zs = sorted({c[1] for c in cut})
+    # The ring's top band runs along x, so the opening does too: the grille
+    # lies across it unrotated, its min corner starting at the west jamb so
+    # its 4-tile length covers every column of the passage.
+    assert p.rot == 0, f"grille rotated {p.rot} across an x-run opening"
+    assert p.x == pytest.approx(xs[0]), (
+        f"grille starts at x={p.x}, the west jamb is at x={xs[0]}")
+    assert zs[0] <= p.z <= zs[-1] + 1, (
+        f"grille at z={p.z} is outside the passage rows {zs}")
+    # Seated like a wall: the stored corner on the half-tile lattice. Its
+    # first seating centred it on a cell boundary, which put the one tile on
+    # the whole board at z=x4.75 -- exactly what the off-grid canary guards.
+    assert round(p.x * 100) % 50 == 0 and round(p.z * 100) % 50 == 0, (
+        f"grille corner ({p.x}, {p.z}) is off the half-tile lattice")
+    assert p.y == pytest.approx(top), "the grille should stand on the wall base"
+
+
 def test_a_gate_point_with_no_wall_in_reach_carves_nothing_and_returns_none():
     """The empty-band path used to return a bare ``False`` from a function
     annotated ``-> bool`` whose success path returns a tuple. Every caller

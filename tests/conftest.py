@@ -71,12 +71,29 @@ GROUND = _asset("2", "Grass 1x1", "tile", 1.0, 0.5, 1.0, "grassland")
 #: bottom it is a 15 inch kerb. Stubbing them the same thickness would make
 #: the tests agree with a board the game will not produce.
 STREET = _asset("3", "CobbleStone Floor Small", "tile", 1.0, 0.25, 1.0, "floor")
+#: The town-wall kit, shaped like the real pins because `_lay_town_wall`'s
+#: whole logic is block-vs-curtain (`build.is_curtain_piece`, a dims test):
+#: the mass is a full 1x1x1 cube (really `md_stairblock_01`; named castle-*
+#: here so `_asset`'s folder inference keeps the rampart in one family), the
+#: parapet is a 0.5-deep curtain piece that stands on the lip, and the walk
+#: is a half-tile paver. Stubbing the cap as a cube would flip `crown_cell`
+#: into its cap-as-paving branch and no merlon would ever stand on a lip.
+WALL_CORE = _asset("q", "castle wall block 1x1", "tile", 1.0, 1.0, 1.0, "block")
+WALL_CAP = _asset("r", "Castle Ruins Crenellation - Small", "tile", 1.0, 1.0, 0.5, "merlon")
+WALL_WALK = _asset("s", "Castle Ruins floor stone 1x1", "tile", 1.0, 0.5, 1.0, "floor")
+WALL_STAIR = _asset("t", "Castle Ruins Stair", "tile", 1.0, 1.0, 1.0, "stairs")
+#: 4.0 wide exactly, because `_hang_portcullises` measures the grille against
+#: the passage mouth and skips any that misses by more than half a tile -- a
+#: stub of a different width would make the hang silently not happen, which
+#: is precisely what the test using it exists to catch.
+GATE = _asset("u", "Door - Portcullis double", "tile", 4.0, 3.75, 0.5, "door")
 
 
 class StubCatalog:
     assets = [FLOOR, UPPER, WALL, INNER, DOOR, STAIRS, STOOL, MARK, GROUND, STREET,
               CIVIC_WALL, CIVIC_WINDOW, CIVIC_DOOR, CIVIC_CORNER, CIVIC_FLOOR,
-              UTIL_WALL, UTIL_CORNER, CORNER, WINDOW]
+              UTIL_WALL, UTIL_CORNER, CORNER, WINDOW,
+              WALL_CORE, WALL_CAP, WALL_WALK, WALL_STAIR, GATE]
 
 
 class StubPalette:
@@ -91,6 +108,11 @@ class StubPalette:
         "door_civic": CIVIC_DOOR, "wall_corner_civic": CIVIC_CORNER,
         "floor_civic": CIVIC_FLOOR,
         "wall_utility": UTIL_WALL, "wall_corner_utility": UTIL_CORNER,
+        # The town wall: the curtain facing is the civic wall panel, exactly
+        # as the real palette pins `castle wall 1x1` for both roles.
+        "city_wall": CIVIC_WALL, "city_wall_core": WALL_CORE,
+        "city_wall_cap": WALL_CAP, "city_wall_walk": WALL_WALK,
+        "city_wall_stair": WALL_STAIR, "city_gate": GATE,
     }
 
     def __init__(self) -> None:
