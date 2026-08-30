@@ -68,7 +68,7 @@ prop: they carry standing water in the tile itself.
 sheet of wet ground with pools in the hollows of it, and reversing those two
 lines paints the fen over its own ponds.
 
-Three set memberships decide everything else, and each is a different question:
+Four set memberships decide everything else, and each is a different question:
 
 - **`WALKABLE`: yes.** The tile is solid matter at grade.
 - **`OPEN`: no.** A marsh is not a *way*. Nobody's front door opens onto a bog
@@ -78,6 +78,23 @@ Three set memberships decide everything else, and each is a different question:
 - **the street pass's `over` set: yes.** A causeway or a reedcutters' drove has
   to be able to cross the fen. Left out, every way into a wetland stops dead at
   its edge.
+- **`EDGE_LAND`: yes.** A fen at the border falls away with the field beside
+  it. Same argument as `WALKABLE`: the swamp floors measure 0.5 tall, exactly
+  like grass, so lowering a marsh cell half a tile is the same operation as
+  lowering a field -- where open water is a *level* sheet over a dropped bed
+  and stepping part of it gives the estuary waterfall §3 of `build.edge_taper`
+  is written against. It also has to be yes for the reason below: §3 carries
+  the fen to the board edge on purpose, so excluding it would shelter the
+  whole west side of Sedgewater and end the map there on the sheer cut the
+  taper exists to remove.
+
+**That last one was decided in this pass and then silently untested for the
+whole of it.** `edge_taper` got `MARSH` at the time; the copy of the same list
+in `tests/test_generation.py` did not, and the suite went on asserting the
+pre-marsh three and passing -- because the only town it was ever run against
+is Forest Church, which has no wetland anywhere on it. There is one list now
+(`raster.EDGE_LAND`), and the edge tests run on Sedgewater as well as Forest
+Church, where that assertion fires 175 times.
 
 Also excluded from: market-square siting (`_place_plaza`), wall-tower siting
 and rampart stairs (nothing is founded in a bog), and `npcs._standable` (no

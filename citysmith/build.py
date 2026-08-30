@@ -184,8 +184,14 @@ def edge_taper(tm, rings: int = EDGE_TAPER_BLOCKS,
     # two-tile causeway. A road leaving town is fine; a road leaving the world
     # is not. So a block carrying paving, and its neighbours along the border,
     # keep their ground: the road ends at the edge with shoulders.
+    # `R.EDGE_LAND` is the one definition of what the edge is made of, and it
+    # carries the reasoning for each surface in it -- including why a fen
+    # counts as land and open water does not. It used to be spelled out here,
+    # and the copy of it in the tests then went stale the moment marsh was
+    # added: the suite kept asserting the pre-marsh list and passed anyway,
+    # because the only town anyone ran it against has no wetland on it.
     paved = {b for b in border
-             if any(tm.surface[z][x] not in (R.GROUND, R.FIELD, R.MARSH)
+             if any(tm.surface[z][x] not in R.EDGE_LAND
                     for (x, z) in cells(*b))}
     sheltered = set(paved)
     for b in paved:

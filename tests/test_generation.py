@@ -23,6 +23,75 @@ def overlaps(a: Rect, b: Rect) -> bool:
     return a.x < b.x2 and b.x < a.x2 and a.z < b.z2 and b.z < a.z2
 
 
+# -- the sample town ----------------------------------------------------------
+#
+# Five tests below need a town a *generator* exported rather than one built by
+# hand: notching, the market square, and the three that check how the map's
+# edge falls away all depend on shapes a synthetic fixture would have to
+# invent.
+#
+# They used to read `out/layout.json` and skip when it was absent. That made
+# them ambient, and it cost twice over. `out/layout.json` is whatever town was
+# imported last -- the README quickstart writes the reader's own map to it --
+# so anyone following the quickstart got a failure that blamed the repo for
+# their town. And the skip said "Forest Church" while nothing checked, so the
+# subject changed silently from machine to machine: the edge-taper assertion
+# below sat stale against wetland for a whole feature without ever being run
+# on a town that had any.
+#
+# It is imported in-process from the committed sample instead, resolved
+# relative to this file rather than to the working directory -- a cwd-relative
+# path is the same ambient hazard wearing a different hat. There is
+# deliberately **no skip**: the sample is tracked, so a missing one is a broken
+# checkout and not a reason to go quietly green.
+
+SAMPLES = pathlib.Path(__file__).resolve().parent.parent / "samples"
+
+#: Both committed exports, with the arguments each is imported under.
+#:
+#: **The three edge tests run on both, and that is the point of the second
+#: one.** Forest Church has no wetland anywhere on it -- so a suite that only
+#: ever saw Forest Church could not tell a correct edge rule from one that had
+#: gone stale against marsh, and for a whole feature it did not: the assertion
+#: was wrong and green at the same time. Sedgewater is 9,066 marsh cells with
+#: 386 of them on the border, and it fires that assertion 175 times.
+#:
+#: Sedgewater's arguments are the import `docs/marsh.md` measures (227x204),
+#: so the town in the suite is the town in the docs rather than a third one
+#: nobody has described.
+TOWNS = {
+    "forest_church": (SAMPLES / "forest_church.json", {}),
+    "sedgewater": (SAMPLES / "sedgewater.geojson",
+                   dict(name="Sedgewater", core_only=False, margin_feet=200)),
+}
+
+
+@pytest.fixture(scope="module", params=sorted(TOWNS))
+def edge_tiles(request):
+    """Each committed town, rasterised: one town per test run."""
+    from citysmith import importers
+    from citysmith.raster import rasterize
+
+    path, options = TOWNS[request.param]
+    return rasterize(importers.import_layout(path, **options))
+
+
+@pytest.fixture(scope="module")
+def forest_church_bridged():
+    """Forest Church with bridges laid.
+
+    Only Forest Church, and only here. The two tests that use it are about a
+    dense MFCG town -- 51 buildings notched into L-shapes around a carved
+    market square -- and Sedgewater is a 24-building hamlet in a fen, where
+    neither claim is meant to hold.
+    """
+    from citysmith import importers
+    from citysmith.raster import rasterize
+
+    path, options = TOWNS["forest_church"]
+    return rasterize(importers.import_layout(path, **options), bridges=True)
+
+
 # -- city ---------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -1471,18 +1540,11 @@ def test_notch_is_refused_when_the_yard_is_sealed():
     assert _notch_opens_outward(tm, patch, reachable={(6, 4)})
 
 
-def test_notching_produces_l_shapes_but_keeps_every_door():
+def test_notching_produces_l_shapes_but_keeps_every_door(forest_church_bridged):
     """The whole point: vary the plan without cutting anyone off the street."""
     import collections
-    from citysmith.layout import Layout
-    from citysmith.raster import rasterize
-    import pathlib
 
-    src = pathlib.Path("out/layout.json")
-    if not src.exists():
-        pytest.skip("needs the imported Forest Church layout")
-
-    tm = rasterize(Layout.load(src), bridges=True)
+    tm = forest_church_bridged
     fp = collections.defaultdict(list)
     for z in range(tm.depth):
         for x in range(tm.width):
@@ -1499,16 +1561,10 @@ def test_notching_produces_l_shapes_but_keeps_every_door():
     assert all(tm.doors.get(bid) for bid in fp), "a notch took a building's only door"
 
 
-def test_the_town_has_a_market_square():
+def test_the_town_has_a_market_square(forest_church_bridged):
     from citysmith import raster as R
-    from citysmith.layout import Layout
-    from citysmith.raster import rasterize
-    import pathlib
 
-    src = pathlib.Path("out/layout.json")
-    if not src.exists():
-        pytest.skip("needs the imported Forest Church layout")
-    tm = rasterize(Layout.load(src), bridges=True)
+    tm = forest_church_bridged
     plaza = sum(1 for z in range(tm.depth) for x in range(tm.width)
                 if tm.surface[z][x] == R.PLAZA)
     assert plaza > 0, "MFCG gave no square, so one has to be carved"
@@ -1836,22 +1892,14 @@ def _taper_fringe(tm):
     return border, bitten
 
 
-def test_the_fringe_is_runs_not_teeth():
+def test_the_fringe_is_runs_not_teeth(edge_tiles):
     """A kept block with no kept neighbour projects over nothing.
 
     Bites were decided per block and independently, so the border came out as a
     comb: 2x2 tabs standing off the edge with void under them, which at eye
     level is the map reading as a torn sheet rather than as land running out.
     """
-    from citysmith.layout import Layout
-    from citysmith.raster import rasterize
-
-    import pathlib
-
-    src = pathlib.Path("out/layout.json")
-    if not src.exists():
-        pytest.skip("needs the imported Forest Church layout")
-    tm = rasterize(Layout.load(src))
+    tm = edge_tiles
     border, bitten = _taper_fringe(tm)
     kept = border - bitten
     assert bitten, "nothing was bitten -- the fringe is not ragged at all"
@@ -1865,24 +1913,29 @@ def test_the_fringe_is_runs_not_teeth():
     assert teeth == [], f"{len(teeth)} border block(s) project alone: {teeth[:5]}"
 
 
-def test_no_road_runs_out_over_the_void():
+def test_no_road_runs_out_over_the_void(edge_tiles):
     """A road leaving town is fine; a road leaving the world is not.
 
     The fringe used to bite a block and then rescue the paved cells inside it,
     which removes the ground either side and leaves the street on a two-tile
     causeway over bare board.
+
+    The allowed set is `R.EDGE_LAND` and not a list written out here. It was a
+    list, and it went stale: `MARSH` joined the land set in the build when the
+    fen was built and this copy kept the pre-marsh three, so the assertion was
+    wrong from that day and said nothing, because the only town anyone ran it
+    against has no wetland on it. A fen at the border is tapered like the
+    field beside it -- see `R.EDGE_LAND` for why that is right rather than
+    convenient.
     """
     from citysmith import raster as R
-    from citysmith.layout import Layout
-    from citysmith.raster import rasterize
 
-    import pathlib
-
-    src = pathlib.Path("out/layout.json")
-    if not src.exists():
-        pytest.skip("needs the imported Forest Church layout")
-    tm = rasterize(Layout.load(src))
+    tm = edge_tiles
     border, bitten = _taper_fringe(tm)
+
+    # Land, or nothing at all: a bite may leave bare board beside it, but
+    # never a surface that was laid on ground it has just removed.
+    allowed = R.EDGE_LAND | {R.VOID}
 
     for (bx, bz) in bitten:
         for dx, dz in ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)):
@@ -1893,13 +1946,13 @@ def test_no_road_runs_out_over_the_void():
                            for c in (0, 1) for a in (0, 1)]:
                 if not (cx < tm.width and cz < tm.depth):
                     continue
-                assert tm.surface[cz][cx] in (R.GROUND, R.FIELD, R.VOID), (
+                assert tm.surface[cz][cx] in allowed, (
                     f"bite at {(bx, bz)} strands "
                     f"{tm.surface[cz][cx]!r} at {(cx, cz)}"
                 )
 
 
-def test_only_land_falls_away_at_the_edge():
+def test_only_land_falls_away_at_the_edge(edge_tiles):
     """A river surface and a road have to stay level; ground may not.
 
     The taper lowers the outermost ring so the map does not end in a sheer
@@ -1907,21 +1960,31 @@ def test_only_land_falls_away_at_the_edge():
     carriageway two tiles from the border, and a ledge straight across the
     river -- a waterfall the width of an estuary, which is what "why is the
     water stepped" turned out to be.
+
+    `MARSH` is deliberately absent from `level`: a fen is solid ground at
+    grade, so it falls away with the field beside it. Water is the case this
+    test is named for and it stays.
     """
     from citysmith import raster as R
     from citysmith.build import edge_taper
-    from citysmith.layout import Layout
-    from citysmith.raster import rasterize
 
-    import pathlib
-
-    src = pathlib.Path("out/layout.json")
-    if not src.exists():
-        pytest.skip("needs the imported Forest Church layout")
-    tm = rasterize(Layout.load(src))
+    tm = edge_tiles
     taper = edge_taper(tm)
 
-    level = {R.WATER, R.STREET, R.PLAZA, R.LANE, R.PIER}
+    # Written out here on purpose, and NOT derived from `R.EDGE_LAND`. A test
+    # that reads the constant it is checking cannot catch that constant being
+    # wrong -- it would simply agree with the mistake. This is the independent
+    # half of the pair: the sibling test reads `EDGE_LAND` to say what land
+    # is, and this one names what must stay level without consulting it, so
+    # moving a surface into the land set that does not belong there fails the
+    # disjointness check below rather than quietly changing what is asserted.
+    level = {R.WATER, R.STREET, R.PLAZA, R.LANE, R.PIER, R.COURT, R.FLOOR}
+    overlap = sorted(level & R.EDGE_LAND)
+    assert not overlap, (
+        f"{overlap} is both land the map edge may drop and a surface that has "
+        f"to stay level -- one of the two lists is wrong"
+    )
+
     stepped = [
         (x, z) for z in range(tm.depth) for x in range(tm.width)
         if tm.surface[z][x] in level and taper.get((x, z), 0.0) != 0.0

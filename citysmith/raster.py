@@ -67,6 +67,27 @@ WALKABLE = frozenset({GROUND, FIELD, MARSH, STREET, PLAZA, COURT, PIER, LANE, FL
 #: laying one is that the doors are reachable across it.
 OPEN = frozenset({GROUND, STREET, PLAZA, COURT, PIER, LANE})
 
+#: Bare earth: the surfaces the map's edge is made of, and the only ones
+#: :func:`build.edge_taper` may lower or bite out. Everything else is a
+#: *surface laid on* the ground and has to stay level -- dropping the outer
+#: ring of a river gives a waterfall the width of an estuary, and dropping it
+#: under a carriageway gives a half-tile step across the road.
+#:
+#: **``MARSH`` is land here, and that is a decision rather than an oversight.**
+#: A fen is not open water: `docs/marsh.md` measures the swamp floors at 0.5
+#: tall, exactly like grass and tilled earth, so a marsh cell is solid matter
+#: at grade and lowering it half a tile is the same operation as lowering a
+#: field. Water is the opposite case -- a level sheet over a dropped bed --
+#: which is why it is absent. And a fen *reaches* the border by design ("a
+#: wetland either runs off the map or it fences off whatever is behind it"),
+#: so excluding it would shelter the whole west side of Sedgewater and end
+#: the map there on the sheer cut the taper exists to remove.
+#:
+#: This is only the edge taper's question. The verge pass and the shingle-bank
+#: pass ask a different one about the same surfaces and answer it their own
+#: way; neither should read this.
+EDGE_LAND = frozenset({GROUND, FIELD, MARSH})
+
 SIDES = (("n", 0, -1), ("s", 0, 1), ("w", -1, 0), ("e", 1, 0))
 
 # -- street widths -----------------------------------------------------------
