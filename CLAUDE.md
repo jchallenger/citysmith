@@ -2160,13 +2160,15 @@ under `citysmith/` imports it.
   it is 1 x 3 x 2, so it is a tunnel segment rather than a jamb piece, and
   four would be needed to span the carriageway. It has never been probed --
   do that before placing it.
-- Gate doors. The gate has its towers now -- square bastions on both jambs,
-  and on every corner of the ring (`pick_wall_towers`; the raster records the
-  ring's vertices in `TileMap.wall_corners`) -- and three tiles of headroom
-  under the lintel. What it does not have is a portcullis or an arch, and the
-  reason is the data: MFCG puts Forest Church's only gate *on a vertex* of the
-  ring, where the road ends, so the raster's disc clearing removes the corner
-  and the opening faces north-west across a 45-degree stair-step. A flat
-  4-wide panel (`Door - Portcullis double`, pinned and unused in the palette)
-  has no straight jamb-to-jamb line to hang on. A gate cut through a straight
-  run of wall would take one; nothing builds it yet.
+- Gate doors -- **no longer unbuilt, and the premise did not survive.** This
+  bullet said MFCG's vertex gate could never take a flat panel: the raster's
+  disc clearing removed the ring's corner, so the opening was a 45-degree
+  stair-step with no straight jamb-to-jamb line. The fix was to the *cut*,
+  not the door: `raster._carve_gate` opens every passage as an axis-aligned
+  rectangle -- which is why the bullet above can say "the gate has doors" --
+  and `build._hang_portcullises` reads the opening axis off the jambs and
+  hangs `Door - Portcullis double` across it, seated like a wall on the
+  half-tile lattice (its first seating centred it on a cell boundary, the one
+  placement on the board off the grid). The towers, the `wall_corners`
+  record and the headroom stand as described. What is still unbuilt at the
+  gate is the previous bullet's list: winch, murder holes, arch ring.

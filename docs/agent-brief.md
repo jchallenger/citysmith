@@ -290,11 +290,16 @@ whose top is not `grade`, and the only rows that come back are 0 and the last.
   four corners of every tower; 20 are two rope rails meeting at a corner of a
   diagonal plank. All are 0.5x0.5 in plan and read as a post. The alternative
   is a gap at every corner. The other 24 are pre-existing door/wall overlaps.
-- **No portcullis or gate doors.** Forest Church's only gate sits on a vertex
-  of the ring where the road ends, so the opening is a missing corner facing
-  north-west across a 45-degree stair-step, and a flat 4-wide panel has no
-  straight line to hang on. `city_gate` / `city_gate_arch` stay pinned and
-  unused. A gate cut through a straight run would take one.
+- **Gate dressing stops at the grille.** This bullet used to say "no
+  portcullis or gate doors" because the vertex gate's opening was a 45-degree
+  stair-step with no straight line to hang a panel on. That premise is gone:
+  `raster._carve_gate` cuts every passage as an axis-aligned rectangle, so
+  even Forest Church's vertex gate has straight jambs, and
+  `build._hang_portcullises` spans them with `Door - Portcullis double`,
+  seated on the half-tile lattice. `city_gate` is used; only `city_gate_arch`
+  stays pinned and unused -- the opening is still a plain rectangle in the
+  masonry, with no arch ring, winch or murder holes, and the arch piece has
+  never been probed.
 - **Glazed facades.** Tall buildings carry a dark panel in every wall bay and
   read as modern curtain wall rather than shuttered upper storeys.
 - **Map edge** is a hard straight cut into the void from outside.
@@ -382,10 +387,14 @@ Non-obvious rules, all verified in game:
    working plane's height relative to the turf, or whatever `M` does.
 2. Then wire the comparison into `verify` as a standing board-vs-file check, so
    a bad paste reports itself instead of waiting to be noticed in a screenshot.
-3. **Gate doors for straight-run gates.** Detect a gate whose passage crosses
-   a straight stretch of wall, and hang `Door - Portcullis double` (4 wide,
-   3.75 tall -- the top 0.75 buries in the lintel, which is invisible) across
-   the jamb-to-jamb line. Forest Church's corner gate will never take one.
+3. **Gate doors -- DONE, and the premise did not survive.** This item asked
+   for straight-run detection because "Forest Church's corner gate will never
+   take one". No detection was needed: `raster._carve_gate` cuts *every*
+   passage square, so the corner gate has straight jambs and
+   `build._hang_portcullises` hangs `Door - Portcullis double` across them
+   (4 wide, 3.75 tall -- the top 0.75 buries in the lintel, which is
+   invisible). What remains at the gate is cosmetic: the arch ring, winch and
+   murder holes in the defects list above.
 4. Only then, cosmetics. The glazed facades read worst at play height, and the
    rampart reads as a maze of parallel runs from directly above -- worth checking
    whether that is a real shape problem or an artifact of cropping across a
