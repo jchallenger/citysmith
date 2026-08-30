@@ -310,6 +310,214 @@ def test_a_geojson_export_is_imported_before_it_is_built(tmp_path):
     assert snapshot["result"]["chunks"]
 
 
+# -- the import half ----------------------------------------------------------
+#
+# `import_layout` used to be called with a seed and nothing else, so every knob
+# `citysmith import` offers -- the crop window most of all -- was reachable from
+# the command line and from nowhere on the page. On `samples/sedgewater.geojson`
+# that silently costs three outlying farms and most of the board.
+
+
+def _sedgewater(tmp_path) -> pathlib.Path:
+    sample = (pathlib.Path(__file__).resolve().parents[1]
+              / "samples" / "sedgewater.geojson")
+    if not sample.is_file():
+        pytest.skip("no FTG sample export in this checkout")
+    (tmp_path / sample.name).write_bytes(sample.read_bytes())
+    return tmp_path
+
+
+def _imported_line(snapshot) -> str:
+    """The first line of the `imported` event: the layout's own summary."""
+    for event in snapshot["events"]:
+        if event["stage"] == "imported":
+            return event["text"].splitlines()[0]
+    raise AssertionError(f"no import in {[e['stage'] for e in snapshot['events']]}")
+
+
+def test_the_import_options_reach_the_importer(tmp_path):
+    """The measurement, driven through the endpoint rather than in-process.
+
+    Two builds off one export, differing only in the two fields the form now
+    carries. If they were dropped the two summaries would be identical -- which
+    is exactly what they were before, and why a UI user lost three farms with no
+    control on the page to prevent it.
+
+    The build is cropped to a corner so this costs a hamlet rather than a town.
+    The crop is applied to the imported layout, so the summary still reports the
+    whole board the import produced.
+    """
+    root = _sedgewater(tmp_path)
+    crop = {"x": 0, "z": 0, "w": 24, "d": 24}
+
+    def run(**fields):
+        with running(out_dir=root / "out", roots=(root,),
+                     palette_factory=palette_factory) as (_, port):
+            snapshot = build(port, only_source(port, kind="geojson"),
+                             stem="sw", crop=crop, **fields)
+        assert snapshot["state"] == "done", snapshot["error"]
+        return snapshot
+
+    default = _imported_line(run())
+    whole = _imported_line(run(core_only=False, margin_feet=200.0))
+
+    assert "138x114 tiles" in default, default
+    assert "227x203 tiles" in whole, whole
+
+
+def test_the_import_defaults_are_the_importers_own(tmp_path):
+    """A request that sets nothing must ask for nothing.
+
+    Two copies of a default is one copy that goes stale, and a form whose
+    "unchanged" is not the importer's unchanged changes the map for everybody
+    who never touched the field. So the parser's answer for an empty body and
+    the defaults `/api/options` sends the page are both checked against
+    `IMPORT_OPTIONS`, which is also what `unused_import_options` measures a
+    chosen value against.
+    """
+    sources = [uiserver.Source(id="s1", path=tmp_path / "x.geojson",
+                               kind="geojson", label="x", detail="", size=1)]
+    params = uiserver.read_build_request({"source": "s1"}, sources)
+    assert {k: params[k] for k in uiserver.IMPORT_OPTIONS} == uiserver.IMPORT_OPTIONS
+
+    test_pipeline._layout(tmp_path)
+    with running(out_dir=tmp_path / "uiout", roots=(tmp_path,),
+                 palette_factory=palette_factory) as (_, port):
+        status, options = call_json(port, "/api/options")
+    assert status == 200, options
+    for key, value in uiserver.IMPORT_OPTIONS.items():
+        assert options["defaults"][key] == value, key
+
+    # And the page is told which reader takes which, rather than deciding for
+    # itself: three of these are FTG-only, and that fact lives in `importers`.
+    assert set(options["import_options"]) == {"mfcg", "ftg"}
+    ftg_only = (set(options["import_options"]["ftg"])
+                - set(options["import_options"]["mfcg"]))
+    assert ftg_only == {"core_only", "cluster_gap_ft", "fences"}
+
+
+def test_a_default_the_form_sends_is_the_default_the_reader_has():
+    """`IMPORT_OPTIONS` is a second copy of somebody else's defaults.
+
+    The test above pins the form and the parser to that copy; this one pins the
+    copy to the originals. Without it, a form whose "unchanged" is not the
+    reader's unchanged silently changes the map for everyone who never touched
+    the field -- and it would look like a generator change, not a form one.
+
+    Two shapes, and both are checked because they mean the same thing by
+    different routes. A concrete default has to match the reader's signature.
+    `None` means "say nothing", and it only means that because `_filter` drops
+    a `None` before the reader ever sees it -- which is how one form serves two
+    readers whose own defaults differ (`house_frontage_ft` is 35.0 in MFCG and
+    None in FTG).
+    """
+    import inspect
+
+    from citysmith import ftg, importers, mfcg
+
+    readers = {importers.MFCG: mfcg.import_layout, importers.FTG: ftg.import_layout}
+    checked = set()
+    for key, ours in uiserver.IMPORT_OPTIONS.items():
+        for fmt, reader in readers.items():
+            if key not in importers.options_for(fmt):
+                continue
+            theirs = inspect.signature(reader).parameters[key].default
+            if ours is not None:
+                assert ours == theirs, (key, fmt, ours, theirs)
+            checked.add(key)
+    assert checked == set(uiserver.IMPORT_OPTIONS), (
+        "an option no reader accepts is a control that can never do anything")
+
+    nulls = {k for k, v in uiserver.IMPORT_OPTIONS.items() if v is None}
+    kept = importers._filter({k: None for k in nulls}, importers.options_for("ftg"))
+    assert kept == {}, "a None must be dropped, or it overrides the reader's own"
+
+
+def test_an_import_option_that_cannot_apply_is_reported_rather_than_dropped(tmp_path):
+    """`verify.feature_report`'s rule, applied to a request instead of to a map.
+
+    A `layout.json` is already imported, so none of these can do anything to
+    it -- and an option that is set, dropped and never mentioned looks exactly
+    like one that was honoured. The page hides the fields for a layout source,
+    but the page is not the only thing that can post to this endpoint.
+
+    The other half matters as much: a build that changed nothing must not carry
+    the line, or it is on every build and nobody reads it.
+    """
+    test_pipeline._layout(tmp_path)
+    with running(out_dir=tmp_path / "uiout", roots=(tmp_path,),
+                 palette_factory=palette_factory) as (_, port):
+        source = only_source(port)
+        chosen = build(port, source, stem="a", core_only=False, fences=False)
+        untouched = build(port, source, stem="b")
+
+    assert chosen["state"] == "done", chosen["error"]
+    said = {e["stage"]: e["text"] for e in chosen["events"]}
+    assert "NOT USED" in said["import_options"], said["import_options"]
+    assert "core_only" in said["import_options"]
+    assert "fences" in said["import_options"]
+    assert "already a layout" in said["import_options"]
+
+    assert untouched["state"] == "done", untouched["error"]
+    assert "import_options" not in [e["stage"] for e in untouched["events"]]
+
+
+def test_an_option_the_format_has_no_use_for_is_named_with_the_format():
+    """MFCG and FTG do not carry the same knobs, and `importers` is the record.
+
+    MFCG exports geometry only: no settled core to crop to, no fences to drop.
+    `importers.options_for` is what says so, so this and `import_layout`'s own
+    filter cannot disagree about which options a reader takes.
+    """
+    accepted = uiserver.importers.options_for("mfcg")
+    params = {**uiserver.IMPORT_OPTIONS, "core_only": False, "margin_feet": 200.0}
+
+    assert uiserver.unused_import_options(params, "ftg") == []
+    assert uiserver.unused_import_options(params, "mfcg") == ["core_only"]
+    assert "margin_feet" in accepted        # so it is absent from that answer
+    assert uiserver.unused_import_options(params, None) == ["core_only", "margin_feet"]
+
+    line = uiserver.unused_import_line(["core_only"], "mfcg")
+    assert "MFCG" in line and "core_only" in line
+
+
+def test_import_layout_is_called_with_spelled_out_keywords():
+    """The sibling of `test_build_town_is_called_with_spelled_out_keywords`.
+
+    Same clause for the same reason -- `**params` would put every keyword of
+    both importers within reach of a request. The second assertion is the one
+    that catches this bug's own shape: a field offered on the form, coerced by
+    the parser, and then never passed on. That is a control that does nothing
+    and says nothing.
+    """
+    source = pathlib.Path(uiserver.__file__).read_text(encoding="utf-8")
+    call_site = source.split("layout = importers.import_layout(", 1)[1]
+    call_site = call_site.split("\n            )", 1)[0]
+    assert "**" not in call_site
+    for name in uiserver.IMPORT_OPTIONS:
+        assert f"{name}=params[" in call_site, name
+
+
+def test_the_page_offers_the_import_fields_and_hides_them_for_a_layout():
+    """A control for every option, and none of them on a source that cannot use one.
+
+    Read off the page rather than asserted about it: the whole defect was an
+    option that existed everywhere except where somebody could reach it.
+    """
+    here = pathlib.Path(uiserver.__file__).resolve().parent / "ui"
+    page = (here / "index.html").read_text(encoding="utf-8")
+    script = (here / "app.js").read_text(encoding="utf-8")
+
+    for name in uiserver.IMPORT_OPTIONS:
+        assert f'id="{name}"' in page, name
+        assert f'"{name}"' in script, name
+
+    assert 'id="import-fields" hidden' in page
+    assert "showImportFields" in script
+    # The gate is the source's kind, and the request drops the fields to match.
+    assert 'kind !== "geojson"' in script
+
+
 # -- progress -----------------------------------------------------------------
 
 def test_the_build_endpoint_returns_a_job_id_instead_of_the_report(tmp_path):
@@ -504,6 +712,26 @@ def test_the_build_endpoint_takes_no_command_string(tmp_path):
             ({"roofs": "yes"}, "roofs"),
             ({"crop": "0,0,10,10"}, "crop"),
             ({"source": "../layout.json"}, "source"),
+            # The import half. `json.loads` accepts the bare literals
+            # `Infinity` and `NaN`, so a float field that only range-checks
+            # takes an infinite margin -- which is a board with no size.
+            ({"margin_feet": float("inf")}, "margin_feet"),
+            ({"margin_feet": float("nan")}, "margin_feet"),
+            ({"margin_feet": "60"}, "margin_feet"),
+            ({"margin_feet": True}, "margin_feet"),
+            ({"margin_feet": -1}, "margin_feet"),
+            ({"house_frontage_ft": 100000}, "house_frontage_ft"),
+            ({"core_only": "yes"}, "core_only"),
+            ({"fences": 1}, "fences"),
+            ({"name": "../../etc/passwd"}, "name"),
+            ({"name": "<script>alert(1)</script>"}, "name"),
+            ({"name": "x" * 61}, "name"),
+            ({"name": 7}, "name"),
+            # The CLI spells three of these as negatives. A form takes the
+            # positive, and the flag spelling is an unknown field, never a
+            # synonym that quietly means the opposite.
+            ({"whole_canvas": True}, "whole_canvas"),
+            ({"no_fences": True}, "no_fences"),
         ]
         for field, name in bad:
             status, data = call_json(port, "/api/build", method="POST",

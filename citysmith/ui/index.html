@@ -39,9 +39,47 @@
       </div>
       <p class="hint">
         The list is the server's own scan of its output directory, <code>samples/</code>
-        and the working directory. A GeoJSON is imported first, with default
-        options and this seed, and the layout is written to
+        and the working directory. A GeoJSON is imported first, with the options
+        below and this seed, and the layout is written to
         <code>layout.json</code>.
+      </p>
+    </fieldset>
+
+    <!-- Only shown for a GeoJSON export. A layout.json has already been
+         imported, so every control here would be inert on one. -->
+    <fieldset id="import-fields" hidden>
+      <legend>Import</legend>
+      <div class="grid2">
+        <div class="row">
+          <label for="margin_feet">Margin (feet)</label>
+          <input type="number" id="margin_feet" name="margin_feet" min="0" max="5000" step="10" value="60">
+        </div>
+        <div class="row">
+          <label for="house_frontage_ft">Median house frontage (ft)</label>
+          <input type="number" id="house_frontage_ft" name="house_frontage_ft" min="5" max="200" step="1" placeholder="MFCG 35, FTG metric">
+        </div>
+        <div class="row">
+          <label for="cluster_gap_ft">Settlement cluster gap (ft)</label>
+          <input type="number" id="cluster_gap_ft" name="cluster_gap_ft" min="0" max="100000" step="10" placeholder="197 (60 m)">
+        </div>
+        <div class="row">
+          <label for="name">Town name</label>
+          <input type="text" id="name" name="name" placeholder="from the export">
+        </div>
+      </div>
+      <div class="checks">
+        <label id="core_only-label"><input type="checkbox" id="core_only" checked> Crop to the settled core</label>
+        <label id="clip-label"><input type="checkbox" id="clip" checked> Clip to the settlement plus the margin</label>
+        <label id="fences-label"><input type="checkbox" id="fences" checked> Import field boundaries</label>
+      </div>
+      <p class="hint">
+        An FTG canvas is mostly farmland, and a few outlying farms stretch the
+        window across the whole map: on Graybank that is 853&times;1013 tiles
+        instead of 400&times;272. Turn off <em>crop to the settled core</em> to
+        keep those farms, and raise the margin to give them room. Field
+        boundaries are the format's biggest single asset cost out in open
+        country &mdash; this is whether they are imported at all, not how they
+        are built.
       </p>
     </fieldset>
 

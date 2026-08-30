@@ -110,6 +110,58 @@ function numberOrNull(input) {
   return Number.isFinite(value) ? Math.round(value) : null;
 }
 
+/* The import options are measured in feet, and feet have fractions. Rounding
+ * them the way `numberOrNull` rounds a seed would quietly change what was
+ * typed, and `Number.isFinite` is doing real work: the server rejects Infinity
+ * and NaN, so sending one is a 400 for something the box can produce. */
+function decimalOrNull(input) {
+  const raw = input.value.trim();
+  if (raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/* -- the import half ------------------------------------------------------- */
+
+/* The seven options `citysmith import` takes. They are keyed by the importers'
+ * own keyword names, which is what `/api/options` sends defaults under and what
+ * the server passes straight through -- one spelling from the box to the
+ * reader. `read` says how to get a value out of the control. */
+const IMPORT_FIELDS = [
+  { id: "core_only", read: (e) => e.checked },
+  { id: "margin_feet", read: decimalOrNull },
+  { id: "house_frontage_ft", read: decimalOrNull },
+  { id: "cluster_gap_ft", read: decimalOrNull },
+  { id: "clip", read: (e) => e.checked },
+  { id: "fences", read: (e) => e.checked },
+  { id: "name", read: (e) => e.value.trim() || null },
+];
+
+/* Which format accepts which option, from the server. A label saying "FTG only"
+ * that this file decided for itself is a second copy of `importers`' option
+ * sets, and the copy is the one that goes stale. */
+function markImportFields() {
+  const accepts = (options && options.import_options) || {};
+  const mfcg = new Set(accepts.mfcg || []);
+  const ftg = new Set(accepts.ftg || []);
+  for (const field of IMPORT_FIELDS) {
+    const label = $(field.id + "-label")
+      || document.querySelector('label[for="' + field.id + '"]');
+    if (!label) continue;
+    const only = ftg.has(field.id) && !mfcg.has(field.id) ? " (FTG only)"
+      : mfcg.has(field.id) && !ftg.has(field.id) ? " (MFCG only)" : "";
+    if (only) label.append(el("span", "hint", only));
+  }
+}
+
+/* A layout.json is already imported, so every control in there is inert on one.
+ * Hidden rather than disabled: a disabled row still reads as "this could apply
+ * here", and it cannot. `formBody` omits the fields to match, so the request
+ * says nothing about an import that is not going to happen. */
+function showImportFields(kind) {
+  $("import-fields").hidden = kind !== "geojson";
+}
+
 /* -- boot ------------------------------------------------------------------ */
 
 async function boot() {
@@ -128,6 +180,13 @@ async function boot() {
   $("storeys").value = d.storeys;
   $("stem").value = d.stem;
   $("raster_scale").value = d.raster_scale;
+  for (const field of IMPORT_FIELDS) {
+    const input = $(field.id);
+    const value = d[field.id];
+    if (input.type === "checkbox") input.checked = value !== false;
+    else input.value = value === null || value === undefined ? "" : value;
+  }
+  markImportFields();
   await rescan();
   if (paintPlatform()) await pasteRescan();
 }
@@ -165,10 +224,12 @@ function showSourceDetail() {
   if (!chosen) {
     line.textContent = "No layout or GeoJSON found. Import one, or drop an "
       + "export into the working directory and rescan.";
+    showImportFields(null);
     return;
   }
   const kb = Math.max(1, Math.round(chosen.size / 1024));
   line.textContent = chosen.kind + " -- " + chosen.detail + " (" + kb + " KB)";
+  showImportFields(chosen.kind);
 }
 
 /* -- the request ----------------------------------------------------------- */
@@ -181,7 +242,7 @@ function formBody() {
   if (anyCrop && crop.some((v) => v === null)) {
     throw new Error("Crop needs all four numbers, or none.");
   }
-  return {
+  const body = {
     source: $("source").value,
     stem: $("stem").value.trim(),
     style: $("style").value,
@@ -203,6 +264,13 @@ function formBody() {
     multi_slab: $("multi_slab").checked,
     crop: anyCrop ? { x: crop[0], z: crop[1], w: crop[2], d: crop[3] } : null,
   };
+  /* Only for a GeoJSON. On a layout.json the server would take these, use none
+   * of them and say so in the log -- a line about a choice nobody made. */
+  const chosen = sources.find((s) => s.id === body.source);
+  if (chosen && chosen.kind === "geojson") {
+    for (const field of IMPORT_FIELDS) body[field.id] = field.read($(field.id));
+  }
+  return body;
 }
 
 async function startBuild(event) {

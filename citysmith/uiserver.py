@@ -81,6 +81,7 @@ import urllib.parse
 from dataclasses import dataclass, field
 
 from . import camera
+from . import importers
 from . import preview
 from .layout import Layout
 from . import pastedrive
@@ -309,21 +310,51 @@ def resolve_in(root, relative: str, *, suffixes=SERVABLE_SUFFIXES) -> pathlib.Pa
 
 # -- the request, as types ----------------------------------------------------
 #
-# Every field below is an int, a bool, or a member of a closed set. There is no
-# field whose value is passed on as text to anything that could interpret it,
-# and an unknown key is an error rather than something ignored -- which is what
-# stops a caller reaching a `build_town` keyword this form does not offer.
+# Every field below is a number, a bool, a member of a closed set, or -- in the
+# single case of a town name -- text against a pattern as narrow as `_STEM`'s.
+# There is no field whose value is passed on as text to anything that could
+# interpret it, and an unknown key is an error rather than something ignored --
+# which is what stops a caller reaching a `build_town` or `import_layout`
+# keyword this form does not offer.
 
 #: Filename stems that cannot surprise anything downstream: `write_chunks`
 #: globs on the stem and writes `<stem>-<label>.slab.txt` beside the slabs.
 _STEM = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$")
+
+#: A town name this form may set. `name` is the one import option whose value is
+#: free text rather than a number or a flag, so it gets a pattern for the same
+#: reason `_STEM` has one: it is written into `layout.json`, drawn into the
+#: raster SVG's title, and every board name derived from this town later starts
+#: from it. Letters of any script, digits, and the punctuation a place name
+#: actually uses.
+_TOWN_NAME = re.compile(r"^[^\W_][\w '’.,-]{0,59}$", re.UNICODE)
+
+#: The import options this form offers, each mapped to the value that means
+#: "leave it to the importer". **The keys are the importers' own keyword names**
+#: so :func:`run_build` can spell them straight through, and the defaults are
+#: here rather than only at the parser so :func:`unused_import_options` can tell
+#: an option somebody chose from one nobody touched.
+#:
+#: The CLI's flags are the negatives of three of these: ``--whole-canvas`` is
+#: ``core_only`` off, ``--no-fences`` is ``fences`` off, ``--no-clip`` is
+#: ``clip`` off. A form has checkboxes rather than flags, so it states the
+#: positive and the page labels it.
+IMPORT_OPTIONS = {
+    "core_only": True,
+    "margin_feet": 60.0,
+    "house_frontage_ft": None,
+    "cluster_gap_ft": None,
+    "clip": True,
+    "fences": True,
+    "name": None,
+}
 
 _FIELDS = frozenset({
     "source", "stem", "style", "seed", "storeys", "chunk_tiles", "max_assets",
     "npc_budget", "fence_style", "hour", "raster_scale", "roofs", "bridges",
     "quarters", "npcs", "keep_open_country", "per_building", "by_region",
     "multi_slab", "crop",
-})
+}) | frozenset(IMPORT_OPTIONS)
 
 
 def _int(body: dict, key: str, default, lo: int, hi: int, *, nullable=False):
@@ -339,6 +370,30 @@ def _int(body: dict, key: str, default, lo: int, hi: int, *, nullable=False):
     return value
 
 
+def _float(body: dict, key: str, default, lo: float, hi: float, *, nullable=False):
+    """A number with a fraction, bounded. The import options measure feet.
+
+    Two traps, and each has bitten something already. `bool` is an `int`
+    subclass, so a checkbox posted into a number field arrives as 1 -- the same
+    hole `_int` guards. And **`json.loads` accepts the bare literals `Infinity`
+    and `NaN`**: an infinite margin passes ``lo <= value <= hi`` on one side and
+    fails it on the other with a range message that says nothing useful, so
+    finiteness is checked first and named.
+    """
+    value = body.get(key, default)
+    if value is None and nullable:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise BadRequest(f"{key}: expected a number, got {value!r}")
+    value = float(value)
+    if not math.isfinite(value):
+        raise BadRequest(f"{key}: expected a finite number, got {value!r}")
+    if not lo <= value <= hi:
+        raise BadRequest(
+            f"{key}: must be between {lo:g} and {hi:g}, got {value:g}")
+    return value
+
+
 def _bool(body: dict, key: str, default: bool) -> bool:
     value = body.get(key, default)
     if not isinstance(value, bool):
@@ -351,6 +406,28 @@ def _choice(body: dict, key: str, default: str, allowed) -> str:
     if value not in allowed:
         raise BadRequest(
             f"{key}: expected one of {', '.join(sorted(allowed))}, got {value!r}")
+    return value
+
+
+def _town_name(body: dict, key: str):
+    """The import's ``name`` override, or None to keep what the export says.
+
+    Blank is not a name -- it is the absence of one, which is exactly what the
+    importers' own ``None`` means -- so an empty box does not overwrite an
+    authored settlement name with nothing.
+    """
+    value = body.get(key, IMPORT_OPTIONS[key])
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise BadRequest(f"{key}: expected text or null, got {value!r}")
+    value = value.strip()
+    if not value:
+        return None
+    if not _TOWN_NAME.match(value):
+        raise BadRequest(
+            f"{key}: a place name -- letters, digits, spaces and . , - ' "
+            f"only, up to 60 characters")
     return value
 
 
@@ -413,7 +490,64 @@ def read_build_request(body, sources) -> dict:
         "by_region": _bool(body, "by_region", False),
         "multi_slab": _bool(body, "multi_slab", False),
         "crop": crop,
+        # The import half. These reach `importers.import_layout` and do nothing
+        # at all for a `layout.json` source, which is already imported --
+        # `unused_import_options` is what says so rather than letting them
+        # vanish. Bounds, since none of these had one on the CLI:
+        #   margin_feet       5,000 ft is 1,000 tiles of empty ground on every
+        #                     side, already larger than the biggest town here.
+        #                     `clip` off is the unbounded way to keep the lot.
+        #   house_frontage_ft scales the WHOLE town, so the dangerous direction
+        #                     is up: 200 ft of median frontage is ~6x the
+        #                     default and ~36x the cells. Below 15 ft `mfcg`
+        #                     raises its own advice, which is better than a
+        #                     range error, so the floor is under it.
+        #   cluster_gap_ft    only selects which buildings are the core; it
+        #                     scales nothing, so it can be loose.
+        "core_only": _bool(body, "core_only", True),
+        "margin_feet": _float(body, "margin_feet", 60.0, 0.0, 5_000.0),
+        "house_frontage_ft": _float(body, "house_frontage_ft", None,
+                                    5.0, 200.0, nullable=True),
+        "cluster_gap_ft": _float(body, "cluster_gap_ft", None,
+                                 0.0, 100_000.0, nullable=True),
+        "clip": _bool(body, "clip", True),
+        "fences": _bool(body, "fences", True),
+        "name": _town_name(body, "name"),
     }
+
+
+def unused_import_options(params: dict, fmt: str | None) -> list[str]:
+    """Which chosen import options this source cannot use, in name order.
+
+    Only options **changed from their default** are reported. Leaving one alone
+    is not asking for anything, so naming it on every build would be noise --
+    and noise is how the one line that matters gets skipped.
+
+    ``fmt`` is ``None`` for a `layout.json`, which can use none of them: it is
+    already imported, and re-importing is a different button. Otherwise it is
+    the format the file turned out to be, because MFCG and FTG do not carry the
+    same knobs -- MFCG exports geometry only, so it has no settled core to crop
+    to and no fences to drop.
+
+    This is `verify.feature_report`'s rule applied to a request instead of to a
+    map: an option that is set, ignored and never mentioned looks exactly like
+    an option that was honoured.
+    """
+    accepted = importers.options_for(fmt) if fmt else frozenset()
+    return [key for key, default in sorted(IMPORT_OPTIONS.items())
+            if key not in accepted and params.get(key, default) != default]
+
+
+def unused_import_line(names, fmt: str | None) -> str:
+    """The sentence for :func:`unused_import_options`' answer."""
+    which = ", ".join(names)
+    if fmt is None:
+        return (f"NOT USED: {which}. This source is already a layout -- import "
+                f"options apply to a GeoJSON export, so pick the export to "
+                f"change them.")
+    # "an", for both: MFCG and FTG are each read out letter by letter.
+    return (f"NOT USED: {which}. This turned out to be an {fmt.upper()} "
+            f"export, and the {fmt.upper()} reader has no such option.")
 
 
 # -- the paste request, as types ----------------------------------------------
@@ -542,8 +676,6 @@ def run_build(job: Job, params: dict, *, out_dir, palette_factory) -> None:
     with the parameters spelled out, one by one, which is what makes the set of
     things this endpoint can do a closed list.
     """
-    from . import importers
-    
     source: Source = params["source"]
     out_dir = pathlib.Path(out_dir)
     try:
@@ -551,13 +683,39 @@ def run_build(job: Job, params: dict, *, out_dir, palette_factory) -> None:
         palette = palette_factory(params["style"], params["seed"])
 
         if source.kind == "geojson":
-            job.say("importing", f"importing {source.label}")
-            layout = importers.import_layout(source.path, seed=params["seed"])
+            # Sniffed here rather than inside `import_layout`, for the same
+            # count of reads: the format is wanted afterwards, to say which
+            # options this reader had no use for. It is NOT recoverable from
+            # `layout.source`, which the MFCG reader writes as "mfcg 0.11.5".
+            fmt = importers.detect_format(source.path)
+            job.say("importing", f"importing {source.label} ({fmt.upper()})")
+            # Spelled out one by one, for the reason `build_town` is below:
+            # a `**params` here would put every keyword of both importers
+            # within reach of a request the moment one is added.
+            layout = importers.import_layout(
+                source.path,
+                fmt=fmt,
+                seed=params["seed"],
+                core_only=params["core_only"],
+                margin_feet=params["margin_feet"],
+                house_frontage_ft=params["house_frontage_ft"],
+                cluster_gap_ft=params["cluster_gap_ft"],
+                clip=params["clip"],
+                fences=params["fences"],
+                name=params["name"],
+            )
             saved = out_dir / "layout.json"
             layout.save(saved)
             job.say("imported", f"{layout.summary()}\n  wrote {saved}")
+            unused = unused_import_options(params, fmt)
         else:
             layout = Layout.load(source.path)
+            fmt = None
+            unused = unused_import_options(params, fmt)
+        # An option that was set, dropped and never mentioned looks exactly
+        # like one that was honoured. This is the line that tells them apart.
+        if unused:
+            job.say("import_options", unused_import_line(unused, fmt))
 
         def progress(stage: str, **fields) -> None:
             job.say(stage, _pipeline_line(stage, fields))
@@ -1309,7 +1467,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
         Sent rather than hard-coded in the page for one reason: a style or a
         fence style that exists in `palette.py` and not in the dropdown is a
-        feature the UI silently hides.
+        feature the UI silently hides. The import options are here for exactly
+        that reason and no other -- every one of them was reachable from the
+        CLI and from nowhere on this page, which is the same defect with the
+        list drawn from a different module.
         """
         self._json(200, {
             "styles": sorted(STYLES),
@@ -1324,6 +1485,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 "quarters": True, "npcs": True, "keep_open_country": False,
                 "per_building": False, "by_region": False,
                 "multi_slab": False,
+                **IMPORT_OPTIONS,
+            },
+            # Which reader accepts which import option, so the page can mark
+            # the ones a format will ignore instead of carrying a second copy
+            # of `importers`' option sets in its own labels. Same argument as
+            # the vocabularies above: a fact that lives in two places is a fact
+            # that will disagree with itself.
+            "import_options": {
+                fmt: sorted(importers.options_for(fmt) & set(IMPORT_OPTIONS))
+                for fmt in (importers.MFCG, importers.FTG)
             },
             # A boolean and nothing else. The key itself never leaves this
             # process, and the browser has no route to api.anthropic.com.

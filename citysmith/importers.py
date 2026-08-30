@@ -143,5 +143,26 @@ _FTG_OPTIONS = frozenset({
 })
 
 
+def options_for(fmt: str) -> frozenset[str]:
+    """Which import options the reader for ``fmt`` accepts.
+
+    :func:`import_layout` drops the rest **silently**, and that is right for a
+    caller holding one set of options for both formats -- neither reader should
+    have to know about the other's knobs. It is right for the CLI too, where the
+    user typed the flag and can still see it in their own scrollback.
+
+    It is not right for a form. There, an option can be set, dropped and leave
+    no trace it was ever asked for, which is the failure
+    `verify.feature_report` exists for stated about a knob instead of a feature.
+    This is the lookup that lets a caller **say** which of its options this file
+    is about to ignore.
+    """
+    if fmt == MFCG:
+        return _MFCG_OPTIONS
+    if fmt == FTG:
+        return _FTG_OPTIONS
+    raise SourceError(f"Unknown format {fmt!r}; expected {MFCG!r} or {FTG!r}.")
+
+
 def _filter(options: dict[str, Any], allowed: frozenset[str]) -> dict[str, Any]:
     return {k: v for k, v in options.items() if k in allowed and v is not None}
