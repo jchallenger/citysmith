@@ -4302,6 +4302,20 @@ WALL_STAIR_REACH = 4
 #: proud of it and still leave no joint to see.
 CHIMNEY_LAP = 0.25
 
+#: How far a 2x2 flat cap sits below the course it closes.
+#:
+#: **Measured against a hand-build, not derived.** The user laid a 10x10 hip
+#: entirely in Rural's 2x2 pieces and handed the slab back; decoded, its apex
+#: cap sits at y=3.75 where the ring course is 4.0. Seating it by its top, the
+#: rule the 1x1 cap follows, would put it at 3.50 -- a quarter tile low, which
+#: on thatch reads as a dented ridge.
+#:
+#: The two scales genuinely differ: both caps are 0.5 tall, so this is not a
+#: consequence of the piece's height and no rule takes one number to the other.
+#: A kit whose wide cap has not been laid by hand has not been measured.
+WIDE_CAP_LAP = 0.25
+
+
 def place_roof_piece(piece: Asset, tx: int, tz: int, course_y: float,
                      rot: int = 0, *, rise: float = 1.0) -> Placement:
     """Place a roof piece for the course whose top is at ``course_y``.
@@ -4319,13 +4333,25 @@ def place_roof_piece(piece: Asset, tx: int, tz: int, course_y: float,
     holds across every kit measured -- 1x1 slopes and corners are 1.0 and 2x2
     ones are 2.0, while flat caps are 0.5 at both scales.
 
+    **How far a lid drops is MEASURED per scale, and the two scales disagree.**
+    Both caps are 0.5 tall, so a single rule would put them at the same depth;
+    they are not at the same depth. Against a hand-build the wide cap sits
+    `WIDE_CAP_LAP` under its course -- half-lapped, standing a quarter tile
+    proud -- while the small one seats flush by its top. Two points do not make
+    a formula and none is invented here.
+
     **This exists because it was re-derived and got wrong twice in one file.**
     `tools/chimney_probe.py` seated a cap by its base and a combination by its
     top; the ridge stood half a tile proud and the chimney was buried, and a
     reviewer spent four rounds diagnosing an instrument rather than the town.
     Ten probe tools re-derive this today. This is meant to be the only copy.
     """
-    seat = course_y - piece.size_y if piece.size_y < rise else course_y
+    if piece.size_y >= rise:
+        seat = course_y
+    elif rise > 1.0:
+        seat = course_y - WIDE_CAP_LAP
+    else:
+        seat = course_y - piece.size_y
     return place_tile(piece, tx, tz, seat, rot)
 
 

@@ -9,27 +9,36 @@ roof with ships a full 2x2 set. Measured, and the relationship is exact:
 So a 2x2 piece is exactly two courses of the 1x1 field -- two cells deep and
 two rises tall.
 
-**Two things were refuted before this got anywhere, and both are worth keeping.**
+**Settled against two hand-builds the user laid and handed back**, which is
+the standard this took after a rotation sweep read off a board got it wrong.
 
-First, the wide family does not share its kit's 1x1 rotation. Rural and Tavern
-both close at (12, 12) while their small conventions are (0, 0) and (6, 6), so
-no rule takes one table to the other -- `ROOF_ROT_OFFSET_WIDE`, swept with
-`roofrot_probe.py --hips --footprint wide`.
+*The wide family shares its kit's 1x1 turn.* Rural is (0, 0) at both scales.
+This file used to say the opposite -- that Rural and Tavern both close at
+(12, 12) and no rule takes one table to the other -- from misreading a
+four-quadrant sweep laid on a solid pedestal, where a hole in the roof reads as
+pedestal-coloured thatch. The 8x8 hand-build is an 8x8 hip in 1x1 pieces beside
+the same hip in 2x2, and the shipped path reproduces both halves exactly, 64/64
+and 16/16.
 
-Second, and this is the shape of the answer: **mixing the scales inside one
-roof does not work even with the right turn.** Dropping 2x2 blocks into a 1x1
-ring layout leaves holes wherever the coarse piece and the fine ring structure
-disagree, which is most places. But the rotation sweep also showed a hip built
-ENTIRELY at 2x2 on a coarse grid closing perfectly. So the unit of choice is
-the ROOF, not the cell: a wing whose footprint is even in both dimensions can
-be built wholly at the double scale, and one that is not stays wholly at the
-single one.
+*The apex closes on its own, in two different ways, and neither needs a special
+case.* An EVEN coarse grid ends in four corner pieces meeting at a point; an
+ODD one ends in a single centre cell with four falls, which takes the flat cap.
+`_roof_piece` already returns the cap for zero, three or four falls, so both
+fall out of the shipped rule. The narrow apex slot this probe was written to
+chase came from a coarse path that RESTATED `_roof_piece` instead of calling
+it, and lost that branch in the restating -- so the fix was deleting code. A
+probe that reimplements the thing it is probing can only tell you about the
+probe.
+
+*A wide cap does not seat like a small one.* Both are 0.5 tall, and the
+10x10 hand-build puts its apex cap a quarter tile proud of the course where the
+small rule would seat it flush. `build.WIDE_CAP_LAP`, measured, not derived.
 
     1  1x1, 8x8      the shipped roof, control
-    2  2x2, 8x8      the same roof built wholly on a 4x4 coarse grid
+    2  2x2, 8x8      the same roof built wholly on a 4x4 coarse grid -- an EVEN
+                     grid, so its apex is four corners meeting at a point
     3  1x1, 10x10    control
-    4  2x2, 10x10    coarse, 5x5 -- an odd coarse grid, so its ridge is a cell
-                     rather than a line and the comparison is the harder one
+    4  2x2, 10x10    coarse, 5x5 -- an ODD grid, so its apex is one capped cell
 
     python tools/roofscale_probe.py > out/roofscale.slab.txt
 """
@@ -116,6 +125,7 @@ def main() -> None:
     side2 = partner(side1)
     corner2 = partner(corner1) if corner1 else None
     cap2 = partner(cap1, want_h=cap1.size_y) if cap1 else None
+    inner2 = partner(inner1) if inner1 else None
     for nm, a in (("1x1 slope", side1), ("2x2 slope", side2),
                   ("1x1 corner", corner1), ("2x2 corner", corner2)):
         print(f"  {nm:12s} {a.name if a else '(none)'}", file=sys.stderr)
@@ -168,9 +178,14 @@ def main() -> None:
         elif mode == "coarse":
             # **The whole roof at the double scale, on its own grid.** Rings
             # are computed over super-cells, a piece covers a 2x2 block, and a
-            # course rises by the piece's own 2.0. This is `lay_hip_wide`'s
-            # algorithm, which the rotation sweep showed closes cleanly -- and
-            # it is the thing that mixing scales cell by cell could not do.
+            # course rises by the piece's own 2.0. It is the SAME algorithm at
+            # a coarser grain, so it calls `_roof_piece` and `place_roof_piece`
+            # rather than restating them -- the first version restated them and
+            # lost two branches doing it: a cell with three or four falls takes
+            # the cap (it is the tip of an arm, and on an odd coarse grid the
+            # apex is exactly that), and two OPPOSITE falls are a ridge run
+            # rather than a corner. The apex slot this probe was written to
+            # find was that missing branch, not a missing piece.
             wedge, wcorner = wide_off
             gw, gd = bw // 2, bd // 2
             coarse = {(gx, gz) for gx in range(gw) for gz in range(gd)}
@@ -178,30 +193,17 @@ def main() -> None:
             wrise = side2.size_y
             for (gx, gz) in sorted(coarse):
                 r = grings[(gx, gz)]
-                y = roof_y + r * wrise
                 fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
                              if grings.get((gx + dx, gz + dz), -1) < r)
-                if len(fall) == 1:
-                    piece = side2
-                    rot = (ROOF_EDGE_ROT[fall[0]] + wedge) % 24
-                elif len(fall) == 2 and corner2 is not None:
-                    piece = corner2
-                    # **Key the corner on a frozenset, not a sorted join.**
-                    # sorted(("n","e")) is ["e","n"] -> "en", which is not a
-                    # key, so `.get(..., 0)` silently returned rotation 0 on
-                    # the north-east and south-east corners -- half of them --
-                    # and the roof came out holed. `CORNER_BY_SIDES` exists
-                    # for this.
-                    rot = (ROOF_CORNER_ROT[CORNER_BY_SIDES[frozenset(fall)]]
-                           + wcorner) % 24
-                elif not fall:
-                    piece, rot = cap2 or cap1, 0
-                else:
-                    piece, rot = side2, 0
+                piece, rot = _roof_piece(fall, side2, corner2, cap2 or cap1,
+                                         inner2,
+                                         _is_reflex(grings, gx, gz, fall),
+                                         wedge, wcorner)
                 if piece is not None:
                     out.append(place_roof_piece(piece, ox + 2 * gx,
-                                                oz + 2 * gz, y, rot,
-                                                rise=wrise))
+                                                oz + 2 * gz,
+                                                roof_y + r * wrise,
+                                                rot, rise=wrise))
             # Any odd row or column the coarse grid could not reach keeps the
             # single scale, which is what an odd footprint gets everywhere.
             taken = {(2 * gx + dx, 2 * gz + dz) for (gx, gz) in coarse

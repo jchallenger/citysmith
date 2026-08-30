@@ -7,6 +7,7 @@ and floating geometry are always bugs.
 
 from __future__ import annotations
 
+import pathlib
 import pytest
 
 from citysmith import floorplan as fp_mod
@@ -3021,20 +3022,128 @@ def test_a_chimney_piece_is_classified_by_its_own_name():
             assert not is_roof_chimney(byname[name]), name
 
 
-def test_the_wide_roof_turn_matches_a_hand_build():
-    """Rural's 2x2 hip turn, settled against a slab the user laid by hand.
+#: Hips the user laid by hand in TaleSpire and handed back as slabs. These are
+#: the ground truth for the whole roof algorithm, and they exist because
+#: reading a rotation sweep off a board got the wide turn wrong and two further
+#: claims were built on the misreading.
+_HAND_HIPS = (
+    # fixture, (origin x, edge in tiles, cell scale, base y) per treatment
+    ("handbuilt_wide_hip_8x8.slab", (("small", 0, 8, 1, 4.5),
+                                     ("wide", 13, 8, 2, 4.5))),
+    ("handbuilt_wide_hip.slab", (("wide", 0, 10, 2, 0.0),)),
+)
 
-    Every one of the sixteen pieces in a 4x4 coarse hip matches what
-    `ROOF_ROT_OFFSET_WIDE` generates at (0, 0), and none matches at (6, 6),
-    (12, 12) or (18, 18). The table said (12, 12) before this, from reading a
-    four-quadrant rotation sweep off a board and picking the wrong quadrant --
-    the sweep lays its hips on a solid pedestal, so a hole in the roof reads as
-    pedestal-coloured thatch and a wrong quadrant can look closed.
 
-    The claim that came with it -- that the wide convention is not derivable
-    from the small one -- is withdrawn. For Rural they are the same. Whether
-    that holds elsewhere is unchecked, and `roof_offsets_wide` answers None for
-    an unchecked kit rather than guessing.
+def _hand_hip(fixture):
+    """Every roof placement in a hand-built fixture, keyed on its low corner."""
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import placed_bounds
+    from citysmith.catalog import load_or_build
+    from citysmith.slab import decode
+
+    byid = {a.id: a for a in load_or_build().assets}
+    root = pathlib.Path(__file__).parent / "fixtures"
+    text = (root / fixture).read_text().strip()
+    laid = {}
+    for pl in decode(text).placements:
+        asset = byid[pl.asset_id]
+        if "roof" not in asset.name.lower():
+            continue
+        x0, z0, _, _ = placed_bounds(asset, pl)
+        laid[(round(x0, 1), round(z0, 1))] = (asset.name, pl.rot, round(pl.y, 2))
+    return laid
+
+
+def _build_hip(kind, ox, edge, scale, base):
+    """The same hip from the shipped functions, keyed the same way."""
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import (
+        SIDE_OFFSETS, _is_reflex, _roof_piece, _roof_rings, place_roof_piece,
+        roof_offsets, roof_offsets_wide,
+    )
+    from citysmith.catalog import load_or_build
+
+    byname = {}
+    for a in load_or_build().assets:
+        byname.setdefault(a.name, a)
+    names = (("Thatched Roof 01", "Thatched Roof Corner 01",
+              "Thatched Roof Inner Corner 01", "Thatched roof flat 01")
+             if kind == "small" else
+             ("Thatched Roof 03", "Thatched Roof Corner 02",
+              "Thatched Roof Inner Corner 02", "Thatched roof flat 02"))
+    slope, corner, inner, cap = (byname[n] for n in names)
+    off = roof_offsets(slope) if kind == "small" else roof_offsets_wide(slope)
+    assert off is not None
+
+    n = edge // scale
+    coarse = {(x, z) for x in range(n) for z in range(n)}
+    rings = _roof_rings(coarse)
+    rise = slope.size_y
+    built = {}
+    for (gx, gz) in sorted(coarse):
+        r = rings[(gx, gz)]
+        fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
+                     if rings.get((gx + dx, gz + dz), -1) < r)
+        piece, rot = _roof_piece(fall, slope, corner, cap, inner,
+                                 _is_reflex(rings, gx, gz, fall), *off)
+        pl = place_roof_piece(piece, ox + scale * gx, scale * gz,
+                              base + r * rise, rot, rise=rise)
+        built[(float(ox + scale * gx), float(scale * gz))] = (
+            piece.name, rot, round(pl.y, 2))
+    return built
+
+
+def test_the_roof_algorithm_reproduces_two_hand_builds():
+    """The shipped roof, piece for piece, against hips laid by hand in game.
+
+    This is the strongest evidence in the project for any geometry rule, and it
+    replaced a weaker test that only restated the rotation table back to
+    itself. It pins four separate things at once, three of which were recorded
+    wrong here first:
+
+    * **The wide family takes its kit's own 1x1 turn.** Rural is (0, 0) at both
+      scales. The table said (12, 12), read off a four-quadrant sweep laid on a
+      solid pedestal -- where a hole in the roof is pedestal-coloured thatch,
+      so a wrong quadrant looks closed.
+    * **The claim that no rule takes the small table to the wide one** was
+      built on that misreading and is withdrawn.
+    * **So was an "apex is never capped" theory**, invented to explain holes
+      that were only the wrong rotation. The apex closes two ways and neither
+      is special-cased: an EVEN grid ends in four corners meeting at a point,
+      an ODD one in a single centre cell with four falls, and `_roof_piece`
+      already returns the cap for zero, three or four falls.
+    * **A wide cap seats a quarter tile proud where a small one seats flush**
+      (`WIDE_CAP_LAP`), though both are 0.5 tall.
+
+    One cell is allowed to differ: the 10x10 fixture has a dormer
+    (`Thatched roof window`) swapped in for one east-face slope, which is
+    dressing rather than structure.
+    """
+    for fixture, treatments in _HAND_HIPS:
+        laid = _hand_hip(fixture)
+        for kind, ox, edge, scale, base in treatments:
+            built = _build_hip(kind, ox, edge, scale, base)
+            assert built, f"{fixture} {kind}: built nothing"
+            differ = [k for k, v in built.items() if laid.get(k) != v]
+            for k in differ:
+                # Only a dressing swap on an otherwise correct slope.
+                assert laid[k][0] == "Thatched roof window", (
+                    f"{fixture} {kind} at {k}: built {built[k]}, "
+                    f"hand-laid {laid.get(k)}")
+                assert laid[k][1:] == built[k][1:], f"{fixture} {kind} at {k}"
+            assert len(differ) <= 1, f"{fixture} {kind}: {differ}"
+
+
+def test_the_wide_roof_turn_is_only_claimed_where_it_was_measured():
+    """An unmeasured kit answers None, so a caller falls back rather than guess.
+
+    Tavern was listed in `ROOF_ROT_OFFSET_WIDE` on the strength of the misread
+    sweep and has been removed. One kit verified against a hand-build is worth
+    more than three asserted ones, and a rank of fins is the cost of guessing.
     """
     import sys
 
