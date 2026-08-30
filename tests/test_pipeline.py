@@ -234,7 +234,7 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [ok  ] vehicle width: main street 92/92 tiles hold 4 (20 ft), lane 49/49 tiles hold 2 (10 ft); 0 of 92 through-route tiles (0.0%) are under 3 tiles (15 ft), where a 10 ft cart cannot get past a pedestrian
 [ok  ] board size: 30x30 tiles (150x150 ft) fits the 2000x2000 board
 [ok  ] asset budget: 974 assets = 0.1% of the 1,000,000 per-board limit
-[ok  ] slab export: 7 slab paste(s), largest 792 compressed bytes (cap 30,720)
+[ok  ] slab export: 7 slab paste(s), largest 795 compressed bytes (cap 30,720)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] gabled ends: none here; no quarters to key on, so every ridge is hipped -- a crop rarely clusters enough to have any
 [ok  ] field walls: none in the source
