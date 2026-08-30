@@ -3138,28 +3138,55 @@ def test_the_roof_algorithm_reproduces_two_hand_builds():
             assert len(differ) <= 1, f"{fixture} {kind}: {differ}"
 
 
-def test_the_wide_roof_turn_is_only_claimed_where_it_was_measured():
-    """An unmeasured kit answers None, so a caller falls back rather than guess.
+def test_the_wide_roof_turn_is_not_the_kits_own_1x1_turn():
+    """Four kits swept, and the tempting rule is false.
 
-    Tavern was listed in `ROOF_ROT_OFFSET_WIDE` on the strength of the misread
-    sweep and has been removed. One kit verified against a hand-build is worth
-    more than three asserted ones, and a rank of fins is the cost of guessing.
+    Rural's wide turn equals its 1x1 turn, settled against a hand-build. Three
+    more kits were swept on open ground against Rural's known-good pair, and
+    **Tavern breaks it**: its 1x1 convention is (6, 6), its 2x2 hip at (6, 6)
+    is a rank of fins, and (0, 0) closes. Castle Fortified and Abandoned
+    Village do coincide with their own 1x1 turns, at (6, 0) -- which is exactly
+    the coincidence that made one kit's measurement look like a rule.
+
+    So the wide turn is per kit and must be measured. This test exists to stop
+    anyone deriving it, which is what the sweep was written to check and what a
+    reader of the table would otherwise assume from three rows out of four.
     """
     import sys
 
     sys.path.insert(0, ".")
-    from citysmith.build import (
-        ROOF_ROT_OFFSET, ROOF_ROT_OFFSET_WIDE, roof_offsets_wide,
-    )
-    from citysmith.catalog import load_or_build
+    from citysmith.build import ROOF_ROT_OFFSET, ROOF_ROT_OFFSET_WIDE
 
-    assert ROOF_ROT_OFFSET_WIDE["rural"] == (0, 0)
-    assert ROOF_ROT_OFFSET_WIDE["rural"] == ROOF_ROT_OFFSET["rural"]
+    assert ROOF_ROT_OFFSET_WIDE == {
+        "rural": (0, 0),
+        "tavern": (0, 0),
+        "castle fortified": (6, 0),
+        "abandoned village": (6, 0),
+    }
+    same = [k for k, v in ROOF_ROT_OFFSET_WIDE.items()
+            if ROOF_ROT_OFFSET.get(k) == v]
+    assert sorted(same) == ["abandoned village", "castle fortified", "rural"]
+    assert ROOF_ROT_OFFSET["tavern"] == (6, 6)
+    assert ROOF_ROT_OFFSET_WIDE["tavern"] == (0, 0)
+
+
+def test_an_unswept_kit_has_no_wide_turn_rather_than_a_default():
+    """A kit nobody has put on a board answers None, so a caller falls back.
+
+    Guessing costs a rank of fins on every roof in that style, and the table
+    carried a guessed row for Tavern once already -- (12, 12), from a misread
+    sweep -- which is why this is a test and not a convention.
+    """
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import roof_offsets_wide
+    from citysmith.catalog import load_or_build
 
     byname = {}
     for a in load_or_build().assets:
         byname.setdefault(a.name, a)
-    for name in ("Village Roof Side 01", "Castle Ruins Wall 01"):
+    for name in ("Castle Ruins Wall 01", "Palace Marble roof curve window"):
         piece = byname.get(name)
         if piece is not None:
             assert roof_offsets_wide(piece) is None, name

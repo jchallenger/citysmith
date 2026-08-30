@@ -53,7 +53,8 @@ import sys
 
 sys.path.insert(0, ".")
 
-from citysmith.build import (
+from citysmith.build import (  # noqa: F401
+    _roof_piece, place_roof_piece, roof_offsets, roof_offsets_wide,
     ROOF_CORNER_ROT, ROOF_EDGE_ROT, SIDE_OFFSETS, _is_reflex,
     _normalized_whole_tiles, _roof_rings, place_tile, placed_bounds,
 )
@@ -149,97 +150,81 @@ HIP_SETS_WIDE = {
     "Abandoned Village": ("haunted roof 2x2", "haunted roof corner out",
                           "haunted roof corner inner",
                           "haunted roof 2x2 broken flat"),
+    # **Castle Fortified names its 1x1 pieces "2x2".** `Regular 2x2 corner out
+    # half top` measures 1x1.25x1 and is half of the 2x2 corner; the wide set
+    # is the unqualified `Regular 2x2 ...` names. Read the collider, not the
+    # name -- this kit is the reason that rule exists.
+    #
+    # It ships **no square 2x2 cap**: its flats are all 1x1, and `Top 2x1 flat`
+    # is 1x0.5x2. That costs nothing on this sweep, because HIP_WIDE is 4 and
+    # an EVEN coarse grid ends in four corners rather than a cap -- but it
+    # means an odd-sided Castle wing cannot close at the wide scale, which is a
+    # constraint on where the coarse path may be used, not on the turn.
+    "Castle Fortified": ("Regular 2x2", "Regular 2x2 corner out",
+                         "Regular 2x2 corner in", "Top 1x1 flat"),
 }
 
 HIP_WIDE = 4     #: edge of a wide hip, in SUPER-cells (so 8 tiles)
 
 
 def lay_hip(out, byname, pedestal, kit: str, ox: int, oz: int,
-            edge_off: int, corner_off: int) -> None:
-    """One hip of ``kit``'s pieces with the Thatched convention turned by
-    ``edge_off`` / ``corner_off`` quarter-steps.
+            edge_off: int, corner_off: int, *, edge: int = HIP,
+            scale: int = 1, sets=None) -> None:
+    """One hip of ``kit``'s pieces, turned by ``edge_off`` / ``corner_off``.
 
     This is the whole hypothesis in one artifact: if a kit's pieces are the
     right shapes and only the *convention* is wrong, then exactly one of these
     closes into a roof and the rest are the rank of fins the town shows.
+
+    ``scale`` selects the vocabulary: 1 for the 1x1 family, 2 for the 2x2 one,
+    where a piece covers a 2x2 block and a course rises by its own 2.0. The two
+    were separate functions with the same body until a restatement bug in the
+    sibling probe made the case for having one.
+
+    **``pedestal`` may be None, and for a rotation sweep it should be.** The
+    first wide sweep stood its hips on a solid floor, so a hole in the roof
+    rendered as pedestal-coloured thatch and a wrong quarter turn looked
+    closed -- that misreading put (12, 12) in `ROOF_ROT_OFFSET_WIDE` and stood
+    there until a hand-build contradicted it. Laid over open ground a hole
+    shows green.
     """
-    slope, corner, inner, cap = (byname.get(n) for n in HIP_SETS[kit])
-    cells = {(x, z) for x in range(HIP) for z in range(HIP)}
-    for x, z in sorted(cells):
-        out.append(place_tile(pedestal, ox + x, oz + z, 0.0))
-    rings = _roof_rings(cells)
-    rise = slope.size_y if slope is not None else 1.0
-    for (x, z) in sorted(cells):
-        r = rings[(x, z)]
-        y = pedestal.size_y + r * rise
-        fall = tuple(s for s, dx, dz in SIDE_OFFSETS
-                     if rings.get((x + dx, z + dz), -1) < r)
-        # _roof_piece inlined, because the offsets are the thing being tested
-        # and threading them through the shared helper would change the town.
-        if len(fall) == 1:
-            piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
-        elif len(fall) == 2:
-            which = CORNER_OF.get(frozenset(fall))
-            if which is None:
-                piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
-            elif _is_reflex(rings, x, z, fall) and inner is not None:
-                piece = inner
-                rot = ROOF_CORNER_ROT[OPPOSITE_CORNER[which]] + corner_off
-            else:
-                piece, rot = (corner or slope), ROOF_CORNER_ROT[which] + corner_off
-        else:
-            piece, rot = cap, 0
-        if piece is not None:
-            out.append(place_tile(piece, ox + x, oz + z, y, rot % 24))
-
-
-def lay_hip_wide(out, byname, pedestal, kit: str, ox: int, oz: int,
-                 edge_off: int, corner_off: int) -> None:
-    """One hip built entirely from a kit's 2x2 pieces.
-
-    The same algorithm as :func:`lay_hip` on a coarser grid: rings are computed
-    over super-cells, each piece covers a 2x2 block, and a course rises by the
-    piece's own 2.0 rather than by 1.0. If the wide family shares the small
-    one's convention, the offset that closes here is the one already in
-    `ROOF_ROT_OFFSET`; if it does not, this is where that shows.
-    """
-    slope, corner, inner, cap = (byname.get(n) for n in HIP_SETS_WIDE[kit])
+    names = (sets or (HIP_SETS if scale == 1 else HIP_SETS_WIDE))[kit]
+    slope, corner, inner, cap = (byname.get(n) for n in names)
     if slope is None:
         return
-    coarse = {(gx, gz) for gx in range(HIP_WIDE) for gz in range(HIP_WIDE)}
-    for gx in range(HIP_WIDE):
-        for gz in range(HIP_WIDE):
-            for dx in range(2):
-                for dz in range(2):
-                    out.append(place_tile(pedestal, ox + 2 * gx + dx,
-                                          oz + 2 * gz + dz, 0.0))
+    n = edge // scale
+    coarse = {(x, z) for x in range(n) for z in range(n)}
+    base = 0.0
+    if pedestal is not None:
+        for x in range(edge):
+            for z in range(edge):
+                out.append(place_tile(pedestal, ox + x, oz + z, 0.0))
+        base = pedestal.size_y
     rings = _roof_rings(coarse)
     rise = slope.size_y
     for (gx, gz) in sorted(coarse):
         r = rings[(gx, gz)]
-        y = pedestal.size_y + r * rise
         fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
                      if rings.get((gx + dx, gz + dz), -1) < r)
-        if len(fall) == 1:
-            piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
-        elif len(fall) == 2:
-            which = CORNER_OF.get(frozenset(fall))
-            if which is None:
-                piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
-            elif _is_reflex(rings, gx, gz, fall) and inner is not None:
-                piece = inner
-                rot = ROOF_CORNER_ROT[OPPOSITE_CORNER[which]] + corner_off
-            else:
-                piece, rot = (corner or slope), ROOF_CORNER_ROT[which] + corner_off
-        else:
-            piece, rot = cap, 0
+        # **Call `_roof_piece`; do not restate it.** Its `edge_off` and
+        # `corner_off` parameters are exactly what this probe varies, so
+        # threading them through changes nothing about the town -- the older
+        # comment here claimed otherwise and was wrong. The sibling probe
+        # restated it, lost the three-or-four-fall cap branch, and produced an
+        # apex hole that was then theorised about for two sessions.
+        piece, rot = _roof_piece(fall, slope, corner, cap, inner,
+                                 _is_reflex(rings, gx, gz, fall),
+                                 edge_off, corner_off)
         if piece is not None:
-            # A cap is shorter than a course and seats by its top; everything
-            # else seats by its base. Same rule as `build.place_roof_piece`,
-            # which is where this belongs once the probes are converted.
-            seat = y - piece.size_y if piece.size_y < rise else y
-            out.append(place_tile(piece, ox + 2 * gx, oz + 2 * gz, seat,
-                                  rot % 24))
+            out.append(place_roof_piece(piece, ox + scale * gx, oz + scale * gz,
+                                        base + r * rise, rot, rise=rise))
+
+
+def lay_hip_wide(out, byname, pedestal, kit: str, ox: int, oz: int,
+                 edge_off: int, corner_off: int, *, edge: int = None) -> None:
+    """A kit's 2x2 hip. Thin wrapper; :func:`lay_hip` does the work."""
+    lay_hip(out, byname, pedestal, kit, ox, oz, edge_off, corner_off,
+            edge=edge if edge is not None else HIP_WIDE * 2, scale=2)
 
 
 CORNER_OF = {
@@ -266,6 +251,14 @@ def main() -> None:
                          "1x1 is the single-course family _lay_roofs builds "
                          "from; wide is the double-course family, which is "
                          "the only one with an `end` piece.")
+    ap.add_argument("--corner-off", type=int,
+                    help="pin the corner turn and sweep the edge")
+    ap.add_argument("--kits", help="comma-separated kits to lay at --turn, "
+                    "one 2x2 hip each, instead of the control-pair comparison")
+    ap.add_argument("--turn", help="E,C wide turn to lay --kits at")
+    ap.add_argument("--sweep", action="store_true",
+                    help="four quarter turns of one kit instead of the "
+                         "control-pair comparison (diagonal only)")
     ap.add_argument("--hips", action="store_true",
                     help="lay four hips, one per rotation offset, instead of "
                          "the piece matrix -- the decisive test, and small "
@@ -304,20 +297,85 @@ def main() -> None:
             ap.error(f"no {'wide ' if wide else ''}hip vocabulary recorded for "
                      f"{args.kit!r}; have {', '.join(sets)}")
         out: list = []
-        hip_edge = (HIP_WIDE * 2) if wide else HIP
-        pitch = hip_edge + HIP_GAP
-        # Four wide hips in a row is 44 tiles and does not frame; 2x2 does.
-        cols = 2 if wide else len(ROTS)
+
+        if not wide:
+            hip_edge, pitch, cols = HIP, HIP + HIP_GAP, len(ROTS)
+            slots = [(args.kit, 1, off, off) for off in ROTS]
+            pad, tail = 3, 5
+        elif args.kits:
+            # **Is the WIDE convention one convention, shared across kits?**
+            # Rural's wide turn is (0, 0) and so is its 1x1, which made the two
+            # facts look like one. Tavern's 1x1 is (6, 6) and its 2x2 at (6, 6)
+            # is fins, so they are NOT one fact -- the wide turn is its own
+            # thing. This lays one kit's 2x2 hip per slot at a single turn, so
+            # a shared convention shows as every hip closing at once.
+            hip_edge = HIP_WIDE * 2
+            pitch, cols = hip_edge + HIP_GAP, 3
+            # With --turn, one turn for every kit -- the "is there ONE wide
+            # convention" test. Without it, each kit's own recorded wide turn,
+            # which is the verification board: every hip should close at once,
+            # and any that does not is a wrong row in the table.
+            slots = []
+            for k in (k.strip() for k in args.kits.split(",")):
+                if args.turn:
+                    e, c = (int(v) for v in args.turn.split(","))
+                else:
+                    piece = byname.get(HIP_SETS_WIDE[k][0])
+                    ec = roof_offsets_wide(piece) if piece is not None else None
+                    if ec is None:
+                        ap.error(f"no wide turn recorded for {k!r}")
+                    e, c = ec
+                slots.append((k, 2, e, c))
+            pad, tail = 2, 3
+        elif args.sweep:
+            # The old shape: four quarter turns of one kit at the wide scale.
+            # **Only reachable behind --sweep now, and it walks a DIAGONAL** --
+            # edge and corner turned together. That is fine for Rural (0, 0)
+            # and Tavern (6, 6) and useless for Castle Fortified and Abandoned
+            # Village, whose 1x1 turns are both (6, 0) and therefore off it.
+            # Pin one with --edge-off when hunting.
+            hip_edge = HIP_WIDE * 2
+            pitch, cols = hip_edge + HIP_GAP, 3
+            # One axis at a time. --edge-off pins the edge and sweeps the
+            # corner; --corner-off pins the corner and sweeps the edge. The
+            # space is 4x4 and a diagonal walk covers only four of the sixteen.
+            if args.corner_off is not None:
+                slots = [(args.kit, 2, off, args.corner_off) for off in ROTS]
+            else:
+                slots = [(args.kit, 2,
+                          args.edge_off if args.edge_off is not None else off,
+                          off) for off in ROTS]
+            pad, tail = 2, 2
+        else:
+            # **The default is a HYPOTHESIS TEST, not a search.** Rural's wide
+            # turn is its own 1x1 turn, settled against a hand-build. If that
+            # generalises, the answer for every kit is already in
+            # ROOF_ROT_OFFSET and the only question is whether the two hips are
+            # the same roof. So lay four: Rural's pair, then the kit's pair.
+            #
+            # Rural is on every board on purpose. It is the one pair KNOWN to
+            # be right, so it shows what "correct" looks like in this lighting
+            # -- and CLAUDE.md's rule that a dark kit is run one at a time
+            # against the tan Thatched control is exactly this. A sweep that
+            # can only say "which of these four looks best" has been misread
+            # here twice; a comparison against a known-good pair cannot be.
+            # 2x2 rather than a row of four: 22 x 22 frames with room to
+            # spare, where 47 x 14 needs 49 tiles of slant range against a
+            # stop at 49.75. It also puts the known-good pair on one row and
+            # the kit under test directly below it.
+            hip_edge = HIP_WIDE * 2
+            pitch, cols = hip_edge + HIP_GAP, 2
+            kits = ["Rural"] + ([] if args.kit == "Rural" else [args.kit])
+            slots = [(k, sc, None, None) for k in kits for sc in (1, 2)]
+            pad, tail = 2, 3
+        rows = (len(slots) + cols - 1) // cols
         span = cols * pitch
-        rows = (len(ROTS) + cols - 1) // cols
-        # A tighter apron on the wide sweep: the 1x1 one is a single row of
-        # four and has depth to spare, while 2x2 stacks two rows and a 30-deep
-        # board needs 53 tiles of slant range against a stop at 49.75.
-        pad = 2 if wide else 3
-        for dz in range(-pad, rows * pitch + (2 if wide else 5)):
+
+        for dz in range(-pad, rows * pitch + tail):
             for dx in range(-pad, span + 2):
                 out.append(place_tile(grass, dx, dz, -grass.size_y))
-        for i, off in enumerate(ROTS):
+
+        for i, (kit, scale, eoff, coff) in enumerate(slots):
             ox = (i % cols) * pitch
             oz = (i // cols) * pitch
             # Numbered as a **bar on the ground**, not a stack. A vertical
@@ -326,12 +384,20 @@ def main() -> None:
             # shows. A bar of i+1 cells running east is unmistakable from
             # directly overhead, which is the one view this probe needs.
             for t in range(i + 1):
-                out.append(place_tile(marker, ox + t, oz + hip_edge + 2, 0.0))
-            eoff = args.edge_off if args.edge_off is not None else off
-            lay = lay_hip_wide if wide else lay_hip
-            lay(out, byname, pedestal, args.kit, ox, oz, eoff, off)
-            print(f"# {i + 1}: r{i // cols}c{i % cols}  {args.kit} "
-                  f"edge +{eoff} corner +{off}", file=sys.stderr)
+                out.append(place_tile(marker, ox + t, oz + hip_edge + 1, 0.0))
+            if eoff is None:
+                ctl = byname.get(HIP_SETS[kit][0])
+                eoff, coff = roof_offsets(ctl) if ctl is not None else (0, 0)
+            # **No pedestal.** A hole must read as grass, not as floor: the
+            # first wide sweep stood its hips on a solid one, so a hole
+            # rendered as pedestal-coloured thatch and a wrong quarter turn
+            # looked closed. That misreading is what put (12, 12) in the table.
+            lay_hip(out, byname, None, kit, ox, oz, eoff, coff,
+                    edge=hip_edge, scale=scale,
+                    sets=HIP_SETS if scale == 1 else HIP_SETS_WIDE)
+            print(f"# {i + 1}: r{i // cols}c{i % cols}  {kit} "
+                  f"{'1x1' if scale == 1 else '2x2'} "
+                  f"edge +{eoff} corner +{coff}", file=sys.stderr)
         byid = {a.id: a for a in cat.assets}
         print(encode(_normalized_whole_tiles(Slab(out), byid)))
         print(f"# {len(out)} placements", file=sys.stderr)

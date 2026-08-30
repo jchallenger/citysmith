@@ -5786,27 +5786,37 @@ ROOF_ROT_OFFSET: dict[str, tuple[int, int]] = {
 
 #: The same turn for a kit's DOUBLE-COURSE family.
 #:
-#: **Rural is (0, 0) -- the same as its 1x1 convention -- and that is settled
-#: against a hand-build, not against a screenshot.** The user laid the sixteen
-#: 2x2 pieces of a 4x4 coarse hip by hand and handed the slab back; decoded,
-#: every one of the sixteen matches what this table generates at (0, 0), and
-#: none matches at (6, 6), (12, 12) or (18, 18).
+#: **Rural is settled against a hand-build; the other three are swept.** The
+#: user laid a 4x4 coarse hip by hand and handed the slab back, and every one
+#: of its sixteen pieces matches generation at (0, 0) and none at (6, 6),
+#: (12, 12) or (18, 18). That replaced (12, 12), which came from reading a
+#: four-quadrant sweep off a board and picking the wrong quadrant -- the sweep
+#: stood its hips on a solid pedestal, so a hole rendered as pedestal-coloured
+#: thatch and a wrong turn could look closed. The sweep lays on open ground
+#: now, where a hole shows green.
 #:
-#: It replaces (12, 12), which came from reading a four-quadrant rotation
-#: sweep off a board and picking the wrong quadrant. Two things followed from
-#: that error and both were wrong: a claim that the wide convention is not
-#: derivable from the small one, and an "apex is never capped" theory invented
-#: to explain holes that were really just the wrong rotation. A sweep laid on a
-#: solid pedestal shows a hole as pedestal-coloured roof, which is what made it
-#: readable as clean; the hand-build had no such cover.
+#: **The wide turn is NOT derivable from the kit's 1x1 turn**, and Tavern is
+#: the proof: its 1x1 convention is (6, 6) and its 2x2 hip at (6, 6) is a rank
+#: of fins, while (0, 0) closes. Rural and Castle Fortified and Abandoned
+#: Village happen to coincide with their own 1x1 turns, which is exactly the
+#: coincidence that made a one-kit measurement look like a rule. Measure per
+#: kit.
 #:
-#: **A kit with no entry has not been checked against a hand-build.**
-#: `roof_offsets_wide` returns None for one rather than a default, so a caller
-#: falls back to the 1x1 family instead of laying a rank of fins. Tavern was
-#: listed here on the strength of the same misread sweep and has been removed:
-#: one verified kit is worth more than three asserted ones.
+#: | kit | 1x1 | 2x2 | same? |
+#: |---|---|---|---|
+#: | Rural | (0, 0) | (0, 0) | yes -- hand-build |
+#: | Tavern | (6, 6) | (0, 0) | **no** |
+#: | Castle Fortified | (6, 0) | (6, 0) | yes |
+#: | Abandoned Village | (6, 0) | (6, 0) | yes |
+#:
+#: **A kit with no entry has not been measured.** `roof_offsets_wide` returns
+#: None for one rather than a default, so a caller falls back to the 1x1
+#: family instead of laying fins.
 ROOF_ROT_OFFSET_WIDE: dict[str, tuple[int, int]] = {
     "rural": (0, 0),
+    "tavern": (0, 0),
+    "castle fortified": (6, 0),
+    "abandoned village": (6, 0),
 }
 
 
