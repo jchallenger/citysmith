@@ -21,7 +21,10 @@ dependencies = []
 # The generator is fully usable offline. Claude only translates natural
 # language into generator parameters and writes GM-facing prose.
 ai = ["anthropic>=0.40"]
-dev = ["pytest>=8"]
+# `pytest-xdist` is a test-runner plugin, not a dependency of the generator:
+# the stdlib-only rule is scoped to the core, and nothing under `citysmith/`
+# imports either of these. It takes the suite from 104s to 24s on 16 cores.
+dev = ["pytest>=8", "pytest-xdist>=3"]
 
 [project.scripts]
 citysmith = "citysmith.cli:main"

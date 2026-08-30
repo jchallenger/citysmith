@@ -111,11 +111,18 @@ Run all three before reporting a build as good.
 
 **1. Tests.**
 ```bash
-python -m pytest -q
+python -m pytest -q -n auto
 ```
-326 tests. `tests/fixtures/*.slab` are genuine TaleSpire slabs and are the codec's
-ground truth: decode → encode reproduces the original *binary* byte for byte (the
-base64 differs, because .NET's deflate and zlib's differ — that is expected).
+881 tests, ~24s in parallel against ~104s serial. `tests/fixtures/*.slab` are
+genuine TaleSpire slabs and are the codec's ground truth: decode → encode
+reproduces the original *binary* byte for byte (the base64 differs, because
+.NET's deflate and zlib's differ — that is expected).
+
+**Do not run the whole suite after every edit.** Run the file you touched, or
+`--lf -x` to re-run only what failed; the full suite is the gate before a
+commit, not the inner loop. See CLAUDE.md's *Testing* section for why the
+slow tests are worth looking at rather than tolerating — two of them were
+bugs, not cost.
 
 **2. The off-grid canary.** Every non-prop placement must sit on a half-tile
 boundary. A single fractional overhang drags the whole board off the grid, which

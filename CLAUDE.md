@@ -1964,10 +1964,71 @@ Two things learned seeding it:
 
 ## Testing
 
-`python -m pytest -q`. Tests assert invariants (no overlapping buildings, no
-unreachable rooms, walls resting on floors), not exact output — so generator
-aesthetics can change freely while real bugs stay caught. `tests/fixtures/*.slab`
+`python -m pytest -q -n auto`. 881 tests in ~24s on 16 cores, ~104s serial.
+Tests assert invariants (no overlapping buildings, no unreachable rooms, walls
+resting on floors), not exact output — so generator aesthetics can change
+freely while real bugs stay caught. `tests/fixtures/*.slab`
 are genuine TaleSpire slabs and are the ground truth for the codec.
+
+**The full suite is the gate before a commit, not the inner loop.** Run the
+file you touched, or `--lf -x` to re-run only what failed.
+
+### A slow test is a finding, not a cost (MEASURED 2026-08-30)
+
+"It takes so long with so many tests" was the complaint, and the count was not
+the problem: **846 of 873 tests ran in 55s. Three tests held 42s of the 134s,
+and two of those were bugs rather than work.**
+
+- **16.0s of it was a network timeout inside a path test.**
+  `test_a_path_cannot_be_walked_out_of_the_output_directory` does no building
+  at all. One of its escape strings is `//etc/passwd`, which on Windows is the
+  UNC path `\\etc\passwd` -- and `Path.resolve()` on a UNC root is a NETWORK
+  CALL, blocking while SMB gives up on a host named `etc`. So 12% of the suite
+  was one blocking lookup, and it was **also a live defect in the server**:
+  `uiserver.resolve_in` took that string from a request, so `//somehost/x`
+  stalled a handler for 16 seconds -- a denial of service with a one-line
+  payload. Refused by name now, before the disk ever sees it
+  (`PureWindowsPath(rel).drive or .root`, which covers `C:`, `\\host\share`, a
+  leading slash and drive-relative `C:notes.svg`).
+- **7.5s of it was the same 460x460 raster built twice.** `_pop` rasterises,
+  and `test_the_budget_keeps_guards_before_idlers` called it once for the full
+  population and again for the capped one. A module-scoped fixture builds the
+  town once and both town tests read it -- safe because `npcs.posts` only reads
+  the TileMap and nothing in `npcs.py` assigns to one.
+
+The rule: **run `--durations=25` before concluding the suite is merely big.**
+The time here concentrates in a handful of tests, and twice now that
+concentration was a bug wearing a stopwatch.
+
+And **assert the property, not the clock.** The regression test for the UNC
+case monkeypatches `Path.resolve` to raise, so reaching the disk *is* the
+failure. A timing assertion would be flaky under load and would pass for the
+wrong reason on a machine with no network.
+
+### What `-n auto` does and does not change
+
+xdist buys wall-clock only. It does **not** make the fixture work above
+redundant, and the two interact in a way worth knowing before you delete one:
+
+- **Under the default `--dist load` a module is split across workers**, so the
+  module-scoped `big_town` fixture is built **twice** -- 8.00s and 7.88s of
+  setup, measured. That costs CPU and not wall-clock, since the two builds run
+  concurrently. The fixture is what speeds up the *serial* run and the
+  single-file run, which are the two that happen in the loop.
+- **`--dist loadfile` is worse, not better** -- 35.9s against 24.4s. Grouping
+  by file pins `test_generation.py`'s 137 tests to one worker and makes it the
+  long pole. Do not reach for it to "fix" the duplicated fixture above.
+- **`test_determinism.py` is safe under xdist**, checked 3/3. It spawns its own
+  subprocesses with a set `PYTHONHASHSEED`, which is independent of how pytest
+  distributes the test.
+- **No test writes outside `tmp_path`**, so there is no shared `out/` for
+  parallel workers to collide in. Worth re-checking if one ever does: this file
+  already records a measurement read wrong because a previous build's chunk
+  files were still sitting in `out/`.
+
+`pytest-xdist` is in the `dev` extra. **That does not dent the stdlib-only
+rule**, which is scoped to the core -- it is a test-runner plugin and nothing
+under `citysmith/` imports it.
 
 ## Not built yet
 
