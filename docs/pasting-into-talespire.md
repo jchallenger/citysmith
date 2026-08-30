@@ -132,7 +132,7 @@ has **not** been driven — treat it as a lead, not a measurement.
 | left-click | pick up a placed asset | — |
 | `W`/`A`/`S`/`D` | fly the camera | **hold** — velocity ramps; 0.4 s crawls, 3 s crosses a map |
 | `Q` / `E` | rotate the camera (hint bar; not driven) | — |
-| left-drag | pan the camera | **no** — measured; see the note below the table |
+| left-drag | **picks the map up in build mode**; does nothing to the camera out of it | **never use it to pan** — measured; see the note below the table |
 | middle-drag | rotate camera | — |
 | `Ctrl` + right-drag | set the build **elevation plane** | — |
 | right-hand vertical track | **elevation cut plane**, graduated in tiles — *not* a camera slider | grab the blue chevrons, and move with relative motion |
@@ -146,6 +146,17 @@ has **not** been driven — treat it as a lead, not a measurement.
 | `Space` | raise the HUD (a **toggle** — pressing it again closes it) | — |
 | `F1` | help — a video overlay; it does not screen-capture | — |
 | `Alt+Enter` | toggle windowed / fullscreen | — |
+
+**Left-drag is not a pan, and the cost of pretending otherwise is the map
+(measured 2026-08-30).** This table has said so since it was read off the hint
+bar, and `ts.ps1 pan` sent a LEFT drag anyway. Re-measured on a 900x500 crop
+against a 0.59 noise floor: a 300 px left drag moves the frame **0.59** -- the
+floor exactly -- and the same right drag moves it **14.60**. So out of build
+mode the verb was a silent no-op. In build mode a left drag is PICK UP OBJECT,
+so it lifted whatever lay under the cursor and put it down elsewhere: two calls
+quarried a two-tile hole out of a review board's terrain and left a grass tile
+standing in the void, and the hole grew between two screenshots of a roof that
+was being judged from them. Nothing said a thing. `pan` is a right drag now.
 
 **Duration, measured (2026-08-24).** TaleSpire runs under a 25 fps cap here
 (`TaleSpireSettings.json`, `RefreshRateSettingV0`), so a frame is ~41 ms, and

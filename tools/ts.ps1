@@ -13,7 +13,7 @@ does not rediscover them each time.
   .\tools\ts.ps1 key    -Keys "^c"
   .\tools\ts.ps1 orbit  -X 800 -Y 500 -DX 260 -DY 0
   .\tools\ts.ps1 rdrag  -X 800 -Y 400 -DX 0 -DY 400      # precise; hand must be clear
-  .\tools\ts.ps1 pan    -X 800 -Y 300 -DX 0 -DY 500      # left drag, also short range
+  .\tools\ts.ps1 pan    -X 800 -Y 300 -DX 0 -DY 500      # right drag; empty hand first
   .\tools\ts.ps1 fly    -Keys w -Hold 3.0                # long haul; WASD ramps
   .\tools\ts.ps1 clear                                   # empty the hand (right TAP)
   .\tools\ts.ps1 cutbox                                  # N: slice into a mass
@@ -236,7 +236,9 @@ function Focus-TS {
 # Every camera move in TaleSpire is a drag, and every drag has to be slow: the
 # camera *follows* the cursor rather than jumping to it, so a fast synthetic
 # drag outruns it and registers as nothing at all. One implementation, three
-# callers (left pan, right pan, middle orbit), so they cannot drift apart.
+# callers (right pan, middle orbit), so they cannot drift apart. A LEFT
+# drag is not among them: it does not move the camera, and in build mode it
+# picks the map up -- see `pan`.
 function Drag([int]$px,[int]$py,[int]$dx,[int]$dy,[uint32]$down,[uint32]$up,
               [int]$steps = 60,[int]$ms = 40,
               [int]$grab = 250,[int]$pre = 250,[int]$hold = 300,[int]$post = 600) {
@@ -702,10 +704,26 @@ switch ($Cmd) {
     "orbited $DX,$DY"
   }
   'pan'     {
-    # Left drag pans. No pre-emptive right-click here: with an empty hand a
-    # right-click opens the asset library over the board.
+    # **A LEFT drag does not pan, and in build mode it is destructive.** This
+    # used to send LDOWN/LUP on the strength of a comment reading "Left drag
+    # pans". Measured against a 0.59 noise floor on a 900x500 crop: a left
+    # drag of 300 px moves the frame by 0.59 -- nothing at all -- while the
+    # same right drag moves it 14.60. The binding table in
+    # docs/pasting-into-talespire.md has said left-drag does NOT pan since it
+    # was read off the hint bar; this verb simply contradicted it.
+    #
+    # Out of build mode that was a silent no-op, which cost a review pass
+    # spent believing the camera would not move. IN build mode a left drag is
+    # PICK UP OBJECT, so each call lifted whatever lay under the cursor and
+    # dropped it somewhere else -- two calls quarried a two-tile hole out of a
+    # board's terrain and left a grass tile standing in the void, and the
+    # growing hole was very nearly read as a defect in the roof work being
+    # reviewed. A driving verb that edits the map while claiming to move the
+    # camera is the worst failure mode this tool has.
+    #
+    # It is the right drag now, same as `rdrag`, which is what actually pans.
     Focus-TS
-    Drag $X $Y $DX $DY ([TSIn]::LDOWN) ([TSIn]::LUP) $CAM.steps $CAM.ms $CAM.grab $CAM.pre $CAM.hold $CAM.post
+    Drag $X $Y $DX $DY ([TSIn]::RDOWN) ([TSIn]::RUP) $CAM.steps $CAM.ms $CAM.grab $CAM.pre $CAM.hold $CAM.post
     "panned $DX,$DY"
   }
   'rdrag'   {
