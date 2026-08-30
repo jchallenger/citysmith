@@ -233,6 +233,19 @@
    "disposable": false,
    "note": "One bay per quarter at seed 2 (civic=crow, docks=flush, outskirts=hip), gable ends all facing WEST so one square-on elevation holds all three. THE elevation for crowstep-end-elevation."
   },
+  "PROBE roof 1x1 vs 2x2": {
+   "board": "PROBE roof 1x1 vs 2x2",
+   "holds": "probe",
+   "source": "out\\roofscale.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T00:00:15",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale-*"
+  },
   "PROBE wall bond stagger": {
    "board": "PROBE wall bond stagger",
    "holds": "probe",

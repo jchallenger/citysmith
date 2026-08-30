@@ -4302,6 +4302,33 @@ WALL_STAIR_REACH = 4
 #: proud of it and still leave no joint to see.
 CHIMNEY_LAP = 0.25
 
+def place_roof_piece(piece: Asset, tx: int, tz: int, course_y: float,
+                     rot: int = 0, *, rise: float = 1.0) -> Placement:
+    """Place a roof piece for the course whose top is at ``course_y``.
+
+    **Which end of a piece seats at the course depends on the piece, and
+    getting it wrong is invisible in the file.** A slope, a corner and a
+    roof-and-chimney combination all seat by their BASE and rise above the
+    course. A flat CAP seats by its TOP: it closes a ridge rather than
+    climbing it, which is the rule `Builder.surface` follows for anything laid
+    flat and the one CLAUDE.md states as "surface tiles align at the top, not
+    the bottom".
+
+    The test is the piece's own height against the course rise. A piece
+    shorter than one rise is a lid; a piece a rise or more is a course. That
+    holds across every kit measured -- 1x1 slopes and corners are 1.0 and 2x2
+    ones are 2.0, while flat caps are 0.5 at both scales.
+
+    **This exists because it was re-derived and got wrong twice in one file.**
+    `tools/chimney_probe.py` seated a cap by its base and a combination by its
+    top; the ridge stood half a tile proud and the chimney was buried, and a
+    reviewer spent four rounds diagnosing an instrument rather than the town.
+    Ten probe tools re-derive this today. This is meant to be the only copy.
+    """
+    seat = course_y - piece.size_y if piece.size_y < rise else course_y
+    return place_tile(piece, tx, tz, seat, rot)
+
+
 #: How far a roof-and-chimney COMBINATION sinks below the roof course it
 #: replaces. Picked off a board (`PROBE chimney seated by base`, back row
 #: middle): flush reads as a stack perched on the ridge, half a tile in reads
@@ -4681,8 +4708,10 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
         if crow and on_end(cell):
             continue
         if side is not None:
-            b.add(place_tile(side, cell[0], cell[1], roof_y + course * rise,
-                             (ROOF_EDGE_ROT[fall] + edge_off) % 24))
+            b.add(place_roof_piece(side, cell[0], cell[1],
+                                   roof_y + course * rise,
+                                   (ROOF_EDGE_ROT[fall] + edge_off) % 24,
+                                   rise=rise))
     # **One chimney, on the ridge.** The hip path places one per building and
     # the first cut of this one placed none, which took East Tradebourne from
     # 1,578 chimneys to 40 -- a town losing 97%% of its chimneys is the most
