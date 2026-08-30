@@ -484,8 +484,11 @@ def test_a_trail_cell_builds_with_the_lane_role(catalog_palette):
     b = Builder(palette, 0)
     grade = palette.require("floor").size_y
     # The same surface->role mapping build_from_tilemap uses for these cells.
-    _lay_terrain(b, tm, {raster.GROUND: "ground", raster.LANE: "lane",
-                         raster.FIELD: "ground"}, grade=grade, taper={})
+    # `_lay_terrain` takes a *callable* (surface, x, z) -> role, not a dict:
+    # a yard and the lawn beside it are both GROUND and pave differently.
+    roles = {raster.GROUND: "ground", raster.LANE: "lane", raster.FIELD: "ground"}
+    _lay_terrain(b, tm, lambda s, x, z: roles.get(s, "ground"),
+                 grade=grade, taper={})
 
     lane = palette.require("lane")
     here = [p for p in b.placements
@@ -546,7 +549,8 @@ def test_the_channel_runs_on_under_an_authored_deck(catalog_palette):
     palette = catalog_palette
     b = Builder(palette, 0)
     grade = palette.require("floor").size_y
-    _lay_terrain(b, tm, {raster.GROUND: "ground", raster.STREET: "street"},
+    roles = {raster.GROUND: "ground", raster.STREET: "street"}
+    _lay_terrain(b, tm, lambda s, x, z: roles.get(s, "ground"),
                  grade=grade, taper={})
     laid = _lay_bridges(b, tm, grade=grade, taper={})
     assert laid == 16, "one deck per pier cell"

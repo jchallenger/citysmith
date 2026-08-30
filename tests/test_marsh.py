@@ -74,9 +74,18 @@ def test_a_track_can_cross_the_fen():
     into a wetland stops dead at its edge -- a silently dropped feature, which
     is the failure this project records more often than any other."""
     tm = R.rasterize(_fen(pool=False, road=True))
-    crossing = [x for x in range(2, 26) if tm.surface[40][x] == R.STREET]
+    # Made public surface, not STREET alone. The claim is that the way REACHES
+    # ACROSS -- and since the grown market square landed, the near end of this
+    # fixture's causeway is paved as PLAZA, which is walkable made ground and
+    # not a break in the way. Counting STREET was a proxy that outlived the
+    # thing it stood for: it read 15 here while the crossing was 24 unbroken
+    # cells and no marsh was left on the row at all.
+    made = (R.STREET, R.PLAZA)
+    crossing = [x for x in range(2, 26) if tm.surface[40][x] in made]
     assert len(crossing) > 15, (
         f"the causeway only reached {len(crossing)} cells into the fen")
+    assert crossing == list(range(min(crossing), max(crossing) + 1)), (
+        "the way across the fen is broken, not merely re-surfaced")
 
 
 # -- what a marsh is, and is not ----------------------------------------------
