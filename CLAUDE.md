@@ -21,6 +21,7 @@ This file is the internal engineering notes. User-facing docs:
   the roofing and the chimneys are built; the terraces are still design),
 `docs/camera-model.md` (the builder camera, measured, and the moves that
   drive it),
+`docs/regenerating-boards.md` (the ordered path from this code to fresh boards),
 `tasks.json` (what is designed, what is built, and `citysmith tasks --check`),
 `docs/board-strategy.md` (interior vs exterior boards, and moving a party
   between them -- what the community recommends, and what we do instead),
