@@ -1701,7 +1701,7 @@
       "state": "open",
       "doc": "citysmith/build.py",
       "evidence": "test:test_a_roof_uses_its_kits_larger_pieces",
-      "note": "MEASURED on Forest Church: 1,661 roof pieces placed and EVERY ONE is 1x1, while every kit we roof with ships a full 2x2 set -- Rural 5 (incl. Thatched Roof 03, roof flat 02, corner 02, inner corner 02), Tavern 7, Abandoned Village 8, Castle Fortified 12. This is the wall-run defect one surface up: the kit is authored at two sizes and we place only the small one, so a roof reads as a grid of tiles rather than as a roof. `walls.pack` is the shape of the answer -- cover a course with the larger piece where one fits -- but a roof is not a run: it steps in and up per ring, so a 2x2 has to align to the ring AND to the rise, and the hip rotations are per kit (build.ROOF_ROT_OFFSET). Probe before building. || PROBED 2026-08-30, `PROBE roof 1x1 vs 2x2`, and naive block packing DOES NOT WORK. What is established: the scale relationship is exact and the same in every kit -- 1x1 slopes and corners are 1.0 tall, 2x2 ones are 2.0, and flat caps are 0.5 at both scales -- so a 2x2 slope is arithmetically two courses of the 1x1 field, two cells deep and two rises tall. That is the same relationship END_PIECE_CELLS records for the gable end. Partner pieces match cleanly by SIZE AND FAMILY (`Thatched Roof 01` -> `Thatched Roof 03`, `Corner 01` -> `Corner 02`); the kits number them inconsistently so a name match would fail. What does NOT work: taking any 2x2 block of cells whose rings are (r, r+1) and seating a 2x2 piece at ring r with the 1x1 rotation convention. On the board the 1x1 controls are clean hips and the 2x2 roofs are broken -- misaligned planes, steps and visible gaps. Three candidates, none tested: the 2x2 hip ROTATION convention may differ from the 1x1 one, which `build.ROOF_ROT_OFFSET` already records as per-kit for 1x1 and which `roofrot_probe.py --hips` measured by sweeping all four quarter turns; the 2x2 piece may be a single course at twice the scale rather than two courses; or the block selection may be straddling the hip diagonals. NEXT STEP is a rotation sweep for the 2x2 set, the same shape as `roofrot_probe.py --hips`, before any more packing work. Do not guess the turn -- that table exists because guessing it produced a rank of fins. || ROTATION SWEPT 2026-08-30, and it was the cause. `roofrot_probe.py --hips --footprint wide` (new -- the hip sweep had a hardcoded 1x1 vocabulary and silently ignored --footprint) lays the same 2x2 hip four times, once per quarter turn. Rural and Tavern BOTH close at (12, 12) -- `PROBE 2x2 hip rotations` and `... Tavern`, bottom-left in each, a clean X of hip ridges with no gaps while the other three are fins. Their 1x1 conventions are (0, 0) and (6, 6), so the deltas are +12 and +6 and NO RULE takes one table to the other: the wide family has its own convention and it has to be measured per kit. That is why the first packing attempt produced misaligned planes -- it used the 1x1 offsets. `ROOF_ROT_OFFSET_WIDE` and `roof_offsets_wide` hold it; an unswept kit answers None rather than a default, so a caller falls back to the 1x1 family instead of laying fins. Castle Fortified and Abandoned Village are unswept. REMAINING: re-run the packing with the correct turn, and settle whether a 2x2 block may straddle a hip diagonal -- the rotation was one of three candidates and only it has been tested. || RE-RUN WITH THE MEASURED TURN, 2026-08-30. Two more findings and one still open. (a) MIXING SCALES INSIDE ONE ROOF DOES NOT WORK even with the right turn -- 2x2 blocks dropped into a 1x1 ring layout leave holes wherever the coarse piece and the fine ring structure disagree. The unit of choice is the ROOF, not the cell: a wing built WHOLLY on a coarse grid is the shape of the answer, and `roofscale_probe.py` mode `coarse` does that. (b) A PROBE BUG, mine: `ROOF_CORNER_ROT.get(\"\".join(sorted(fall)), 0)` yields 'en' and 'es' for the north-east and south-east corners, which are not keys, so `.get` returned rotation 0 on half the corners and the roof came out holed. `build.CORNER_BY_SIDES` keys on a frozenset for exactly this. Fixed; the corners are symmetric now. (c) STILL OPEN, and measured rather than guessed: NO CELL ON A COARSE GRID EVER HAS ZERO FALLS -- checked on 4x4 and 5x5, the capped set is empty both times -- so the coarse path never places a cap and the apex is never closed. That is the remaining hole. The 1x1 path solves it with `roof_top_is_supported`, which caps the top ring only where a slope would have nothing to lean on; the coarse path needs the same rule. CAVEAT ON THE ROTATION SWEEP: `lay_hip_wide` has the same structure and so had the same apex hole, hidden by the solid pedestal under it. The turn measurement stands -- three offsets were plainly fins and one plainly coherent -- but 'closes cleanly' overstated it and the next sweep should lay its hips on open ground.",
+      "note": "MEASURED on Forest Church: 1,661 roof pieces placed and EVERY ONE is 1x1, while every kit we roof with ships a full 2x2 set -- Rural 5 (incl. Thatched Roof 03, roof flat 02, corner 02, inner corner 02), Tavern 7, Abandoned Village 8, Castle Fortified 12. This is the wall-run defect one surface up: the kit is authored at two sizes and we place only the small one, so a roof reads as a grid of tiles rather than as a roof. `walls.pack` is the shape of the answer -- cover a course with the larger piece where one fits -- but a roof is not a run: it steps in and up per ring, so a 2x2 has to align to the ring AND to the rise, and the hip rotations are per kit (build.ROOF_ROT_OFFSET). Probe before building. || PROBED 2026-08-30, `PROBE roof 1x1 vs 2x2`, and naive block packing DOES NOT WORK. What is established: the scale relationship is exact and the same in every kit -- 1x1 slopes and corners are 1.0 tall, 2x2 ones are 2.0, and flat caps are 0.5 at both scales -- so a 2x2 slope is arithmetically two courses of the 1x1 field, two cells deep and two rises tall. That is the same relationship END_PIECE_CELLS records for the gable end. Partner pieces match cleanly by SIZE AND FAMILY (`Thatched Roof 01` -> `Thatched Roof 03`, `Corner 01` -> `Corner 02`); the kits number them inconsistently so a name match would fail. What does NOT work: taking any 2x2 block of cells whose rings are (r, r+1) and seating a 2x2 piece at ring r with the 1x1 rotation convention. On the board the 1x1 controls are clean hips and the 2x2 roofs are broken -- misaligned planes, steps and visible gaps. Three candidates, none tested: the 2x2 hip ROTATION convention may differ from the 1x1 one, which `build.ROOF_ROT_OFFSET` already records as per-kit for 1x1 and which `roofrot_probe.py --hips` measured by sweeping all four quarter turns; the 2x2 piece may be a single course at twice the scale rather than two courses; or the block selection may be straddling the hip diagonals. NEXT STEP is a rotation sweep for the 2x2 set, the same shape as `roofrot_probe.py --hips`, before any more packing work. Do not guess the turn -- that table exists because guessing it produced a rank of fins. || ROTATION SWEPT 2026-08-30, and it was the cause. `roofrot_probe.py --hips --footprint wide` (new -- the hip sweep had a hardcoded 1x1 vocabulary and silently ignored --footprint) lays the same 2x2 hip four times, once per quarter turn. Rural and Tavern BOTH close at (12, 12) -- `PROBE 2x2 hip rotations` and `... Tavern`, bottom-left in each, a clean X of hip ridges with no gaps while the other three are fins. Their 1x1 conventions are (0, 0) and (6, 6), so the deltas are +12 and +6 and NO RULE takes one table to the other: the wide family has its own convention and it has to be measured per kit. That is why the first packing attempt produced misaligned planes -- it used the 1x1 offsets. `ROOF_ROT_OFFSET_WIDE` and `roof_offsets_wide` hold it; an unswept kit answers None rather than a default, so a caller falls back to the 1x1 family instead of laying fins. Castle Fortified and Abandoned Village are unswept. REMAINING: re-run the packing with the correct turn, and settle whether a 2x2 block may straddle a hip diagonal -- the rotation was one of three candidates and only it has been tested. || RE-RUN WITH THE MEASURED TURN, 2026-08-30. Two more findings and one still open. (a) MIXING SCALES INSIDE ONE ROOF DOES NOT WORK even with the right turn -- 2x2 blocks dropped into a 1x1 ring layout leave holes wherever the coarse piece and the fine ring structure disagree. The unit of choice is the ROOF, not the cell: a wing built WHOLLY on a coarse grid is the shape of the answer, and `roofscale_probe.py` mode `coarse` does that. (b) A PROBE BUG, mine: `ROOF_CORNER_ROT.get(\"\".join(sorted(fall)), 0)` yields 'en' and 'es' for the north-east and south-east corners, which are not keys, so `.get` returned rotation 0 on half the corners and the roof came out holed. `build.CORNER_BY_SIDES` keys on a frozenset for exactly this. Fixed; the corners are symmetric now. (c) STILL OPEN, and measured rather than guessed: NO CELL ON A COARSE GRID EVER HAS ZERO FALLS -- checked on 4x4 and 5x5, the capped set is empty both times -- so the coarse path never places a cap and the apex is never closed. That is the remaining hole. The 1x1 path solves it with `roof_top_is_supported`, which caps the top ring only where a slope would have nothing to lean on; the coarse path needs the same rule. CAVEAT ON THE ROTATION SWEEP: `lay_hip_wide` has the same structure and so had the same apex hole, hidden by the solid pedestal under it. The turn measurement stands -- three offsets were plainly fins and one plainly coherent -- but 'closes cleanly' overstated it and the next sweep should lay its hips on open ground. || SETTLED AGAINST A HAND-BUILD, 2026-08-30. The user laid the sixteen 2x2 pieces of a 4x4 coarse hip by hand and handed the slab back. Decoded, all sixteen match generation at offset (0, 0) and NONE matches at (6,6), (12,12) or (18,18). So Rural's wide turn is (0, 0) -- the SAME as its 1x1 -- and the (12, 12) I recorded was a misread of the four-quadrant sweep. Two claims built on it are withdrawn: that the wide convention is not derivable from the small one, and the 'apex is never capped' theory invented to explain holes that were the wrong rotation. The sweep lays its hips on a solid pedestal, so a hole reads as pedestal-coloured thatch and a wrong quadrant can look closed -- lay them on open ground next time. WITH THE CORRECT TURN: a 10x10 footprint on a 5x5 coarse grid is a clean hip -- continuous thatch, proper X of ridges, no gaps, and visibly simpler than the 1x1 control beside it. An 8x8 on a 4x4 coarse grid still shows a narrow apex slot, because an EVEN coarse grid has no centre cell for a cap to close: its inner ring is 2x2 of corners meeting at a point. That is the one remaining defect and it is bounded -- odd coarse grids are already right. REMAINING: close the even-grid apex; check whether other kits share their own 1x1 turn (only Rural is verified, and `roof_offsets_wide` answers None for the rest rather than guessing); then wire the coarse path into `_lay_roofs` for wings whose footprint is even in both dimensions.",
       "tags": [
         "roofs",
         "assets",
@@ -1782,6 +1782,129 @@
         "probe",
         "roofs",
         "refactor"
+      ]
+    },
+    {
+      "id": "plaza-size-for-contents",
+      "what": "Size the market square to what has to stand on it",
+      "state": "open",
+      "doc": "docs/great-buildings.md 1.4",
+      "evidence": "citysmith.raster.PLAZA_MIN_TILES",
+      "note": "MEASURED: Pelvesthollow, Graybank and Forest Church have **exactly 49 plaza cells each** -- a 7x7 square, the same number three times, so `_carve_plaza` is cutting a fixed size rather than a fitted one. East Tradebourne has 631 because its export carries real PAVEMENT polygons. A 7x7 square cannot hold what section 1.4 says a market place contains: a cross at the centre, stall rows around it and a hall on the edge is 3-4 cells of cross, two rows of stalls with an aisle between them, and a 6x10 m building. The square has to be sized from its contents, and a settlement too small to hold one should have no square rather than a token one -- the same honesty `quarter_map` shows when it returns None.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "market-aisle",
+      "what": "Lay the square out as aisles, so stalls have something to face",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.market_aisles",
+      "note": "`market-stalls` says stalls should be aligned to an aisle and facing it, and there is no aisle -- the plaza is an undifferentiated sheet of paving and the only thing keyed on it is a 0.16-per-cell prop scatter. An aisle is what turns a paved rectangle into a market: two rows facing a gap a cart can pass down. It also gives the cross somewhere to stand that is not simply the centroid, and gives `npcs.posts` a line to put traders on. Wants the same treatment as `raster.classify_roads`: derive it from the shape of the open space, not from a constant.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "market-day-state",
+      "what": "Decide whether a square is set for market day or standing empty",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.MARKET_DAY",
+      "note": "A square that always has stalls on it is a square that is never empty, and a GM needs both -- the market on market day, and the same square at dawn with the stalls struck. This is the one place a board-level switch is worth more than a better default, because it is the difference between two encounters on one map. Cheap once `stall-as-a-building` exists: the stalls are a layer, and `build.LAYERS` already knows how to tag one. Do not build it before the stalls -- a flag over nothing is not a feature.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "stall-as-a-building",
+      "what": "Build a merchant stall as a tiny building, not as a prop",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.4",
+      "evidence": "citysmith.build._lay_stall",
+      "note": "The `Merchant` kit is a COMPLETE WALL FAMILY and nothing treats it as one: Tent Wall (1x2x1 and 1x2x2), Tent Wall Corner, Tent Wall Inner Corner, Tent Roof A/B at 1x1, 1x2 and 2x2, and Tent Overhang for the awning. That is wall, corner, inner corner and roof at three spans -- the same shape as any kit `walls.families` already indexes. So a covered stall is a 2x2 or 2x3 building and should go through `walls.pack` and the roof pass, not through the prop scatter. The six Stall counters (Fruit, Vegetables x2, Spices, Empty, Corner) are 1x1 props that stand in FRONT of the tent, which is a separate placement and not a substitute for it.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "stall-probe",
+      "what": "Probe whether a Merchant tent reads as a stall at 2x2 and 2x3",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.3",
+      "evidence": "test:test_the_merchant_kit_is_a_complete_wall_family",
+      "note": "Nothing has ever built the `Merchant` kit. Its collider says complete wall family; a render says tent. Neither says whether a 2x2 of it reads as a market stall or as a campsite, nor which span looks right beside a 20 ft building, nor whether the Overhang pieces make an awning or a porch. Sweep span (2x2, 2x3, 3x3) against roof variant (A, B, Hanging), with the counters in front and without, and keep a bare paved cell as the control -- if the counters alone read as a market, the tent is decoration and this is a much smaller task. Read at EYE LEVEL from the aisle, which is where a player stands.",
+      "tags": [
+        "market",
+        "probe"
+      ]
+    },
+    {
+      "id": "market-goods-by-trade",
+      "what": "Key the market goods to what the town actually trades in",
+      "state": "open",
+      "doc": "docs/great-buildings.md 1.4",
+      "evidence": "citysmith.build.MARKET_GOODS_BY_TRADE",
+      "note": "`market_goods` is six props -- crate, baskets, apple basket, barrels, sack, bench -- dealt uniformly on every plaza in every town. The importer knows more than that: FTG gives each building an authored `buildingType` and a name, and `quarters.QUARTER_OF_KIND` already sorts them into craft, market and docks. A town whose docks quarter is 18 warehouses sells different things from one that is 171 smithies. Same axis `TRADE_CLUTTER` already uses for street frontage, pointed at the square.",
+      "tags": [
+        "market"
+      ]
+    },
+    {
+      "id": "church-fabric",
+      "what": "Give the church its own fabric, not the castle's",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.3",
+      "evidence": "citysmith.build.CHURCH_FABRIC",
+      "note": "Civic resolves `castle wall 1x1` -- fortification masonry -- for temple, guildhall, manor and barracks alike, so a church is built out of the same wall as a barracks. `Marble Palace` is the only kit in the catalog that authors all three courses (base/mid/top) and it is `complete`: 6 walls and 5 windows at EACH width, 3 corners, fillers, plus arch base/mid/top at both widths, pillar base/mid, a `Rim top` cornice, six curved roof pieces, a 1x4x1 roof tower and a 1x4x1 dome. That is an arcade, a crossing tower and a clerestory in one material, already coursed. Neither it nor `Moorgoth` is in the medieval palette. **This is the task the other church tasks stand on** -- aisles, clerestory and chancel all want pieces only these kits ship.",
+      "tags": [
+        "church"
+      ]
+    },
+    {
+      "id": "church-nave-and-chancel",
+      "what": "Plan a church as a nave with a narrower, lower chancel",
+      "state": "open",
+      "doc": "docs/great-buildings.md 1.3",
+      "evidence": "citysmith.build.chancel_of",
+      "note": "A church is two volumes end to end, not one box: the chancel runs half to two thirds of the nave length and is narrower and lower, and the step between them is the single thing that most says church from outside. `building_ranges` already splits a large footprint into two ranges at different heights -- it drops the far 40 percent by one storey -- so the machinery exists and is pointed at the wrong axis: it makes an outshut, and a chancel is narrower as well as lower. MEASURED on East Tradebourne four temples: 15x5, 12x8, 10x9, 9x4. The two long ones take a chancel directly; see `church-aisles` for the compact pair.",
+      "tags": [
+        "church"
+      ]
+    },
+    {
+      "id": "church-aisles",
+      "what": "Split a compact church into a tall nave between lower aisles",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.nave_ranges",
+      "note": "MEASURED: two of East Tradebourne four temples are COMPACT -- 10x9 at aspect 1.11 and 12x8 at 1.50 -- and a compact church at 80-90 cells is not a wide nave, it is a nave WITH AISLES. That is also why `tower-compact-plan` exists: the aspect gate reads those two as not-a-nave and refuses them a tower. Aisles are a symmetric split -- a taller centre between two lower flanks -- where `building_ranges` splits asymmetrically along the long axis, so this is a second range function rather than a parameter on the first. It is also what earns the clerestory: section 2 -- a lower range each side of a taller centre -- IS the clerestory, and `_lay_roofs` already floods connected cells sharing a storey count into separate roofs, so two heights give two roofs for free.",
+      "tags": [
+        "church"
+      ]
+    },
+    {
+      "id": "church-clerestory",
+      "what": "Hang the tall traceried opening in the nave upper wall",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3.2",
+      "evidence": "citysmith.palette.WALL_CLERESTORY",
+      "note": "`Moorgoth LargeWall 01` and `02` are 1 x **4.0** x 2 and 1 x 4.0 x 1 -- and they are NOT walls. Read as renders they are tall glazed openings, dark stone frames around a traceried window, and the catalog said so all along in a tag (`window`) the collider cannot express. That killed them for the barn and makes them exactly right here: a 20 ft traceried opening is a nave clerestory, and it is the one thing section 2 asks for that nothing else in the library supplies. Blocked on `church-aisles` (there is no clerestory without a lower range beside a taller one) and on `wall-course-height` (`walls.families` prunes every kit to a 2.0 course, so a 4.0 piece is invisible to every caller).",
+      "tags": [
+        "church"
+      ]
+    },
+    {
+      "id": "church-interior-is-a-nave",
+      "what": "Stop the floorplan cutting a nave into cubicles",
+      "state": "open",
+      "doc": "docs/scenes.md",
+      "evidence": "citysmith.floorplan.nave_layout",
+      "note": "A nave is one room. `floorplan.generate` BSPs a footprint into rooms and `hall_layout` plans around a principal space with service rooms off it -- neither is a church. An 88-cell temple would come out as a warren, which is the same failure `hall_layout` was written to fix for the 29x15 warehouse, arriving on a plan whose whole point is that it is undivided. Wants one vessel, a chancel arch across it, and at most a vestry off the chancel. Also worth deciding whether pews exist: the catalog has no pew, no altar but an evil one, and no font, so the furnishing may be benches and candles, or may honestly be nothing -- `docs/interior-slabs.md` records that an unfurnished interior with named rooms is one of the two forms people publish.",
+      "tags": [
+        "church",
+        "interiors"
       ]
     }
   ]

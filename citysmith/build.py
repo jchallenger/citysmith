@@ -5758,31 +5758,37 @@ ROOF_ROT_OFFSET: dict[str, tuple[int, int]] = {
 }
 
 
-#: The same turn for a kit's DOUBLE-COURSE family, and it is a separate table
-#: because it is not derivable from the one above.
+#: The same turn for a kit's DOUBLE-COURSE family.
 #:
-#: Measured 2026-08-30 with `roofrot_probe.py --hips --footprint wide`, which
-#: lays the same 2x2 hip four times, once per quarter turn, so exactly one
-#: closes. Rural and Tavern both close at (12, 12) -- while their 1x1
-#: conventions are (0, 0) and (6, 6). The deltas are +12 and +6, so there is no
-#: rule that takes one table to the other, and assuming the wide family shares
-#: its own kit's small convention is what made a first attempt at 2x2 packing
-#: come out as misaligned planes with steps and gaps.
+#: **Rural is (0, 0) -- the same as its 1x1 convention -- and that is settled
+#: against a hand-build, not against a screenshot.** The user laid the sixteen
+#: 2x2 pieces of a 4x4 coarse hip by hand and handed the slab back; decoded,
+#: every one of the sixteen matches what this table generates at (0, 0), and
+#: none matches at (6, 6), (12, 12) or (18, 18).
 #:
-#: **A kit with no entry here has not been swept.** `roof_offsets_wide` returns
-#: None for one rather than a default, so a caller falls back to the 1x1 family
-#: instead of laying a rank of fins -- the failure `ROOF_ROT_OFFSET` exists to
-#: record, one scale up.
+#: It replaces (12, 12), which came from reading a four-quadrant rotation
+#: sweep off a board and picking the wrong quadrant. Two things followed from
+#: that error and both were wrong: a claim that the wide convention is not
+#: derivable from the small one, and an "apex is never capped" theory invented
+#: to explain holes that were really just the wrong rotation. A sweep laid on a
+#: solid pedestal shows a hole as pedestal-coloured roof, which is what made it
+#: readable as clean; the hand-build had no such cover.
+#:
+#: **A kit with no entry has not been checked against a hand-build.**
+#: `roof_offsets_wide` returns None for one rather than a default, so a caller
+#: falls back to the 1x1 family instead of laying a rank of fins. Tavern was
+#: listed here on the strength of the same misread sweep and has been removed:
+#: one verified kit is worth more than three asserted ones.
 ROOF_ROT_OFFSET_WIDE: dict[str, tuple[int, int]] = {
-    "rural": (12, 12),
-    "tavern": (12, 12),
+    "rural": (0, 0),
 }
 
 
 def roof_offsets_wide(side) -> tuple[int, int] | None:
     """The ``(edge, corner)`` turn for ``side``'s kit at the 2x2 scale.
 
-    None where the kit has not been swept, which is most of them.
+    None where the kit has not been checked against a hand-build, which is
+    every kit but Rural.
     """
     if side is None:
         return None

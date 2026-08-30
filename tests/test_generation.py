@@ -3021,15 +3021,20 @@ def test_a_chimney_piece_is_classified_by_its_own_name():
             assert not is_roof_chimney(byname[name]), name
 
 
-def test_the_wide_roof_turn_is_measured_not_inferred():
-    """A kit's 2x2 hip convention is not derivable from its 1x1 one.
+def test_the_wide_roof_turn_matches_a_hand_build():
+    """Rural's 2x2 hip turn, settled against a slab the user laid by hand.
 
-    Measured with `roofrot_probe.py --hips --footprint wide`, which lays the
-    same hip four times, once per quarter turn, so exactly one closes. Rural
-    and Tavern both close at (12, 12) while their 1x1 conventions are (0, 0)
-    and (6, 6) -- deltas of +12 and +6, so no rule takes one table to the
-    other. Assuming otherwise produced misaligned planes on
-    `PROBE roof 1x1 vs 2x2`.
+    Every one of the sixteen pieces in a 4x4 coarse hip matches what
+    `ROOF_ROT_OFFSET_WIDE` generates at (0, 0), and none matches at (6, 6),
+    (12, 12) or (18, 18). The table said (12, 12) before this, from reading a
+    four-quadrant rotation sweep off a board and picking the wrong quadrant --
+    the sweep lays its hips on a solid pedestal, so a hole in the roof reads as
+    pedestal-coloured thatch and a wrong quadrant can look closed.
+
+    The claim that came with it -- that the wide convention is not derivable
+    from the small one -- is withdrawn. For Rural they are the same. Whether
+    that holds elsewhere is unchecked, and `roof_offsets_wide` answers None for
+    an unchecked kit rather than guessing.
     """
     import sys
 
@@ -3039,17 +3044,14 @@ def test_the_wide_roof_turn_is_measured_not_inferred():
     )
     from citysmith.catalog import load_or_build
 
-    assert ROOF_ROT_OFFSET_WIDE["rural"] == (12, 12)
-    assert ROOF_ROT_OFFSET_WIDE["tavern"] == (12, 12)
-    deltas = {k: (ROOF_ROT_OFFSET_WIDE[k][0] - ROOF_ROT_OFFSET[k][0]) % 24
-              for k in ROOF_ROT_OFFSET_WIDE}
-    assert len(set(deltas.values())) > 1, (
-        f"if the deltas were equal a rule would do: {deltas}")
+    assert ROOF_ROT_OFFSET_WIDE["rural"] == (0, 0)
+    assert ROOF_ROT_OFFSET_WIDE["rural"] == ROOF_ROT_OFFSET["rural"]
 
     byname = {}
     for a in load_or_build().assets:
         byname.setdefault(a.name, a)
-    # An unswept kit answers None, so a caller falls back rather than guesses.
-    ruin = byname.get("Castle Ruins Wall 01")
-    if ruin is not None:
-        assert roof_offsets_wide(ruin) is None
+    for name in ("Village Roof Side 01", "Castle Ruins Wall 01"):
+        piece = byname.get(name)
+        if piece is not None:
+            assert roof_offsets_wide(piece) is None, name
+

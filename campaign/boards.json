@@ -285,6 +285,19 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale2-*"
   },
+  "PROBE roof 2x2 hand-build turn": {
+   "board": "PROBE roof 2x2 hand-build turn",
+   "holds": "probe",
+   "source": "out\\roofscale.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T10:25:36",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale5-*"
+  },
   "PROBE roof coarse 2x2": {
    "board": "PROBE roof coarse 2x2",
    "holds": "probe",
