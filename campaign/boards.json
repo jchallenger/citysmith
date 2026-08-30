@@ -103,6 +103,32 @@
    "disposable": false,
    "note": "backfilled 2026-08-27 from the layout still in out/; NOT recorded at paste time, so the digest is unknown and a rebuild cannot be told from the board"
   },
+  "PROBE 2x2 hip rotations": {
+   "board": "PROBE 2x2 hip rotations",
+   "holds": "probe",
+   "source": "out\\widehips.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T09:23:04",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\whips-*"
+  },
+  "PROBE 2x2 hip rotations Tavern": {
+   "board": "PROBE 2x2 hip rotations Tavern",
+   "holds": "probe",
+   "source": "out\\widehips-tavern.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-30T09:24:19",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\whipsT-*"
+  },
   "PROBE all wall kits": {
    "board": "PROBE all wall kits",
    "holds": "probe",

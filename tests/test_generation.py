@@ -3019,3 +3019,37 @@ def test_a_chimney_piece_is_classified_by_its_own_name():
     for name in ("Thatched Chimney", "Chimney 01"):
         if name in byname:
             assert not is_roof_chimney(byname[name]), name
+
+
+def test_the_wide_roof_turn_is_measured_not_inferred():
+    """A kit's 2x2 hip convention is not derivable from its 1x1 one.
+
+    Measured with `roofrot_probe.py --hips --footprint wide`, which lays the
+    same hip four times, once per quarter turn, so exactly one closes. Rural
+    and Tavern both close at (12, 12) while their 1x1 conventions are (0, 0)
+    and (6, 6) -- deltas of +12 and +6, so no rule takes one table to the
+    other. Assuming otherwise produced misaligned planes on
+    `PROBE roof 1x1 vs 2x2`.
+    """
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import (
+        ROOF_ROT_OFFSET, ROOF_ROT_OFFSET_WIDE, roof_offsets_wide,
+    )
+    from citysmith.catalog import load_or_build
+
+    assert ROOF_ROT_OFFSET_WIDE["rural"] == (12, 12)
+    assert ROOF_ROT_OFFSET_WIDE["tavern"] == (12, 12)
+    deltas = {k: (ROOF_ROT_OFFSET_WIDE[k][0] - ROOF_ROT_OFFSET[k][0]) % 24
+              for k in ROOF_ROT_OFFSET_WIDE}
+    assert len(set(deltas.values())) > 1, (
+        f"if the deltas were equal a rule would do: {deltas}")
+
+    byname = {}
+    for a in load_or_build().assets:
+        byname.setdefault(a.name, a)
+    # An unswept kit answers None, so a caller falls back rather than guesses.
+    ruin = byname.get("Castle Ruins Wall 01")
+    if ruin is not None:
+        assert roof_offsets_wide(ruin) is None

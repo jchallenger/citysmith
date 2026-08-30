@@ -131,6 +131,28 @@ HIP_SETS = {
 HIP = 6          #: edge of each test hip, in cells
 HIP_GAP = 3      #: bare cells between hips
 
+#: The same five-piece hip vocabulary at the DOUBLE-COURSE scale. Measured:
+#: every kit's 2x2 slope and corner is 2.0 tall against the 1x1 set's 1.0, and
+#: both scales cap at 0.5 -- so a 2x2 piece is exactly two courses of the 1x1
+#: field, two cells deep and two rises tall.
+#:
+#: **Whether it takes the same quarter turn as the 1x1 set is not known**, and
+#: that is what this sweep is for. `ROOF_ROT_OFFSET` records the 1x1
+#: convention as differing per kit; there is no reason the wide family follows
+#: its own kit's small one, and a first attempt at 2x2 packing that assumed so
+#: produced misaligned planes with steps and gaps (`PROBE roof 1x1 vs 2x2`).
+HIP_SETS_WIDE = {
+    "Rural": ("Thatched Roof 03", "Thatched Roof Corner 02",
+              "Thatched Roof Inner Corner 02", "Thatched roof flat 02"),
+    "Tavern": ("Village Roof Side 03", "Village Roof Corner 02",
+               "Village Roof Inner Corner 02", "Tavern Roof flat 02"),
+    "Abandoned Village": ("haunted roof 2x2", "haunted roof corner out",
+                          "haunted roof corner inner",
+                          "haunted roof 2x2 broken flat"),
+}
+
+HIP_WIDE = 4     #: edge of a wide hip, in SUPER-cells (so 8 tiles)
+
 
 def lay_hip(out, byname, pedestal, kit: str, ox: int, oz: int,
             edge_off: int, corner_off: int) -> None:
@@ -169,6 +191,55 @@ def lay_hip(out, byname, pedestal, kit: str, ox: int, oz: int,
             piece, rot = cap, 0
         if piece is not None:
             out.append(place_tile(piece, ox + x, oz + z, y, rot % 24))
+
+
+def lay_hip_wide(out, byname, pedestal, kit: str, ox: int, oz: int,
+                 edge_off: int, corner_off: int) -> None:
+    """One hip built entirely from a kit's 2x2 pieces.
+
+    The same algorithm as :func:`lay_hip` on a coarser grid: rings are computed
+    over super-cells, each piece covers a 2x2 block, and a course rises by the
+    piece's own 2.0 rather than by 1.0. If the wide family shares the small
+    one's convention, the offset that closes here is the one already in
+    `ROOF_ROT_OFFSET`; if it does not, this is where that shows.
+    """
+    slope, corner, inner, cap = (byname.get(n) for n in HIP_SETS_WIDE[kit])
+    if slope is None:
+        return
+    coarse = {(gx, gz) for gx in range(HIP_WIDE) for gz in range(HIP_WIDE)}
+    for gx in range(HIP_WIDE):
+        for gz in range(HIP_WIDE):
+            for dx in range(2):
+                for dz in range(2):
+                    out.append(place_tile(pedestal, ox + 2 * gx + dx,
+                                          oz + 2 * gz + dz, 0.0))
+    rings = _roof_rings(coarse)
+    rise = slope.size_y
+    for (gx, gz) in sorted(coarse):
+        r = rings[(gx, gz)]
+        y = pedestal.size_y + r * rise
+        fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
+                     if rings.get((gx + dx, gz + dz), -1) < r)
+        if len(fall) == 1:
+            piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
+        elif len(fall) == 2:
+            which = CORNER_OF.get(frozenset(fall))
+            if which is None:
+                piece, rot = slope, ROOF_EDGE_ROT[fall[0]] + edge_off
+            elif _is_reflex(rings, gx, gz, fall) and inner is not None:
+                piece = inner
+                rot = ROOF_CORNER_ROT[OPPOSITE_CORNER[which]] + corner_off
+            else:
+                piece, rot = (corner or slope), ROOF_CORNER_ROT[which] + corner_off
+        else:
+            piece, rot = cap, 0
+        if piece is not None:
+            # A cap is shorter than a course and seats by its top; everything
+            # else seats by its base. Same rule as `build.place_roof_piece`,
+            # which is where this belongs once the probes are converted.
+            seat = y - piece.size_y if piece.size_y < rise else y
+            out.append(place_tile(piece, ox + 2 * gx, oz + 2 * gz, seat,
+                                  rot % 24))
 
 
 CORNER_OF = {
@@ -227,28 +298,40 @@ def main() -> None:
     marker = byname.get("md_stairblock_01") or pedestal
 
     if args.hips:
-        if args.kit not in HIP_SETS:
-            ap.error(f"no hip vocabulary recorded for {args.kit!r}; "
-                     f"have {', '.join(HIP_SETS)}")
+        wide = args.footprint in ("wide", "2x2")
+        sets = HIP_SETS_WIDE if wide else HIP_SETS
+        if args.kit not in sets:
+            ap.error(f"no {'wide ' if wide else ''}hip vocabulary recorded for "
+                     f"{args.kit!r}; have {', '.join(sets)}")
         out: list = []
-        pitch = HIP + HIP_GAP
-        span = len(ROTS) * pitch
-        for dz in range(-3, HIP + 5):
-            for dx in range(-3, span + 2):
+        hip_edge = (HIP_WIDE * 2) if wide else HIP
+        pitch = hip_edge + HIP_GAP
+        # Four wide hips in a row is 44 tiles and does not frame; 2x2 does.
+        cols = 2 if wide else len(ROTS)
+        span = cols * pitch
+        rows = (len(ROTS) + cols - 1) // cols
+        # A tighter apron on the wide sweep: the 1x1 one is a single row of
+        # four and has depth to spare, while 2x2 stacks two rows and a 30-deep
+        # board needs 53 tiles of slant range against a stop at 49.75.
+        pad = 2 if wide else 3
+        for dz in range(-pad, rows * pitch + (2 if wide else 5)):
+            for dx in range(-pad, span + 2):
                 out.append(place_tile(grass, dx, dz, -grass.size_y))
         for i, off in enumerate(ROTS):
-            ox = i * pitch
+            ox = (i % cols) * pitch
+            oz = (i // cols) * pitch
             # Numbered as a **bar on the ground**, not a stack. A vertical
             # tally reads at an oblique and vanishes in plan -- and a hip is
             # judged in plan, because that is where a gap between courses
             # shows. A bar of i+1 cells running east is unmistakable from
             # directly overhead, which is the one view this probe needs.
             for t in range(i + 1):
-                out.append(place_tile(marker, ox + t, HIP + 2, 0.0))
-            edge = args.edge_off if args.edge_off is not None else off
-            lay_hip(out, byname, pedestal, args.kit, ox, 0, edge, off)
-            print(f"# {i + 1}: {args.kit} edge +{edge} corner +{off}",
-                  file=sys.stderr)
+                out.append(place_tile(marker, ox + t, oz + hip_edge + 2, 0.0))
+            eoff = args.edge_off if args.edge_off is not None else off
+            lay = lay_hip_wide if wide else lay_hip
+            lay(out, byname, pedestal, args.kit, ox, oz, eoff, off)
+            print(f"# {i + 1}: r{i // cols}c{i % cols}  {args.kit} "
+                  f"edge +{eoff} corner +{off}", file=sys.stderr)
         byid = {a.id: a for a in cat.assets}
         print(encode(_normalized_whole_tiles(Slab(out), byid)))
         print(f"# {len(out)} placements", file=sys.stderr)

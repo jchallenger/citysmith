@@ -5758,6 +5758,37 @@ ROOF_ROT_OFFSET: dict[str, tuple[int, int]] = {
 }
 
 
+#: The same turn for a kit's DOUBLE-COURSE family, and it is a separate table
+#: because it is not derivable from the one above.
+#:
+#: Measured 2026-08-30 with `roofrot_probe.py --hips --footprint wide`, which
+#: lays the same 2x2 hip four times, once per quarter turn, so exactly one
+#: closes. Rural and Tavern both close at (12, 12) -- while their 1x1
+#: conventions are (0, 0) and (6, 6). The deltas are +12 and +6, so there is no
+#: rule that takes one table to the other, and assuming the wide family shares
+#: its own kit's small convention is what made a first attempt at 2x2 packing
+#: come out as misaligned planes with steps and gaps.
+#:
+#: **A kit with no entry here has not been swept.** `roof_offsets_wide` returns
+#: None for one rather than a default, so a caller falls back to the 1x1 family
+#: instead of laying a rank of fins -- the failure `ROOF_ROT_OFFSET` exists to
+#: record, one scale up.
+ROOF_ROT_OFFSET_WIDE: dict[str, tuple[int, int]] = {
+    "rural": (12, 12),
+    "tavern": (12, 12),
+}
+
+
+def roof_offsets_wide(side) -> tuple[int, int] | None:
+    """The ``(edge, corner)`` turn for ``side``'s kit at the 2x2 scale.
+
+    None where the kit has not been swept, which is most of them.
+    """
+    if side is None:
+        return None
+    return ROOF_ROT_OFFSET_WIDE.get(_kit_of(side))
+
+
 def roof_offsets(side) -> tuple[int, int]:
     """The ``(edge, corner)`` turn for whichever kit ``side`` came from."""
     return ROOF_ROT_OFFSET.get(_kit_of(side), (0, 0)) if side is not None else (0, 0)
