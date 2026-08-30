@@ -2946,3 +2946,76 @@ def test_a_gable_verge_matches_its_own_roof_material():
             f"of {dealt[3].name!r} [{dealt[3].folder}]")
         checked += 1
     assert checked, "no building closed a verge -- the test proves nothing"
+
+
+def test_the_ridge_carries_one_roof_course_not_two():
+    """A roof-and-chimney piece REPLACES the course; it does not sit on one.
+
+    `roof_stack` and `roof_chimney` mean opposite things depending on the
+    material -- for thatch the stack is `Thatched Roof Chimney`, a combination,
+    and for tile it is `Chimney 01`, a bare one. A caller that trusts the role
+    lays a flat cap and stands a second roof course on it, which put a thatch
+    skirt round every chimney in the town. `is_roof_chimney` classifies the
+    piece instead, the same way `walls._role_of` trusts the kit's own word
+    where a collider cannot tell a wall from a roof.
+    """
+    import collections
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import (
+        build_from_tilemap, is_roof_chimney, placed_bounds,
+    )
+    from citysmith.catalog import load_or_build
+    from citysmith.layout import Layout
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import rasterize
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    byid = {a.id: a for a in palette.catalog.assets}
+    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
+    b = build_from_tilemap(tm, palette, storeys=3)
+
+    cells = collections.defaultdict(list)
+    for pl in b.placements:
+        a = byid[pl.asset_id]
+        x0, z0, x1, z1 = placed_bounds(a, pl)
+        cells[(int((x0 + x1) / 2), int((z0 + z1) / 2))].append(a)
+
+    combos = 0
+    doubled = []
+    for cell, here in cells.items():
+        combo = [a for a in here if is_roof_chimney(a)]
+        if not combo:
+            continue
+        combos += 1
+        flat = [a.name for a in here
+                if "flat" in a.name.lower()
+                and "roof" in (a.group_tag or "").lower()]
+        if flat:
+            doubled.append((cell, combo[0].name, flat))
+
+    assert combos, "no combination chimney was placed -- proves nothing"
+    assert not doubled, (
+        f"{len(doubled)} ridge cell(s) carry a combination AND a flat cap: "
+        f"{doubled[:3]}")
+
+
+def test_a_chimney_piece_is_classified_by_its_own_name():
+    """The role it arrived in is not evidence; the kit's word is."""
+    import sys
+
+    sys.path.insert(0, ".")
+    from citysmith.build import is_roof_chimney
+    from citysmith.catalog import load_or_build
+
+    byname = {}
+    for a in load_or_build().assets:
+        byname.setdefault(a.name, a)
+
+    for name in ("Thatched Roof Chimney", "Village Roof Side/Chimney"):
+        if name in byname:
+            assert is_roof_chimney(byname[name]), name
+    for name in ("Thatched Chimney", "Chimney 01"):
+        if name in byname:
+            assert not is_roof_chimney(byname[name]), name

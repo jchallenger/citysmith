@@ -4302,6 +4302,55 @@ WALL_STAIR_REACH = 4
 #: proud of it and still leave no joint to see.
 CHIMNEY_LAP = 0.25
 
+#: How far a roof-and-chimney COMBINATION sinks below the roof course it
+#: replaces. Picked off a board (`PROBE chimney seated by base`, back row
+#: middle): flush reads as a stack perched on the ridge, half a tile in reads
+#: as buried, and a quarter is the one that looks like a flue coming through
+#: thatch.
+CHIMNEY_SINK = 0.25
+
+
+def is_roof_chimney(asset) -> bool:
+    """True when a chimney piece carries its own roof course.
+
+    **The role it arrived in cannot answer this, because the two roles mean
+    opposite things depending on the material.** Measured:
+
+        thatch   roof_stack = `Thatched Roof Chimney`   (a combination)
+                 roof_chimney = `Thatched Chimney`      (a bare stack)
+        tile     roof_stack = `Chimney 01`              (a bare stack)
+                 roof_chimney = `Village Roof Side/Chimney` (a combination)
+
+    So a caller that trusts `roof_stack` to be free-standing lays a flat cap
+    and stands a second roof course on it -- which is what put a thatch skirt
+    round every chimney in the town, and what a reviewer called "chimney plus
+    slant pieces instead of a lowered chimney".
+
+    The kit's own word is the authority, the same rule `walls._role_of` uses
+    where a collider cannot tell a wall from a roof: a chimney piece that says
+    "roof" in its name brings one.
+    """
+    n = (asset.name or "").lower()
+    return "chimney" in n and "roof" in n
+
+
+def _bare_stack_courses(bare) -> tuple[float, ...]:
+    """Y offsets for a free-standing stack, lapped if one course is a stub.
+
+    `Thatched Chimney` is half a tile -- under three feet of flue, which the
+    palette already records as reading like a stub. Two of them lapped a
+    quarter make 0.75. A piece that is a tile or more stands on its own.
+    """
+    return (0.0,) if bare.size_y >= 1.0 else (0.0, CHIMNEY_LAP)
+
+
+def chimney_pieces(chimney, stack):
+    """``(combination, bare)`` from whatever the two roles resolved to."""
+    got = [a for a in (chimney, stack) if a is not None]
+    return (next((a for a in got if is_roof_chimney(a)), None),
+            next((a for a in got if not is_roof_chimney(a)), None))
+
+
 #: How far a free-standing stack's base sits BELOW the ridge top.
 #:
 #: **A chimney emerges from a roof; it does not stand on one.** Seated with its
@@ -4653,21 +4702,23 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
             # slope from the anchors loop above, so the combination piece goes
             # over it at that slope's own rotation rather than at rot 0. See
             # `roof_stack`.
-            if fall is not None:
-                b.add(place_tile(chimney, chimney_at[0], chimney_at[1], y,
-                                 (ROOF_EDGE_ROT[fall] + edge_off) % 24))
-            elif stack is not None:
+            combo, bare = chimney_pieces(chimney, stack)
+            rot = (ROOF_EDGE_ROT[fall] + edge_off) % 24 if fall is not None else 0
+            if combo is not None:
+                # **It REPLACES the course, and it seats by its BASE.** A
+                # combination is a roof piece with a stack on it, so laying a
+                # cap under it puts two roof courses at the ridge, and seating
+                # it by its top buries the stack in the thatch. Both were done
+                # here. See `is_roof_chimney` and `CHIMNEY_SINK`.
+                b.add(place_tile(combo, chimney_at[0], chimney_at[1],
+                                 y - CHIMNEY_SINK, rot))
+            elif bare is not None:
                 if cap is not None:
                     b.add(place_tile(cap, chimney_at[0], chimney_at[1],
                                      y - cap.size_y))
-                # Sunk by CHIMNEY_SEAT, not stood on the cap -- see the
-                # constant. The buried part is inside the roof and invisible.
-                b.add(place_tile(stack, chimney_at[0], chimney_at[1],
-                                 y - CHIMNEY_SEAT))
-            else:
-                b.add(place_tile(chimney, chimney_at[0], chimney_at[1],
-                                 y - CHIMNEY_LAP))
-                b.add(place_tile(chimney, chimney_at[0], chimney_at[1], y))
+                for dy in _bare_stack_courses(bare):
+                    b.add(place_tile(bare, chimney_at[0], chimney_at[1],
+                                     y - CHIMNEY_SEAT - dy))
 
     if cap is not None:
         for cell, (course, fall) in sorted(courses.items()):
@@ -4916,23 +4967,21 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                     # ordinary slope at the slope's rotation, never on a ridge
                     # and never at rot 0 regardless.
                     sloped = roof_top_is_supported(rings, x, z, fall) or r < top_ring
-                    if sloped and len(fall) == 1:
-                        b.add(place_tile(side, x, z, y,
-                                         (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24))
-                        b.add(place_tile(chimney, x, z, y,
-                                         (ROOF_EDGE_ROT[fall[0]] + edge_off) % 24))
-                    elif stack is not None:
-                        # A cap seats by its top; the stack is sunk into it by
-                        # CHIMNEY_SEAT rather than standing on it, which is the
-                        # same rule the gabled path uses. These two branches are
-                        # the same three cases written twice and that is how
-                        # they drifted -- see `chimney-seating` in tasks.json.
-                        b.add(place_tile(cap, x, z, y - cap.size_y,
-                                         ridge_rot.get((x, z), 0)))
-                        b.add(place_tile(stack, x, z, y - CHIMNEY_SEAT))
-                    else:
-                        b.add(place_tile(chimney, x, z, y - CHIMNEY_LAP))
-                        b.add(place_tile(chimney, x, z, y))
+                    combo, bare = chimney_pieces(chimney, stack)
+                    rot = ((ROOF_EDGE_ROT[fall[0]] + edge_off) % 24
+                           if sloped and len(fall) == 1 else 0)
+                    if combo is not None:
+                        # Replaces the course, seats by its base. The slope
+                        # that used to be laid underneath is gone with it: a
+                        # combination IS the slope.
+                        b.add(place_tile(combo, x, z, y - CHIMNEY_SINK, rot))
+                    elif bare is not None:
+                        if cap is not None:
+                            b.add(place_tile(cap, x, z, y - cap.size_y,
+                                             ridge_rot.get((x, z), 0)))
+                        for dy in _bare_stack_courses(bare):
+                            b.add(place_tile(bare, x, z,
+                                             y - CHIMNEY_SEAT - dy))
                     continue
                 # Cap the top ring only where a slope there would have nothing
                 # to lean on. See `roof_top_is_supported` -- capping the whole
