@@ -254,24 +254,45 @@ def resolve_in(root, relative: str, *, suffixes=SERVABLE_SUFFIXES) -> pathlib.Pa
     output directory would let a request ask for kinds of file that directory
     has no business handing out.
 
-    Three separate escapes are refused, and the order matters because each one
+    Four separate escapes are refused, and the order matters because each one
     catches something the next cannot:
 
     * a component of ``..``, rejected by name before anything touches the disk,
       so a traversal is reported as a traversal rather than as a missing file;
-    * an absolute path -- ``/etc/passwd``, ``C:\\Windows\\win.ini`` -- which
-      ``root / rel`` silently *adopts* whole, and which only the containment
-      check below catches;
+    * an absolute or UNC path -- ``/etc/passwd``, ``C:\\Windows\\win.ini``,
+      ``//host/share/x`` -- which ``root / rel`` silently *adopts* whole.
+      Refused **by name**, and that is the whole point: the containment check
+      below would catch it, but only after ``Path.resolve()``, and resolving a
+      UNC root is a NETWORK CALL. ``//etc/passwd`` blocks for **16 seconds** on
+      this machine while SMB gives up on a host named ``etc`` (measured
+      2026-08-30). A request string that stalls a handler for 16 seconds is a
+      denial of service with a one-line payload, so it never reaches the disk;
+    * a drive-relative path -- ``C:notes.svg`` -- which is not absolute, and is
+      still taken against that drive's working directory rather than ``root``;
     * a symlink inside ``root`` pointing out of it, which is why the comparison
       is made on ``resolve()``'d paths and not on the strings.
+
+    The absolute test is made with :class:`pathlib.PureWindowsPath` on every
+    platform rather than with the native flavour. A Windows-shaped escape sent
+    to a POSIX host is harmless there, but one rule that refuses it everywhere
+    is easier to hold than two that differ, and the only thing it costs is a
+    file literally named ``C:something`` -- which nothing here writes, since
+    every name this serves comes from `_STEM` or is a fixed one like
+    ``city-raster.svg``.
     """
-    root = pathlib.Path(root).resolve()
     rel = urllib.parse.unquote(relative)
     if not rel or "\x00" in rel:
         raise BadRequest("no file named")
     parts = re.split(r"[/\\]", rel)
     if any(p == ".." for p in parts):
         raise BadRequest(f"{rel!r} leaves the output directory")
+    # Before the disk, per the docstring. `drive` covers `C:` and `\\host\share`,
+    # `root` covers a leading `/` or `\`; together they are every shape that
+    # `root / rel` would adopt whole.
+    windows = pathlib.PureWindowsPath(rel)
+    if windows.drive or windows.root:
+        raise BadRequest(f"{rel!r} is not a path inside the output directory")
+    root = pathlib.Path(root).resolve()
     candidate = (root / rel)
     try:
         resolved = candidate.resolve()

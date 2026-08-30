@@ -574,6 +574,33 @@ def test_a_path_cannot_be_walked_out_of_the_output_directory(tmp_path):
         uiserver.resolve_in(out_dir, "notes.exe")
 
 
+def test_an_absolute_request_is_refused_without_touching_the_disk(tmp_path,
+                                                                  monkeypatch):
+    """The refusal has to happen on the STRING, and this is the test that says
+    so -- `//etc/passwd` is a UNC path, and `Path.resolve()` on one is a network
+    call that blocks for 16 seconds waiting for SMB to give up on a host named
+    `etc`. That is a denial of service with a one-line payload, and it was also
+    12% of this suite's entire runtime.
+
+    Asserted by breaking the disk rather than by timing the call: a stopwatch
+    test would be flaky on a loaded machine and would pass for the wrong reason
+    on a machine with no network. If `resolve()` is reached at all, this fails.
+    """
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+
+    def boom(self, *a, **kw):
+        raise AssertionError(f"resolve() reached the disk for {self!r}")
+
+    monkeypatch.setattr(pathlib.Path, "resolve", boom)
+
+    for escape in ("//etc/passwd", "/etc/passwd", "\\\\host\\share\\x",
+                   "C:\\Windows\\win.ini", "C:/Windows/win.ini", "C:notes.svg",
+                   "%2f%2fetc/passwd"):
+        with pytest.raises(uiserver.BadRequest):
+            uiserver.resolve_in(out_dir, escape)
+
+
 def test_a_symlink_out_of_the_output_directory_is_refused(tmp_path):
     """Which is why the comparison is on resolved paths and not on strings."""
     out_dir = tmp_path / "out"
