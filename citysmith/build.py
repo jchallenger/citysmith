@@ -7538,6 +7538,19 @@ STAND_CELL = 9
 #: came out either uniformly thick or uniformly bare.
 REED_CELL = 7
 
+#: How an authored forest outline (`TileMap.forest`, from FTG's FOREST rings)
+#: reshapes the canopy field. The outline overrides the noise's opinion of
+#: *where* the wood is, but not its texture: inside the line the field is
+#: lifted toward closed woodland (``t + LIFT*(1-t)``), outside it is damped
+#: (``t * DAMP``), and both keep the field in 0..1 -- so the cumulative bands
+#: built from it stay strictly increasing and the single-roll ladder is
+#: untouched. Density is *redistributed*, not raised: the byte cap has no
+#: slack for a globally denser wood (Forest Church's largest slab already
+#: runs at 98% of it). Both apply only when a map carries a mask at all; an
+#: MFCG map has none and scatters bit-identically to before the mask existed.
+FOREST_CANOPY_LIFT = 0.55
+FOREST_CANOPY_DAMP = 0.40
+
 
 def _value_noise(x: int, z: int, cell: int, salt: str) -> float:
     """Smooth deterministic noise in 0..1, on a lattice of ``cell`` tiles.
@@ -8288,6 +8301,12 @@ def _dress_districts(b: Builder, tm, grade: float,
                     return True
         return False
 
+    # The authored forest outline, where the map carries one. Read for
+    # membership only -- never iterated -- so no set ordering can leak into
+    # the placement stream; `getattr` because a TileMap pickled or stubbed
+    # from before the field existed must keep meaning "no mask".
+    forest_mask = getattr(tm, "forest", None) or frozenset()
+
     # Parks come from the layout as GROUND repainted by area polygons; the
     # raster keeps no park mask, so rediscover them cheaply: ground cells not
     # adjacent to any street or building read as open green.
@@ -8356,6 +8375,18 @@ def _dress_districts(b: Builder, tm, grade: float,
                 # stands and opens into glades instead of covering the map at
                 # one flat rate.
                 thickness = canopy_at(x, z)
+                if forest_mask:
+                    # The export said where the wood is, so the noise field
+                    # becomes texture rather than authority: lifted toward
+                    # closed canopy inside the outline, damped to stray
+                    # field-edge trees outside it. This must stay *before*
+                    # the bands and must draw nothing from `rng` -- an empty
+                    # mask (every MFCG map) has to leave the roll stream and
+                    # the placements bit-identical to a map without the field.
+                    if (x, z) in forest_mask:
+                        thickness += FOREST_CANOPY_LIFT * (1.0 - thickness)
+                    else:
+                        thickness *= FOREST_CANOPY_DAMP
                 # Cumulative bands, not independent thresholds. These are the
                 # arms of one elif ladder, so each has to sit *above* the last
                 # or it is unreachable -- with the tree band reaching 0.24 in a

@@ -169,6 +169,14 @@ class TileMap:
     #: every field wall on the map -- they are laid along their true bearing
     #: instead, and a bearing does not survive rasterisation.
     fences: list[list[Point]] = field(default_factory=list)
+    #: Cells inside an authored forest outline (FTG's FOREST rings, carried as
+    #: ``LayoutArea("forest")``). A *mask*, not a surface: forest floor is
+    #: grass underfoot, so the cells stay GROUND and everything that walks,
+    #: builds or verifies treats them as open ground -- only the tree scatter
+    #: reads this, to put the wood inside the line the export drew. Empty on
+    #: MFCG maps, and empty means neutral: the scatter must not change by a
+    #: byte when no forest is authored.
+    forest: set[tuple[int, int]] = field(default_factory=set)
 
     @classmethod
     def blank(cls, width: int, depth: int, name: str = "") -> "TileMap":
@@ -223,6 +231,10 @@ class TileMap:
             (x - x0, z - z0) for x, z in self.wall_corners
             if x0 <= x < x0 + width and z0 <= z < z0 + depth
         ]
+        out.forest = {
+            (x - x0, z - z0) for x, z in self.forest
+            if x0 <= x < x0 + width and z0 <= z < z0 + depth
+        }
         # Re-clipped rather than filtered: a fence run is a line, not a point,
         # so a crop cuts through the middle of one and the part that survives
         # needs its own ends. Filtering by vertex would drop a boundary that
@@ -640,6 +652,15 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
         paint(_fill_polygon(shift(area.ring), width, depth), PLAZA)
     for area in layout.areas_of("park"):
         paint(_fill_polygon(shift(area.ring), width, depth), GROUND)
+
+    # Forest rings become a mask, not a surface. Underfoot a forest is the
+    # same grass the rasteriser lays everywhere (`ftg.BACKGROUND_AREAS` says
+    # why the kinds are carried at all), so painting a surface would change
+    # nothing and cost the distinction; the outline rides to the builder on
+    # `TileMap.forest` instead, and `build._dress_districts` reads it to put
+    # the wood inside the line and the glades outside it.
+    for area in layout.areas_of("forest"):
+        tm.forest.update(_fill_polygon(shift(area.ring), width, depth))
 
     # Buildings last: where a footprint and a street disagree after rounding,
     # the building wins, so structures stay whole rather than gaining holes.

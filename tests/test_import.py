@@ -493,6 +493,45 @@ def test_the_channel_runs_on_under_an_authored_deck(catalog_palette):
                for p in beds), "the bed sits below the water column, not at grade"
 
 
+# -- the forest mask ----------------------------------------------------------
+
+def test_the_forest_outline_rides_the_tilemap_as_a_mask():
+    """`LayoutArea("forest")` cells land in `TileMap.forest` -- a mask, not a
+    surface. The floor of a wood is grass underfoot, so the cells stay GROUND
+    and only the tree scatter reads the outline."""
+    from citysmith import raster
+    from citysmith.layout import LayoutArea
+
+    layout = Layout(name="wood", source="ftg", width=20.0, depth=20.0)
+    layout.areas = [LayoutArea(
+        "forest", [(2.0, 2.0), (10.0, 2.0), (10.0, 10.0), (2.0, 10.0)])]
+    tm = raster.rasterize(layout, bridges=False)
+
+    assert (2, 2) in tm.forest and (9, 9) in tm.forest
+    assert (12, 12) not in tm.forest
+    assert tm.surface[4][4] == raster.GROUND, "forest floor is grass underfoot"
+
+
+def test_cropping_a_map_keeps_the_forest_mask():
+    """Every TileMap field has to survive `crop`, or --crop silently eats the
+    feature -- the trap that took the storey counts once (`TileMap.crop`'s
+    own comment). The mask is translated and filtered like the gates."""
+    from citysmith import raster
+    from citysmith.layout import LayoutArea
+
+    layout = Layout(name="wood", source="ftg", width=20.0, depth=20.0)
+    layout.areas = [LayoutArea(
+        "forest", [(2.0, 2.0), (10.0, 2.0), (10.0, 10.0), (2.0, 10.0)])]
+    tm = raster.rasterize(layout, bridges=False)
+
+    cropped = tm.crop(5, 5, 8, 8)
+    assert cropped.forest, "the mask must survive the crop"
+    assert (0, 0) in cropped.forest, "cell (5,5) translated into the window"
+    assert (4, 4) in cropped.forest, "cell (9,9) translated into the window"
+    assert all(0 <= x < 8 and 0 <= z < 8 for x, z in cropped.forest)
+    assert len(cropped.forest) == 25, "the 5x5 overlap of mask and window"
+
+
 # -- the town wall ------------------------------------------------------------
 
 def test_the_wall_band_is_thick_enough_to_have_a_core(village: Layout):

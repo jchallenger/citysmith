@@ -1414,6 +1414,111 @@ def test_conifer_is_a_whole_tree_with_its_crown_on_its_trunk():
     assert crown.y == 0.5 + TRUNK.size_y, "the crown sits on the trunk, not the ground"
 
 
+# -- forest-driven tree density ------------------------------------------------
+
+BROAD = Asset(id="3" * 8 + "-1111-2222-3333-444444444444", name="broadleaf",
+              kind="prop", pack="p", group_tag="prop", tags=(), folder="",
+              size_x=2.0, size_y=3.0, size_z=2.0)
+DEAD = Asset(id="4" * 8 + "-1111-2222-3333-444444444444", name="dead tree",
+             kind="prop", pack="p", group_tag="prop", tags=(), folder="",
+             size_x=1.5, size_y=3.0, size_z=1.5)
+
+_TREE_IDS = frozenset({TRUNK.id, CROWN.id, BROAD.id, DEAD.id})
+
+
+class _FindNothing:
+    """A catalog whose named props all miss -- no wheat, no ferns, no well."""
+
+    assets: list = []
+
+    def find(self, **kw):
+        return []
+
+
+class _WoodedPalette:
+    """The conftest stub with the tree roles filled in, so `_dress_districts`
+    actually plants something to count."""
+
+    _TREES = {"tree_broadleaf": BROAD, "tree_dead": DEAD,
+              "tree_conifer_trunk": TRUNK, "tree_conifer_crown": CROWN}
+
+    def __init__(self, base) -> None:
+        self._base = base
+        self.catalog = _FindNothing()
+
+    def resolve(self, role, variant=0):
+        return self._TREES.get(role) or self._base.resolve(role, variant)
+
+    def require(self, role, variant=0):
+        asset = self.resolve(role, variant)
+        if asset is None:
+            raise KeyError(role)
+        return asset
+
+    def prop(self, category, rng):
+        return self._base.prop(category, rng)
+
+
+def _dressed(tm, palette):
+    from citysmith.build import Builder, _dress_districts
+
+    b = Builder(palette, 0)
+    _dress_districts(b, tm, grade=0.5, taper={})
+    return b.placements
+
+
+def test_an_absent_forest_mask_leaves_the_scatter_untouched(catalog_palette):
+    """The neutrality pin: an empty mask must scatter *bit-identically* to a
+    TileMap from before the field existed, or every MFCG board rebuilds
+    differently the day the mask lands. The modulation therefore has to sit
+    inside the existing single-roll ladder and burn no extra rng draws."""
+    from citysmith.raster import TileMap
+
+    tm1 = TileMap.blank(40, 40, "wood")
+    assert tm1.forest == set()
+    tm2 = TileMap.blank(40, 40, "wood")
+    del tm2.forest                       # a TileMap from before the field
+
+    p1 = _dressed(tm1, _WoodedPalette(catalog_palette))
+    p2 = _dressed(tm2, _WoodedPalette(catalog_palette))
+
+    def key(p):
+        return (p.asset_id, p.x, p.y, p.z, p.rot)
+
+    assert [key(p) for p in p1] == [key(p) for p in p2]
+    assert sum(1 for p in p1 if p.asset_id in _TREE_IDS) > 20, (
+        "the equality must be about a real wood, not two empty lists")
+
+
+def test_an_authored_forest_pulls_the_wood_inside_its_line(catalog_palette):
+    """With a mask over the west half, the canopy closes up inside the line
+    and thins outside it -- density is redistributed, not raised, because the
+    byte cap has no slack for a globally denser wood."""
+    from citysmith.raster import TileMap
+
+    def tree_counts(placements):
+        inside = outside = 0
+        for p in placements:
+            if p.asset_id not in _TREE_IDS:
+                continue
+            # A margin either side of x=20: a jittered, centre-placed canopy
+            # near the line could be counted on either side of it.
+            if p.x < 18.0:
+                inside += 1
+            elif p.x > 22.0:
+                outside += 1
+        return inside, outside
+
+    plain = TileMap.blank(40, 40, "wood")
+    masked = TileMap.blank(40, 40, "wood")
+    masked.forest = {(x, z) for x in range(20) for z in range(40)}
+
+    in0, out0 = tree_counts(_dressed(plain, _WoodedPalette(catalog_palette)))
+    in1, out1 = tree_counts(_dressed(masked, _WoodedPalette(catalog_palette)))
+    assert in1 > in0, "the wood must close up inside the authored line"
+    assert out1 < out0, "and thin outside it -- redistributed, not added"
+
+
 # -- map edge taper -----------------------------------------------------------
 
 def test_tapered_ground_is_still_open_country():
