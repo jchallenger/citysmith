@@ -410,12 +410,15 @@ importer got *built* for the first time:
 is the fewest chunks, and 160 is *worse* than 112 because oversized cells split
 into four where a smaller cell would not have split at all.
 
-**Open, and not the import's doing:** `[FAIL] placements: 732 of 2367 town-wall
-cells have gaps in the masonry`. Bisected to `8412ce9`, which added
-`_lay_city_wall`'s `entombed()`; its parent `93ccba6` builds Forest Church
-clean. Forest Church is an MFCG map, so the FTG path is not involved at all —
-East Tradebourne is simply the first FTG town with a wall, and so the first to
-meet it. Full analysis in `CLAUDE.md` under *Metrics must read the artifact*.
+**Closed, and it was never the import's doing:** `[FAIL] placements: 732 of
+2367 town-wall cells have gaps in the masonry`. Bisected to `8412ce9`, which
+added `_lay_city_wall`'s `entombed()` — a hollow-core optimisation that
+emptied exactly the cells the masonry check samples; its parent `93ccba6`
+builds Forest Church clean, and `e83671a` reverted the optimisation, so the
+rampart builds solid again and the check passes. Forest Church is an MFCG map,
+so the FTG path was never involved — East Tradebourne was simply the first FTG
+town with a wall, and so the first to meet the regression. The history is in
+`CLAUDE.md` under *Metrics must read the artifact*.
 
 ## 7. Fixtures and tests — DONE
 

@@ -1783,6 +1783,15 @@ sides, 111 of Forest Church's 300 body cells, and `check_placements` samples
 mid-height of the second course, so every entombed cell read as a hole. 85 of
 300 holed on Forest Church, 732 of 2367 on East Tradebourne.
 
+The bisection, kept because it is the worked example of a check reading the
+artifact and being *right*:
+
+| commit | `entombed()` | masonry check | Forest Church |
+|---|---|---|---|
+| `93ccba6` cap the ridge | absent | present | **clean** |
+| `8412ce9` square the gate, stairs on the wall | **added** | present | 85 of 300 holed |
+| `e83671a` put the rampart back solid | **reverted** | present | **clean** |
+
 It is fixed. `entombed()` no longer exists in `build.py`, `rampart-solid` is
 marked done in `tasks.json`, and a Forest Church build on 2026-08-28 laid 300
 wall cells with no masonry failure in the report.
