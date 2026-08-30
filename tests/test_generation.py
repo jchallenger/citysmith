@@ -2605,6 +2605,46 @@ def test_the_rampart_is_built_solid_all_the_way_through():
             f"buried cell {c} carries {per_cell[c]} courses, not {courses} -- "
             "the rampart is hollow again and town_wall_gaps will fail")
 
+
+def test_the_rampart_is_built_solid_on_the_stub_palette_too(catalog_palette):
+    """The same invariant as the catalog-backed test above -- every wall cell
+    buried on all four orthogonal sides carries the full course count -- but
+    on the stub palette, so it runs on a machine without a TaleSpire install.
+    The catalog-backed twin needs `catalog.json` and so runs on exactly one
+    machine; everywhere else it fails for want of a catalog, which is no line
+    of defence at all: the hollow-core optimisation could land again and
+    every checkout without the game would stay green.
+    """
+    import collections
+
+    from citysmith.build import (
+        Builder, TOWN_WALL_TILES, _lay_town_wall, pick_wall_towers,
+    )
+
+    palette = catalog_palette
+    tm = _ring_map(thickness=3)
+    b = Builder(palette, 0)
+    _lay_town_wall(b, tm, palette.require("city_wall"), 0.5, TOWN_WALL_TILES)
+
+    core = palette.resolve("city_wall_core")
+    per_cell = collections.Counter(
+        (int(p.x), int(p.z)) for p in b.placements if p.asset_id == core.id)
+    gates = set(tm.gates)
+    mass = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+            if tm.wall[z][x]} | gates
+    towers = {c for t in pick_wall_towers(tm, mass, gates) for c in t}
+    NB = ((1, 0), (-1, 0), (0, 1), (0, -1))
+    buried = [c for c in mass - towers - gates
+              if all((c[0] + dx, c[1] + dz) in mass for dx, dz in NB)]
+    assert buried, "the fixture should have a buried core to check"
+
+    courses = round(TOWN_WALL_TILES / core.size_y)
+    for c in buried:
+        assert per_cell[c] == courses, (
+            f"buried cell {c} carries {per_cell[c]} courses, not {courses} -- "
+            "the rampart is hollow again and town_wall_gaps will fail")
+
+
 def test_wall_stairs_are_inside_parallel_and_land_on_the_curtain():
     """Three things that were each wrong once.
 
