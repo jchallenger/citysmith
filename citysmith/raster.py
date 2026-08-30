@@ -1073,40 +1073,168 @@ def _notch_buildings(tm: "TileMap") -> None:
             break
 
 
-#: Side of the square, and how far from the town's built centre it may sit.
-PLAZA_SIDE = 7
+#: Bounds on the carved square's area, in cells. The floor is a widened
+#: junction -- room for a well, one stall row and a brawl -- which is all the
+#: market a hamlet has. The ceiling stops a fallback from paving a quarter of
+#: a big town; a town that big has an authored square in its export, and the
+#: carve never runs against one (it is a fallback, guarded below).
+PLAZA_MIN_AREA = 24
+PLAZA_MAX_AREA = 256
+
+#: Tiles of market per sqrt(building). Fixed by the one authored market on
+#: hand: East Tradebourne's "Warden Market" rasterises to 631 plaza tiles in a
+#: town of 991 buildings, and 631 / sqrt(991) = 20.0. The *shape* of the law
+#: is chosen by a frontage measurement rather than by the data point (one
+#: point fits any curve): scaling linearly from that same market gives Forest
+#: Church 33 cells, and a 33-cell square at its busiest junction touches zero
+#: building frontage, because main streets are four tiles wide and buildings
+#: stand a verge back from the carriageway -- the square drowns in its own
+#: junction. At 20*sqrt(51) = 143 cells it reaches the facades (18 of 39
+#: perimeter cells against a frontage, measured).
+PLAZA_TILES_PER_ROOT_BUILDING = 20.0
+
+#: Seed scoring radii, in cells (Chebyshev). Traffic is street cells within 3
+#: -- the same 7x7 window the fixed carve scored. Frontage is building cells
+#: within 5, because buildings stand back from the carriageway: scored on
+#: traffic alone the seed lands mid-junction and the grown square touches
+#: 0-11 frontage cells on the two towns measured; adding the frontage term
+#: moves it to where the busiest street meets the densest block and the same
+#: growth touches 18 and 26.
+PLAZA_TRAFFIC_RADIUS = 3
+PLAZA_FRONTAGE_RADIUS = 5
+
+#: What a plaza may pave over: public open ground only. FIELD is someone's
+#: crop, PIER is over water, and a building or town-wall cell is never
+#: touched, so the square is by construction the leftover room between
+#: frontages -- which is what a medieval market square is.
+_PLAZA_GROWS_OVER = frozenset({STREET, GROUND, LANE})
+
+
+def _plaza_target_area(tm: "TileMap") -> int:
+    buildings = len({b for row in tm.building for b in row if b})
+    want = round(PLAZA_TILES_PER_ROOT_BUILDING * math.sqrt(max(1, buildings)))
+    return max(PLAZA_MIN_AREA, min(PLAZA_MAX_AREA, want))
 
 
 def _carve_plaza(tm: "TileMap") -> None:
-    """Open a market square on the busiest piece of the street network.
+    """Open a market square where the busiest street meets the densest block.
 
-    MFCG's squares came through this export empty, so the town had no plaza at
-    all -- no public room, nowhere for the well and the market clutter the
-    dressing pass already knows how to lay, and nowhere for a party to be
-    accosted. The square is placed where the most street already meets, which
-    puts it on the junction the town's own road layout says is the centre.
+    MFCG's squares can come through an export empty, so the town has no plaza
+    at all -- no public room, nowhere for the well and the market the dressing
+    pass lays, and nowhere for a party to be accosted. This is a **fallback**:
+    a town whose export authored its own square (FTG's MARKET/PAVEMENT
+    polygons, or an MFCG file whose squares survive) keeps it untouched.
+
+    The old carve stamped a fixed 7x7 block onto the clearest patch of street,
+    which put an axis-aligned rectangle in the middle of a four-tile
+    carriageway: 1 of its 24 perimeter cells touched a building on Forest
+    Church. A market square is not a stamped shape -- it is the leftover space
+    between frontages. So the square is *grown* outward from the seed over
+    open ground, sized to the town, and takes whatever outline the
+    surrounding buildings give it.
     """
-    best: tuple[int, tuple[int, int]] | None = None
-    for z in range(tm.depth - PLAZA_SIDE):
-        for x in range(tm.width - PLAZA_SIDE):
-            block = [(x + i, z + j) for i in range(PLAZA_SIDE)
-                     for j in range(PLAZA_SIDE)]
-            if any(tm.building[bz][bx] or tm.wall[bz][bx]
-                   or tm.surface[bz][bx] in (WATER, MARSH, VOID, PIER)
-                   for bx, bz in block):
-                continue
-            paved = sum(1 for bx, bz in block if tm.surface[bz][bx] == STREET)
-            if paved == 0:
-                continue
-            if best is None or paved > best[0]:
-                best = (paved, (x, z))
+    # The fallback guard. Authored plazas were painted from the layout's own
+    # polygons before buildings; carving another square onto a town that has
+    # one puts two markets a street apart and the second is a lie.
+    if any(s == PLAZA for row in tm.surface for s in row):
+        return
 
+    # Seed: the street cell with the most traffic *and* the most frontage
+    # around it. Strictly-greater comparison in scan order, so ties resolve
+    # the same way on every run.
+    best: tuple[int, tuple[int, int]] | None = None
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.surface[z][x] != STREET:
+                continue
+            score = 0
+            r = PLAZA_TRAFFIC_RADIUS
+            for dz in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    nx, nz = x + dx, z + dz
+                    if tm.inside(nx, nz) and tm.surface[nz][nx] == STREET:
+                        score += 1
+            r = PLAZA_FRONTAGE_RADIUS
+            for dz in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    nx, nz = x + dx, z + dz
+                    if tm.inside(nx, nz) and tm.building[nz][nx]:
+                        score += 1
+            if best is None or score > best[0]:
+                best = (score, (x, z))
     if best is None:
         return
-    _, (x0, z0) = best
-    for j in range(PLAZA_SIDE):
-        for i in range(PLAZA_SIDE):
-            tm.surface[z0 + j][x0 + i] = PLAZA
+    seed = best[1]
+
+    cells = _grow_plaza(tm, seed, _plaza_target_area(tm))
+    for x, z in cells:
+        tm.surface[z][x] = PLAZA
+
+
+def _grow_plaza(tm: "TileMap", seed: tuple[int, int],
+                target: int) -> set[tuple[int, int]]:
+    """The open room around ``seed``: grown, smoothed, one connected piece.
+
+    Breadth-first over public open ground, nearest cells first, stopping at
+    ``target`` cells -- so the region is a disc clipped by whatever frontages,
+    walls and water surround the junction. The radius cap keeps the disc from
+    running off down the streets when the junction is open on one side: a
+    disc of area A has radius about sqrt(A/2) under the BFS metric, and
+    anything much past that is a corridor, not a square.
+    """
+    max_r = math.ceil(math.sqrt(target / 2.0)) + 2
+
+    def open_ground(x: int, z: int) -> bool:
+        return (tm.inside(x, z) and not tm.building[z][x] and not tm.wall[z][x]
+                and (x, z) not in tm.gates
+                and tm.surface[z][x] in _PLAZA_GROWS_OVER)
+
+    dist = {seed: 0}
+    order = [seed]
+    queue = deque([seed])
+    while queue:
+        x, z = queue.popleft()
+        if dist[(x, z)] >= max_r:
+            continue
+        for _, dx, dz in SIDES:
+            n = (x + dx, z + dz)
+            if n not in dist and open_ground(*n):
+                dist[n] = dist[(x, z)] + 1
+                order.append(n)
+                queue.append(n)
+    region = set(order[:target])
+
+    # Smooth: every plaza cell must belong to a full 2x2 block of plaza. A
+    # cell that does not is the tip of a tentacle one cell wide -- the disc
+    # leaking down a lane -- and a market square with pseudopodia reads as a
+    # paving error. Iterated to a fixpoint because removing a tip exposes the
+    # cell behind it.
+    while True:
+        keep = {
+            (x, z) for (x, z) in region
+            if any((x + i, z + j) in region and (x + i, z) in region
+                   and (x, z + j) in region
+                   for i in (-1, 1) for j in (-1, 1))
+        }
+        if keep == region:
+            break
+        region = keep
+
+    # One room. Smoothing can cut the region in two; the piece the seed is in
+    # is the market, anything else was a pocket reached through a gap the
+    # smoothing closed.
+    if seed not in region:
+        return set()
+    comp = {seed}
+    queue = deque([seed])
+    while queue:
+        x, z = queue.popleft()
+        for _, dx, dz in SIDES:
+            n = (x + dx, z + dz)
+            if n in region and n not in comp:
+                comp.add(n)
+                queue.append(n)
+    return comp
 
 
 #: A lane is at most this wide. Wider than that and it is a street that the
