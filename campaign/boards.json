@@ -181,6 +181,19 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\chim4-*"
   },
+  "PROBE chimney seated by base": {
+   "board": "PROBE chimney seated by base",
+   "holds": "probe",
+   "source": "out\\chimneyprobe.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-29T22:29:28",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\chim5-*"
+  },
   "PROBE chimney seating": {
    "board": "PROBE chimney seating",
    "holds": "probe",

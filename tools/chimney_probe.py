@@ -18,33 +18,30 @@ is that a name is not a shape -- `castle merlon 1x1` was a wooden hoarding for
 eleven revisions on exactly this kind of inference. So: build all five, look,
 and only then change the palette.
 
-Round one, `PROBE chimney seating`: five treatments, and the two that survived
-a board read were the combination REPLACING the cap and a flat cap under
-Tavern's stone stack.
+Four rounds in, and two of the four were measuring this probe's own bugs. Both
+are fixed and both are worth stating, because they are the same mistake about
+the same thing -- WHICH END OF A PIECE SEATS AT THE COURSE.
 
-Round two, `PROBE chimney drop`: those two crossed against a drop of 0 / 0.125
-/ 0.25. The pick was **the combination, no cap, dropped 0.25** -- and the flat
-ridge tile still read too high.
+  * A **cap** seats by its TOP, so `y - cap.size_y` puts that top at the ring
+    height. The probe placed it at `y` and the ridge stood half a tile proud in
+    every box. "The roof patch looks high" was that.
+  * A **combination** -- a roof piece with a chimney on it -- seats by its
+    BASE, like a slope, so its roof half sits at the course and the stack rises
+    above. The probe seated it like a cap, which put all 1.5 tiles of it below
+    the course with the chimney buried. "Still sunken" was that.
 
-Round three is this one, on the two axes the reviewer named. Which CELL the
-chimney stands in, and where along the ridge:
+The shipped `_lay_roofs` has always had both right. This is what
+`wallkit_board.py`'s docstring means by a probe that can only tell you about
+the probe, and it has now cost four rounds.
 
-    slant   a genuine slope cell one ring below the ridge, with the
-            combination taking that slope's own rotation. This is what a
-            roof-and-chimney piece is FOR: it replaces the slope rather than
-            sitting on top of one.
-    flat    the capped ridge itself, the combination replacing the cap.
+Round five sweeps the combination's base around the course height:
 
-    centre  the middle of the run, which is what `_lay_roofs` does today
-    off     one cell along -- a real chimney serves a hearth against a wall,
-            and a hearth is rarely in the middle of the plan
+    sink 0     base flush with the roof course, the whole stack proud
+    sink 0.25  a quarter tile into the roof
+    sink 0.5   half a tile in
 
-The third column pushes the drop to 0.5 on the off-centre case, because "still
-too high" was the note on 0.25 and one more step is cheaper to look at than to
-argue about.
-
-    r0   slant: centre 0.25 | off-centre 0.25 | off-centre 0.5
-    r1   flat:  centre 0.25 | off-centre 0.25 | off-centre 0.5
+    r0  flat, centre       -- replacing the ridge cap
+    r1  slant, off-centre  -- replacing a slope one ring down, at its rotation
 
 Read it from a low oblique and from directly overhead; the difference between
 1 and 2 is whether there are two roof courses at the ridge or one, which shows
@@ -81,12 +78,12 @@ STOREYS = 2
 #: or "off". The drop lowers the piece below the ring height it would otherwise
 #: seat at by its top.
 TREATMENTS = [
-    ("flat, centre, drop 0", "flat", "centre", 0.0),
-    ("flat, centre, drop 0.125", "flat", "centre", 0.125),
-    ("flat, centre, drop 0.25", "flat", "centre", 0.25),
-    ("slant, off-centre, drop 0", "slant", "off", 0.0),
-    ("slant, off-centre, drop 0.125", "slant", "off", 0.125),
-    ("slant, off-centre, drop 0.25", "slant", "off", 0.25),
+    ("flat, centre, sink 0", "flat", "centre", 0.0),
+    ("flat, centre, sink 0.25", "flat", "centre", 0.25),
+    ("flat, centre, sink 0.5", "flat", "centre", 0.5),
+    ("slant, off-centre, sink 0", "slant", "off", 0.0),
+    ("slant, off-centre, sink 0.25", "slant", "off", 0.25),
+    ("slant, off-centre, sink 0.5", "slant", "off", 0.5),
 ]
 
 
@@ -115,7 +112,7 @@ def main() -> None:
     storey_h = wall.size_y
 
     pitch_z = BOX_D + 2 * PAD + GAP
-    for i, (label, cell_kind, position, drop) in enumerate(TREATMENTS):
+    for i, (label, cell_kind, position, sink) in enumerate(TREATMENTS):
         ox = (i % COLS) * pitch
         oz = (i // COLS) * pitch_z
         for dz in range(-PAD, BOX_D + PAD):
@@ -172,8 +169,15 @@ def main() -> None:
                     f = falls((x, z))
                     if f:
                         rot = (ROOF_EDGE_ROT[f[0]] + edge_off) % 24
-                out.append(place_tile(combo, ox + x, oz + z,
-                                      y - drop - combo.size_y, rot))
+                # **A combination seats by its BASE, like a slope -- NOT by its
+                # top, like a cap.** It is a roof piece with a chimney standing
+                # on it, so the roof half belongs at the course and the stack
+                # rises above. Seated by its top the whole 1.5 tiles sat below
+                # the course and the chimney was buried in the roof, which is
+                # what "still sunken" was for three rounds. The shipped gabled
+                # path has always done this correctly:
+                # `place_tile(chimney, x, z, y, rot)`.
+                out.append(place_tile(combo, ox + x, oz + z, y - sink, rot))
                 continue
             fall = tuple(s for s, dx, dz in SIDE_OFFSETS
                          if rings.get((x + dx, z + dz), -1) < r)
