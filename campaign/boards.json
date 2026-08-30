@@ -142,6 +142,19 @@
    "disposable": true,
    "note": "The camera calibration target (tools/camera_probe.py): five size-coded grass marks in a 12-tile square. Every constant in config/camera.json was measured off this board on 2026-08-28. Keep it and the sweep is repeatable with camera_calib.ps1 -KeepBoard; delete it and it costs one paste to rebuild."
   },
+  "PROBE chimney cell and position": {
+   "board": "PROBE chimney cell and position",
+   "holds": "probe",
+   "source": "out\\chimneyprobe.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-29T20:13:49",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\chim3-*"
+  },
   "PROBE chimney drop": {
    "board": "PROBE chimney drop",
    "holds": "probe",
@@ -154,6 +167,19 @@
    "recorded": "2026-08-29T19:43:34",
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\chim2-*"
+  },
+  "PROBE chimney on a true ridge": {
+   "board": "PROBE chimney on a true ridge",
+   "holds": "probe",
+   "source": "out\\chimneyprobe.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-29T20:46:40",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\chim4-*"
   },
   "PROBE chimney seating": {
    "board": "PROBE chimney seating",
