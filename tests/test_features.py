@@ -191,6 +191,53 @@ def test_a_town_whose_trades_do_not_cluster_reports_no_quarters():
     assert "no quarters" in detail
 
 
+def test_the_chimney_line_reports_the_shape_of_the_stack_not_just_a_count():
+    """"1,084 stacks" reads as a success; "1,084 stacks of 1 course" does not.
+
+    This line exists because of a measurement. The four-course flue was built,
+    tested and written up, and reached 26 of 1,274 stacks across the three
+    towns -- 2% -- because it was wired into one branch of `_lay_roofs` and
+    nothing counted the others. Every one of East Tradebourne's 1,084 chimneys
+    was a single piece. That is this function's own failure mode arriving from
+    a direction it did not cover: not a feature absent from the crop, but one
+    present in the code and absent from the output.
+
+    So the report has to carry the flue's SHAPE, which is the thing that
+    differed. A count alone could not have said anything was wrong.
+    """
+    layout = _town(count=6)
+    tm = R.rasterize(layout)
+    builder = build_from_tilemap(tm, _palette(), storeys=2)
+    level, _, detail = next(
+        r for r in feature_report(builder, tm, layout) if r[1] == "chimneys")
+    assert level == "pass", detail
+    assert "course(s)" in detail, detail
+    assert "piece(s)" in detail, detail
+
+
+def test_a_town_with_roofs_and_no_chimneys_fails():
+    """The other branch, which is the one that would have fired.
+
+    A chimney is not something a map can decline to offer, the way it can
+    decline to offer a field boundary: anything with a roof on it has a
+    hearth. So an absent stack is a fail rather than a "none here".
+    """
+    from citysmith import build as B
+
+    layout = _town(count=6)
+    tm = R.rasterize(layout)
+    lay_flue = B.lay_flue
+    B.lay_flue = lambda *a, **k: None
+    try:
+        builder = build_from_tilemap(tm, _palette(), storeys=2)
+    finally:
+        B.lay_flue = lay_flue
+    level, _, detail = next(
+        r for r in feature_report(builder, tm, layout) if r[1] == "chimneys")
+    assert level == "fail", detail
+    assert "not one chimney" in detail, detail
+
+
 def test_the_surface_palette_is_no_longer_two_materials():
     """A town used to arrive as cobble, gravel and grass, with `lane`,
     `gravel` and `field_1x1` all the same asset and `plaza` resolving to

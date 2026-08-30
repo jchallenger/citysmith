@@ -19,6 +19,7 @@ legibility rather than engine constraints:
 
 from __future__ import annotations
 
+import collections
 import math
 
 from dataclasses import dataclass, field
@@ -481,10 +482,11 @@ def tile_interpenetration(builder) -> list[str]:
     upper floor slab drove a quarter of a cubic tile through the masonry
     around its whole perimeter.
     """
-    from .build import placed_bounds
+    from .build import is_chimney, placed_bounds
 
     catalog = builder.palette.catalog
     boxes: list[tuple[float, ...]] = []
+    flue: list[bool] = []
     for p in builder.placements:
         asset = catalog.by_id(p.asset_id)
         if asset is None or asset.kind == "prop":
@@ -493,6 +495,7 @@ def tile_interpenetration(builder) -> list[str]:
             continue          # ground plane and thin trim: laid flush by design
         x0, z0, x1, z1 = placed_bounds(asset, p)
         boxes.append((x0, z0, p.y, x1, z1, p.y + asset.size_y))
+        flue.append(is_chimney(asset))
 
     at: dict[tuple[int, int], list[int]] = {}
     for i, bx in enumerate(boxes):
@@ -510,6 +513,34 @@ def tile_interpenetration(builder) -> list[str]:
                 oz = min(p[4], q[4]) - max(p[1], q[1])
                 oy = min(p[5], q[5]) - max(p[2], q[2])
                 if ox > e and oz > e and oy > e and ox * oy * oz > 0.05:
+                    # **Every overlap a chimney is in is deliberate**, and
+                    # both of its two kinds are measured rather than assumed.
+                    # A flue laps its own courses by `build.CHIMNEY_LAP`, each
+                    # buried to its middle in the one below, so the shaft
+                    # reads as continuous masonry where stacked courses show a
+                    # joint at every lift; and its foot is sunk into the roof
+                    # it comes through by `build.CHIMNEY_BASE`, because a
+                    # chimney emerges from a roof rather than standing on one.
+                    # Both come off the chimney the user laid by hand, and
+                    # `test_the_flue_is_the_one_the_user_built` holds the
+                    # shipped code against that slab.
+                    #
+                    # Counted on Forest Church: 764 chimney-against-roof pairs
+                    # and 416 chimney-against-chimney, 1,180 of 1,737 -- 68%
+                    # of the whole metric, from geometry that is correct. A
+                    # number inflated by deliberate overlap is a number that
+                    # hides a real one, which is the argument this project
+                    # already makes about two corner panels meeting at right
+                    # angles. What a volume test cannot do here is tell a
+                    # measured burial from an accidental one; the chimney's
+                    # relationship with its roof is checked by tests that
+                    # know what it should be --
+                    # `test_every_chimney_sits_on_its_ridge_the_same_way` for
+                    # both ends of the flue and
+                    # `test_a_chimney_never_replaces_the_roof_surface` for the
+                    # roof still being under it.
+                    if flue[ids[a]] or flue[ids[b]]:
+                        continue
                     clashes += 1
     if not clashes:
         return []
@@ -1401,6 +1432,48 @@ def feature_report(builder, tm, layout=None, seed: int = 0
         out.append(("pass", "gabled ends",
                     "none here; no quarters to key on, so every ridge is "
                     "hipped -- a crop rarely clusters enough to have any"))
+
+    # -- chimneys ------------------------------------------------------------
+    # **This line exists because of a measurement, not a hypothesis.** The
+    # four-course flue was built, tested and written up, and reached 26 of
+    # 1,274 stacks across the three towns -- 2% -- because it was wired into
+    # one branch of `_lay_roofs` and nothing counted the others. East
+    # Tradebourne's 1,084 chimneys were every one of them a single piece. That
+    # is this function's own failure mode, arriving from a direction it did not
+    # cover: not a feature absent from the crop, but a feature present in the
+    # code and absent from the output.
+    #
+    # So it reports the SHAPE of what was laid, not just that something was.
+    # "1,084 stacks" reads as a success; "1,084 stacks of 1 course" does not.
+    from .build import chimney_form_for, is_chimney
+
+    flues: dict[tuple[float, float], int] = {}
+    pieces: set[str] = set()
+    for p in builder.placements:
+        asset = by_id(p.asset_id)
+        if asset is None or not is_chimney(asset):
+            continue
+        flues[(p.x, p.z)] = flues.get((p.x, p.z), 0) + 1
+        pieces.add(asset.name)
+    roofed = any((a := by_id(p.asset_id)) is not None
+                 and "roof" in (a.group_tag or "").lower()
+                 and not is_chimney(a) for p in builder.placements)
+    if flues:
+        shape = ", ".join(f"{n} of {c} course(s)" for c, n in sorted(
+            collections.Counter(flues.values()).items()))
+        forms = (sorted({chimney_form_for(q, seed)
+                         for q in set(quarters.values())})
+                 if quarters else [])
+        where = (f"; placed {'/'.join(forms)} by quarter" if forms else
+                 "; every stack on the ridge, this map having no quarters")
+        out.append(("pass", "chimneys",
+                    f"{len(flues)} stack(s) -- {shape} -- from "
+                    f"{len(pieces)} piece(s){where}"))
+    elif roofed:
+        out.append(("fail", "chimneys",
+                    "the town has roofs and not one chimney on them"))
+    else:
+        out.append(("pass", "chimneys", "none; nothing here is roofed"))
 
     # -- field walls ---------------------------------------------------------
     runs = len(getattr(tm, "fences", ()) or ())

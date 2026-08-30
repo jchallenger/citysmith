@@ -803,6 +803,12 @@ Both halves are decided by what the cell is:
 | a capped ridge | `roof_stack` -- free-standing | none needed |
 | a slope | the combination, laid **over** the slope | that slope's own |
 
+> **SUPERSEDED by §12.** The combination piece is retired: every chimney is
+> free-standing now, and the cell keeps the ordinary roof it would have had.
+> The row above is kept because the *reasoning* still holds -- it is why the
+> combination could only go where its own slope fitted, which is what §12
+> gives up in order to place a stack anywhere.
+
 Before, every stack on every board was the combination piece at rot 0, laid
 **twice** and lapped, with no roof surface under it. So a ridge stack wore a
 bare slope on end as a pale skirt, which is exactly what the screenshot showed.
@@ -838,3 +844,162 @@ A 60% drop on the crop, measured through `verify.tile_interpenetration` on the
 two builds' own structure slabs. Two golden lines moved with it -- the seam
 count, and one slab 798 -> 792 bytes -- and nothing else in either report
 changed, including the asset totals.
+
+
+## 12. Built: one flue, and it is the one the user laid
+
+The user handed the chimney slab back a second time, with a sentence that is
+the whole brief:
+
+> acceptable geometry for a chimney that can be creatively placed
+
+It is byte-identical to `tests/fixtures/handbuilt_chimney.slab`, already in the
+tree from §8.4 -- so this confirms the pattern rather than revising it, and
+the instruction is about *reach*: build every chimney this way.
+
+### 12.1 What was actually shipping, measured before anything moved
+
+§11.2 reported the chimney work as done. It was done for one branch. Counted
+across all three towns, through `_lay_roofs` itself:
+
+| town | stacks | 4-course flues | what the rest were |
+|---|---|---|---|
+| Pelvesthollow | 36 | 6 | 29 single pieces, 1 two-course |
+| Graybank | 154 | 20 | 124 single, 10 two-course |
+| East Tradebourne | **1,084** | **0** | 1,084 single pieces |
+
+**26 of 1,274 stacks -- 2%.** The hand-built flue was reachable only through
+the double-scale branch, which fires on a wing that tiles exactly into 2x2
+blocks. East Tradebourne's 1,084 chimneys were 731 `Thatched Roof Chimney` and
+353 `Village Roof Side/Chimney`, every one a **single piece**. Not one lapped
+stack on the biggest town in the repo.
+
+This is the failure mode `verify.feature_report` exists for, arriving from a
+direction it does not cover: the feature was built, tested, written up and
+*correct*, and it reached 2% of the boards. Nothing counted the branch.
+
+### 12.2 The combination piece is retired
+
+`Village Roof Side/Chimney` is a slope with a stack cast onto it. That is what
+made it convenient -- one placement, roof and chimney together -- and it is
+exactly what makes it unplaceable anywhere but on a slope whose rotation it can
+be turned to match. The user had already said so off a screenshot, in §11.2:
+*"one doesnt need the (chimney on slant roof) tile, just the normal chimney."*
+
+`lay_flue` replaces all of it. Nothing it does touches the roof:
+
+* the cell gets the slope or the cap it would have had with no chimney on it,
+  laid by the ordinary loop, at the ordinary rotation;
+* the flue stands through it, four `Thatched Chimney` courses at 0.25, 0.50,
+  0.75 and 1.25 above the roof course's base -- three lapped by `CHIMNEY_LAP`,
+  each buried to its middle in the one below, and the fourth flush on the third
+  to form the mouth.
+
+`test_the_flue_is_the_one_the_user_built` drives `lay_flue` against the fixture
+and compares placements, rather than against numbers copied out of the fixture
+into a constant. That is the same standard `_HAND_HIPS` sets.
+
+Every material has a free-standing stack, so nothing lost a chimney:
+
+| material | flue piece | courses | flue |
+|---|---|---|---|
+| thatch, slate | `Thatched Chimney` 1x0.5x1 | 4, lapped | 1.5 |
+| tile | `Chimney 01` / `02` 1x1x1 | 2, flush | 2.0 |
+
+Stack **count** is unchanged at 36 / 154 / 1,084; placements go 55 -> 124,
+224 -> 522 and 1,084 -> 3,630. `CHIMNEY_SINK` is gone with the piece it
+measured, and the three copies of the seating branch -- gabled, hip, wide --
+are one function, which is the duplication `chimney-seating` recorded and left
+open.
+
+**The tile flue is an analogue, not a measurement**, and so is the whole
+single-scale case: the hand-build's roof course is 2.0 tall and everything here
+is an offset from its base. `chimney-flue-at-the-single-scale` is open with the
+two numbers it has to settle.
+
+### 12.3 What retiring it bought: three forms and a stack per wing
+
+Both of the remaining chimney tasks had been waiting on the same thing, and
+neither needed a new asset once it arrived.
+
+**`chimney-per-wing`.** One stack per roof *block*, on its longest wing, left
+an L-plan house with a cold blank ell -- 378 of East Tradebourne's 1,462 wings
+(26%), 61 of Graybank's 215 (28%), 25 of Pelvesthollow's 61 (41%).
+`wing_carries_a_stack` gives every wing of `CHIMNEY_MIN_WING` = 6 cells its
+own, and `CHIMNEY_SECOND_CROWN` = 7 puts a second at the quarter points of a
+long ridge. The longest wing always carries one whatever its size, so the rule
+only ever adds. Stacks 36 -> **82**, 154 -> **262**, 1,084 -> **2,141**.
+
+**`chimney-forms`.** `CHIMNEY_FORMS` deals end / lateral / ridge by quarter,
+through the same crc32 on `(quarter, seed)` as `GABLE_ENDS` and for the same
+reason -- a district that puts its chimneys in one place reads as a district,
+where a form dealt per building reads as noise. Under seed 33:
+
+| quarter | gable | stack |
+|---|---|---|
+| civic | crow | ridge |
+| craft | endmix | lateral |
+| docks | flush | lateral |
+| market | endmix | end |
+| outskirts | hip | ridge |
+| residential | endmix | end |
+
+**All three forms are a choice of cell and nothing else** -- no new piece, no
+new rotation, no new path -- because a free-standing flue seats itself off
+whatever course it comes through. §3.2 predicted exactly that and it held.
+
+A/B against every stack on the ridge: **93% of East Tradebourne's 2,141 stacks
+move to a new cell, and nothing moves at all on Pelvesthollow or Graybank.**
+Neither has quarters, so there is nothing to key on and `DEFAULT_CHIMNEY_FORM`
+is the honest fallback -- the same answer `quarter_map` gives the gable deal,
+stated here rather than left to be discovered.
+
+`Chimney 02` is also finally in use. `deal_flue` hands one of a kit's
+interchangeable stacks per **building** -- not per stack, which is the opposite
+of `WallFamily.deal`'s rule for panels and is deliberate: a house's chimneys are
+one piece of masonry by one mason, so two flues on one roof match and two
+neighbours need not. `walls.stem_of` accepts the pair as §3.3 predicted, and
+the collider is checked as well as the stem, because a kit is free to index two
+pieces of different heights and a taller course would change the flue's shape.
+
+### 12.4 A metric that the flue was about to drown
+
+`verify.tile_interpenetration` counts pairs of solids sharing a volume. A flue
+is *built* out of overlap -- lapped into itself by `CHIMNEY_LAP` and sunk into
+its roof by `CHIMNEY_BASE`, both measured off the hand-build -- so on Forest
+Church it contributed 416 chimney-against-chimney pairs and 764
+chimney-against-roof, **1,180 of 1,737, 68% of the metric**, all of it correct
+geometry.
+
+A number inflated by deliberate overlap is a number that hides a real one,
+which is the argument this repo already makes about two corner panels meeting
+at right angles. The check skips any pair a chimney is in, and Forest Church
+reads **557**. What a volume test cannot do here is tell a measured burial from
+an accidental one; the chimney's own relationship with its roof is held by
+tests that know what it should be --
+`test_every_chimney_sits_on_its_ridge_the_same_way` for both ends of the flue,
+`test_a_chimney_never_replaces_the_roof_surface` for the roof still being under
+it.
+
+That first test also got stronger and found something. It used to check that no
+chimney *placement* starts at or above the local ridge, which was only ever
+possible while a stack was one or two pieces; a four-course flue is above the
+roof by construction. Rewritten to group by cell and check the flue's **foot**
+below and its **head** above, it reports **9 of 98 flues that never break their
+own roof line** on Forest Church. Six are an artifact and are excluded with a
+reason: they are 2x2 slopes, whose bounding box tops out at the ridge edge
+rather than at the surface over the flue's cell -- and they are the
+hand-build's own geometry, laid on a board and accepted. **Three are real**: a
+stack on a low ell beside a taller range, which would not draw and does not
+read. `chimney-clears-a-taller-neighbour` is open for it, and
+`chimney-per-wing` is what created the class by giving low ells their own
+stacks.
+
+### 12.5 NOT SEEN ON A BOARD
+
+Every number above is off the placements. The forms in particular are a
+*look*: whether an end stack reads as an end stack, whether a lateral stack
+half-way down a slope reads as a forge flue or as a mistake, and whether a
+1.5-tile thatch flue beside a 2.0-tile tile one reads as two materials or as
+two heights. This repo's rule is that a look is not optional, and the probe
+that settles `chimney-flue-at-the-single-scale` is the one to hang it on.

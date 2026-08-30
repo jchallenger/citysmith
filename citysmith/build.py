@@ -4375,32 +4375,47 @@ def coarse_blocks(wing: set[tuple[int, int]]):
     return ox, oz, coarse
 
 
-#: Where a free-standing flue starts, measured up from the base of the roof
-#: course it comes through, at the DOUBLE scale.
+#: Where a free-standing flue's foot sits, measured up from the base of the
+#: roof course it comes through.
 #:
 #: **From the chimney the user built and handed back**
-#: (`tests/fixtures/handbuilt_chimney.slab`): four `Thatched Chimney` courses
-#: at 0.25, 0.50, 0.75 and 1.25 above the base of the 2x2 slope they stand in.
-#: The bottom three lap by `CHIMNEY_LAP`, each buried to its middle in the one
-#: below, and the fourth sits flush on the third to form the mouth.
+#: (`tests/fixtures/handbuilt_chimney.slab`), which they gave twice and the
+#: second time as "acceptable geometry for a chimney that can be creatively
+#: placed": four `Thatched Chimney` courses at 0.25, 0.50, 0.75 and 1.25 above
+#: the base of the 2x2 slope they stand in. The bottom three lap by
+#: `CHIMNEY_LAP`, each buried to its middle in the one below, and the fourth
+#: sits flush on the third to form the mouth. **The roof piece is still there
+#: underneath** -- the slab carries an ordinary `Thatched Roof 03` at that
+#: cell, unmodified, with the flue standing through it.
 #:
-#: The 1x1 rule cannot be reused here and would be invisible if it were:
-#: `CHIMNEY_SEAT` starts the stack half a tile BELOW the course, which on a
-#: 1.0 rise emerges and on a 2.0 rise is buried in the slope's lower half.
-WIDE_CHIMNEY_BASE = 0.25
+#: **MEASURED AT THE DOUBLE SCALE ONLY.** The slab's roof course is 2.0 tall
+#: and this number is an offset from its base, so carrying it to a 1.0 course
+#: is an extrapolation: the flue emerges through the middle of a 1x1 slope
+#: rather than the lower half of a 2x2 one, and stands 0.75 proud of the
+#: course top where at the double scale it stands inside it. That is the
+#: reading `chimney-flue-at-the-single-scale` exists to check on a board.
+CHIMNEY_BASE = 0.25
 
 
-def _wide_stack_courses(bare) -> tuple[float, ...]:
-    """Y offsets above `WIDE_CHIMNEY_BASE` for a flue on a double-scale roof.
+def flue_courses(bare) -> tuple[float, ...]:
+    """Y offsets above the flue's foot, one per course.
 
     Lapped courses to build the shaft, then one flush course for the mouth --
     the piece has a rim at each end, so lapped courses read as continuous
-    masonry where stacked ones show a seam per course. A piece a tile or more
-    tall is not a stub and stands two courses plainly; only the half-tile case
-    is measured, and only for thatch.
+    masonry where stacked ones show a seam per course. **The lapping is the
+    point**, and it is why the hand-build is four pieces rather than a taller
+    one.
+
+    A piece a tile or more tall is not a stub and takes the same shape without
+    the lap: one shaft course and one mouth. Only the half-tile case is
+    measured, and only for thatch -- Tavern's 1.0-tall `Chimney 01` gets the
+    analogue rather than a measurement, and `chimney-flue-at-the-single-scale`
+    carries that too.
     """
-    if bare is None or bare.size_y >= 1.0:
-        return (0.0, bare.size_y) if bare is not None else ()
+    if bare is None:
+        return ()
+    if bare.size_y >= 1.0:
+        return (0.0, bare.size_y)
     laps = tuple(i * CHIMNEY_LAP for i in range(3))
     return laps + (laps[-1] + bare.size_y,)
 
@@ -4458,12 +4473,17 @@ def place_roof_piece(piece: Asset, tx: int, tz: int, course_y: float,
     return place_tile(piece, tx, tz, seat, rot)
 
 
-#: How far a roof-and-chimney COMBINATION sinks below the roof course it
-#: replaces. Picked off a board (`PROBE chimney seated by base`, back row
-#: middle): flush reads as a stack perched on the ridge, half a tile in reads
-#: as buried, and a quarter is the one that looks like a flue coming through
-#: thatch.
-CHIMNEY_SINK = 0.25
+def is_chimney(asset) -> bool:
+    """True for any chimney piece, combination or bare.
+
+    **The kit's own word, for the reason `is_roof_chimney` gives at length**:
+    a collider cannot tell a flue from a fencepost, and every chimney in every
+    installed pack says so in its name while nothing else does. One definition,
+    because `verify` needs the same test -- to skip the flue's deliberate
+    overlaps in `tile_interpenetration`, and to count stacks in
+    `feature_report` -- and two spellings of it would drift.
+    """
+    return "chimney" in (asset.name or "").lower()
 
 
 def is_roof_chimney(asset) -> bool:
@@ -4490,16 +4510,6 @@ def is_roof_chimney(asset) -> bool:
     return "chimney" in n and "roof" in n
 
 
-def _bare_stack_courses(bare) -> tuple[float, ...]:
-    """Y offsets for a free-standing stack, lapped if one course is a stub.
-
-    `Thatched Chimney` is half a tile -- under three feet of flue, which the
-    palette already records as reading like a stub. Two of them lapped a
-    quarter make 0.75. A piece that is a tile or more stands on its own.
-    """
-    return (0.0,) if bare.size_y >= 1.0 else (0.0, CHIMNEY_LAP)
-
-
 def chimney_pieces(chimney, stack):
     """``(combination, bare)`` from whatever the two roles resolved to."""
     got = [a for a in (chimney, stack) if a is not None]
@@ -4507,7 +4517,71 @@ def chimney_pieces(chimney, stack):
             next((a for a in got if not is_roof_chimney(a)), None))
 
 
-#: How far a free-standing stack's base sits BELOW the ridge top.
+def flue_piece(chimney, stack):
+    """The free-standing stack, whichever of the two roles it arrived in.
+
+    **The combination piece is no longer placed anywhere**, so this is the only
+    half of `chimney_pieces` a builder wants. The classification still has to
+    happen -- the two roles mean opposite things depending on the material, as
+    `is_roof_chimney` records -- but only to find the bare piece and discard
+    the other. Every material the generator builds has one:
+
+        thatch, slate   `Thatched Chimney`   1x0.5x1
+        tile            `Chimney 01`         1x1x1
+
+    so retiring the combination costs no town its chimneys.
+    """
+    return chimney_pieces(chimney, stack)[1]
+
+
+def flue_siblings(catalog, bare) -> list:
+    """Every interchangeable stack in ``bare``'s own kit, by name.
+
+    **`walls.stem_of` is the test, and it is a narrower thing than "measures
+    the same".** Two pieces can share a folder, a collider and a group tag and
+    still be different materials -- Shogun Palace files plaster, paper, rock
+    and dug earth in one folder, which is the case that rule was written for.
+    A real sibling differs only by a trailing index, and `Chimney 01` and
+    `Chimney 02` reduce to the same stem where `Thatched Chimney` and
+    `Thatched Roof Chimney` do not.
+
+    The collider is checked as well as the stem, because a kit is free to
+    index two pieces of different heights and a taller flue course would
+    change the shape `flue_courses` builds.
+    """
+    if bare is None:
+        return []
+    stem = W.stem_of(bare.name or "")
+    box = (bare.size_x, bare.size_y, bare.size_z)
+    got = [a for a in catalog.assets
+           if a.folder == bare.folder
+           and W.stem_of(a.name or "") == stem
+           and (a.size_x, a.size_y, a.size_z) == box]
+    return sorted(got, key=lambda a: (a.name or "").lower())
+
+
+def deal_flue(catalog, bare, bid: str):
+    """One of the kit's interchangeable stacks, dealt per BUILDING.
+
+    Per building rather than per stack, which is the opposite of what
+    `WallFamily.deal` does with panels and is deliberate: a house's chimneys
+    are one piece of masonry built by one mason, so two flues on one roof
+    should match, while two neighbours have no reason to. `chimney-per-wing`
+    is what makes that distinction visible.
+
+    Stable under `zlib.crc32` for the same reason every other deal here is --
+    a rebuild has to produce the same bytes, and `boards.digest_of` depends on
+    it. Where a kit ships one stack this returns it and nothing changes, which
+    is Rural's case and therefore most of a town.
+    """
+    sibs = flue_siblings(catalog, bare)
+    if len(sibs) < 2:
+        return bare
+    return sibs[zlib.crc32(f"flue:{bid}".encode()) % len(sibs)]
+
+
+#: How far a free-standing stack's base sits BELOW the ridge top, where the
+#: cell it comes through is CAPPED rather than sloped.
 #:
 #: **A chimney emerges from a roof; it does not stand on one.** Seated with its
 #: base level with the ridge the whole 1.5-tall stack is proud -- 7.5 ft of
@@ -4516,7 +4590,161 @@ def chimney_pieces(chimney, stack):
 #: ridge and 24 at -1.00, because the gabled path and the hip path carry the
 #: same three branches independently and had drifted apart. The number matters
 #: less than the fact that there is now one of it.
+#:
+#: A cap is a lid: `place_roof_piece` seats it by its TOP at ``course_y``, so
+#: subtracting half a tile puts the flue's foot at the cap's own base and the
+#: shaft comes up through it. A SLOPE is a course and seats by its base, which
+#: is `CHIMNEY_BASE`'s case and the one the hand-build measures.
 CHIMNEY_SEAT = 0.5
+
+
+#: The smallest wing that carries a chimney of its own, in cells.
+#:
+#: **Measured against all three towns.** `_lay_roofs` used to place one stack
+#: per roof BLOCK, on its longest wing, so an L-plan house had a stack on its
+#: main range and a cold blank ell: 378 of East Tradebourne's 1,462 wings
+#: (26%), 61 of Graybank's 215 (28%) and 25 of Pelvesthollow's 61 (41%) carried
+#: no flue. Six cells is a room big enough to want a hearth; below it the wing
+#: is a porch, a stair turret or a lean-to, and a chimney on one reads as
+#: clutter.
+#:
+#: A block's LONGEST wing carries one whatever its size, so a cottage smaller
+#: than this keeps the chimney it already had. The rule only ever adds.
+CHIMNEY_MIN_WING = 6
+
+#: How long a crown has to run before it carries a second stack.
+#:
+#: A single flue at the midpoint of a long ridge reads as a hall rather than a
+#: house -- the ridge runs away from it in both directions with nothing on it.
+#: Seven cells is 35 ft, about where a real range would be two hearths and two
+#: stacks rather than one.
+CHIMNEY_SECOND_CROWN = 7
+
+
+#: Where a quarter puts its stacks, as ``(form, weight)``.
+#:
+#: **Dealt by QUARTER, not by building**, exactly as `GABLE_ENDS` is and for
+#: the same reason: a district that puts its chimneys in one place reads as a
+#: district from across the board, where a form dealt per building reads as
+#: noise. The material is already dealt per building by `ROOF_MIX` and the
+#: stack piece by `deal_flue`; this is the third axis and it stays separate.
+#:
+#: The three forms are the vernacular ones. The END stack rises in the gable
+#: wall and is the commonest there is, which is why residential and the trades
+#: lean on it. The LATERAL stack breaks the slope part-way along a flank --
+#: a workshop's forge flue, which is why craft leans on it. The RIDGE stack is
+#: what every chimney in every town used to be.
+#:
+#: **The party stack is a fourth form and it is a no-op here**, checked before
+#: it was designed for: no roof block spans more than one building id on any of
+#: the three towns, because both importers give every building a detached
+#: footprint. Building it would be a feature that is correct and absent.
+CHIMNEY_FORMS: dict[str, tuple[tuple[str, float], ...]] = {
+    "civic":       (("ridge", 0.70), ("end", 0.30)),
+    "market":      (("end", 0.45), ("ridge", 0.35), ("lateral", 0.20)),
+    "craft":       (("lateral", 0.40), ("end", 0.35), ("ridge", 0.25)),
+    "docks":       (("end", 0.50), ("ridge", 0.30), ("lateral", 0.20)),
+    "residential": (("end", 0.55), ("ridge", 0.30), ("lateral", 0.15)),
+    "outskirts":   (("ridge", 1.00),),
+}
+
+#: What a quarter with no entry gets -- and, because `quarters.quarter_map`
+#: answers None on any town whose kinds do not cluster, what most towns get
+#: whole. That is the honest fallback the gable deal already makes: a
+#: settlement with no quarters has nothing to key on, and hipping every ridge
+#: or centring every stack is the right answer there rather than a degradation.
+DEFAULT_CHIMNEY_FORM = "ridge"
+
+
+def chimney_form_for(quarter: str, seed: int = 0) -> str:
+    """Where this quarter puts its stacks, dealt stably from ``seed``.
+
+    Same crc32 deal as :func:`gable_end_for` and :func:`roof_suffix_for`, and
+    stable per ``(quarter, seed)`` for the reason they are: a town has to
+    rebuild to the same bytes, which `boards.digest_of` depends on.
+    """
+    mix = CHIMNEY_FORMS.get(quarter)
+    if not mix:
+        return DEFAULT_CHIMNEY_FORM
+    roll = (zlib.crc32(f"stack:{quarter}:{seed}".encode()) % 10_000) / 10_000.0
+    for form, weight in mix:
+        if roll < weight:
+            return form
+        roll -= weight
+    return mix[-1][0]
+
+
+def wing_carries_a_stack(wing: set, main_wing: set) -> bool:
+    """Whether this wing gets a chimney of its own. See `CHIMNEY_MIN_WING`.
+
+    The block's longest wing always does, whatever its size, so a cottage
+    below the minimum keeps the chimney it already had -- the rule only ever
+    adds. Everything else earns one by being big enough to hold a hearth.
+    """
+    return wing is main_wing or len(wing) >= CHIMNEY_MIN_WING
+
+
+def chimney_cells(crown: list, flank: list,
+                  form: str = DEFAULT_CHIMNEY_FORM) -> list:
+    """Which cells of a wing carry a flue.
+
+    ``crown`` is the top course, ``flank`` the one below it -- both already
+    filtered by the caller to cells that actually get a roof piece, since a
+    flue through a cell with no roof under it is a chimney standing in a hole.
+
+    **All three forms are a choice of CELL and nothing else.** That is what
+    retiring the roof-and-chimney combination bought: a free-standing flue
+    seats itself off whatever course it comes through (`lay_flue`), so an end
+    stack and a lateral one need no new piece, no new rotation and no new
+    placement path. Before, the stack was cast onto a slope and could only go
+    where that slope's own rotation happened to fit.
+
+    A long crown carries two, per `CHIMNEY_SECOND_CROWN`. ``end`` puts them at
+    the ends of the ridge run -- on a gabled wing that IS the gable wall, and
+    on a hipped one it is as close to it as the roof gets, since a hip's crown
+    stops short of the wall by the depth of its own rings.
+    """
+    if not crown:
+        return []
+    twin = len(crown) > CHIMNEY_SECOND_CROWN
+    if form == "lateral" and flank:
+        if twin and len(flank) > 1:
+            return [flank[len(flank) // 4], flank[3 * len(flank) // 4]]
+        return [flank[len(flank) // 2]]
+    if form == "end":
+        return [crown[0], crown[-1]] if twin else [crown[0]]
+    if twin:
+        return [crown[len(crown) // 4], crown[3 * len(crown) // 4]]
+    return [crown[len(crown) // 2]]
+
+
+def lay_flue(b, bare, tx: int, tz: int, course_y: float, *,
+             on_slope: bool) -> None:
+    """Stand the hand-built flue at one cell, through the roof already there.
+
+    **This is the only chimney geometry the generator builds.** The user handed
+    back `tests/fixtures/handbuilt_chimney.slab` and called it "acceptable
+    geometry for a chimney that can be creatively placed", and the two words
+    that matter are *creatively placed*: a flue that comes through a roof it
+    does not modify can go on a ridge, a flank or a gable end, where the
+    roof-and-chimney COMBINATION piece could only go where its own cast-on
+    slope happened to fit and had to be turned to match it.
+
+    So nothing here touches the roof. The caller lays the cell's ordinary
+    slope or cap exactly as it would if there were no chimney, and this stands
+    a shaft through it. Retiring the combination is what makes
+    `chimney-forms` and `chimney-per-wing` placement questions rather than
+    asset questions.
+
+    ``on_slope`` is whether the piece at this cell is a course or a lid -- the
+    same ``size_y >= rise`` test `place_roof_piece` seats by, and the reason
+    the foot has two cases rather than one.
+    """
+    if bare is None:
+        return
+    foot = course_y + CHIMNEY_BASE if on_slope else course_y - CHIMNEY_SEAT
+    for dy in flue_courses(bare):
+        b.add(place_tile(bare, tx, tz, foot + dy))
 
 
 def _ridge_rotations(wing, rings, top_ring, chimney_at):
@@ -4754,10 +4982,23 @@ def _wing_gable(wing: set[tuple[int, int]],
     return gable_end_for(quarter, seed)
 
 
+def _wing_chimney_form(wing: set[tuple[int, int]],
+                       quarter_at: dict[tuple[int, int], str] | None,
+                       seed: int) -> str:
+    """Where this wing puts its stacks: ``ridge``, ``end`` or ``lateral``."""
+    if not quarter_at:
+        return DEFAULT_CHIMNEY_FORM
+    quarter = quarter_at.get(min(wing))
+    if quarter is None:
+        return DEFAULT_CHIMNEY_FORM
+    return chimney_form_for(quarter, seed)
+
+
 def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                      roof_y: float, rise: float, side, cap,
                      edge_off: int, tread, chimney=None, infill=None,
-                     end=None, stack=None) -> None:
+                     end=None, flue=None,
+                     form: str = DEFAULT_CHIMNEY_FORM) -> None:
     """One gabled wing: ridge along the long axis, ends per ``treatment``.
 
     ``crow`` carries the end wall one course proud of the roof and **owns the
@@ -4841,48 +5082,30 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                                    roof_y + course * rise,
                                    (ROOF_EDGE_ROT[fall] + edge_off) % 24,
                                    rise=rise))
-    # **One chimney, on the ridge.** The hip path places one per building and
-    # the first cut of this one placed none, which took East Tradebourne from
-    # 1,578 chimneys to 40 -- a town losing 97%% of its chimneys is the most
-    # visible thing on a roofscape, and no check would have caught it because
-    # every chimney that remained was correct.
-    chimney_at = None
+    # **A chimney per wing, where the quarter puts it.** The hip path places
+    # one per wing too, and the first cut of this one placed none, which took
+    # East Tradebourne from 1,578 chimneys to 40 -- a town losing 97%% of its
+    # chimneys is the most visible thing on a roofscape, and no check would
+    # have caught it because every chimney that remained was correct.
     if chimney is not None:
+        def _course(n):
+            """Cells at course ``n`` that actually get a roof piece."""
+            return [c for c in sorted(courses) if courses[c][0] == n
+                    and not (crow and on_end(c)) and c not in covered]
+
         top = max(c for c, _ in courses.values())
-        crown = [c for c in sorted(courses) if courses[c][0] == top
-                 and not (crow and on_end(c)) and c not in covered]
-        if crown:
-            chimney_at = crown[len(crown) // 2]
-            y = roof_y + top * rise
-            fall = courses[chimney_at][1]
-            # **The same two cases as the hip path.** A ridge cell caps and
-            # takes the free-standing stack; a sloped cell already has its
-            # slope from the anchors loop above, so the combination piece goes
-            # over it at that slope's own rotation rather than at rot 0. See
-            # `roof_stack`.
-            combo, bare = chimney_pieces(chimney, stack)
-            rot = (ROOF_EDGE_ROT[fall] + edge_off) % 24 if fall is not None else 0
-            if combo is not None:
-                # **It REPLACES the course, and it seats by its BASE.** A
-                # combination is a roof piece with a stack on it, so laying a
-                # cap under it puts two roof courses at the ridge, and seating
-                # it by its top buries the stack in the thatch. Both were done
-                # here. See `is_roof_chimney` and `CHIMNEY_SINK`.
-                b.add(place_tile(combo, chimney_at[0], chimney_at[1],
-                                 y - CHIMNEY_SINK, rot))
-            elif bare is not None:
-                if cap is not None:
-                    b.add(place_tile(cap, chimney_at[0], chimney_at[1],
-                                     y - cap.size_y))
-                for dy in _bare_stack_courses(bare):
-                    b.add(place_tile(bare, chimney_at[0], chimney_at[1],
-                                     y - CHIMNEY_SEAT - dy))
+        for chimney_at in chimney_cells(_course(top), _course(top - 1), form):
+            # **The cell keeps its ordinary roof.** A sloped cell already has
+            # its slope from the anchors loop above and a ridge cell is capped
+            # by the cap loop below -- neither of which knows or cares that a
+            # flue comes through here. See `lay_flue`.
+            course, fall = courses[chimney_at]
+            lay_flue(b, flue, chimney_at[0], chimney_at[1],
+                     roof_y + course * rise, on_slope=fall is not None)
 
     if cap is not None:
         for cell, (course, fall) in sorted(courses.items()):
             if fall is not None or (crow and on_end(cell)) or cell in covered:
-                continue
-            if cell == chimney_at:
                 continue
             b.add(place_tile(cap, cell[0], cell[1],
                              roof_y + course * rise - cap.size_y))
@@ -5087,13 +5310,25 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         forced_suffix = (roof_override or {}).get(b.group)
         stack = roof_stack(b.palette, forced_suffix if forced_suffix is not None
                            else roof_suffix_for(tier_of(b.group), b.group))
+        # The one stack this block's chimneys are built from: the free-standing
+        # piece of whichever role carried it, then dealt among its own kit's
+        # interchangeable siblings. See `flue_piece` and `deal_flue`.
+        flue = deal_flue(b.palette.catalog, flue_piece(chimney, stack),
+                         b.group)
 
         # One hip per rectangular wing, not one hip forced over the whole
         # plan. A notched footprint gets a ridge per wing and a valley where
         # they meet, which is what the building would really have and what
         # this kit of 1x1 slopes and corners can actually express.
         wings = roof_wings(cells)
-        chimney_wing = max(wings, key=len) if wings else set()
+        # **A stack per wing, not one per roof block.** The longest wing always
+        # carries one so nothing loses the chimney it had; every other wing
+        # earns one by being big enough to hold a hearth. See
+        # `CHIMNEY_MIN_WING`.
+        main_wing = max(wings, key=len) if wings else set()
+
+        def _carries(wing) -> bool:
+            return wing_carries_a_stack(wing, main_wing)
 
         for wing in wings:
             # **How this wing ends its ridge, dealt by QUARTER.** `quarter_at`
@@ -5126,8 +5361,9 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             if treatment != "hip":
                 _lay_gabled_wing(b, wing, treatment, roof_y, rise, side, cap,
                                  edge_off, tread,
-                                 chimney if wing is chimney_wing else None,
-                                 infill, end, stack)
+                                 chimney if _carries(wing) else None,
+                                 infill, end, flue,
+                                 _wing_chimney_form(wing, quarter_at, seed))
                 continue
 
             # **The whole wing at the double scale, or none of it.** Mixing
@@ -5144,13 +5380,13 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                 # A wing carrying the flue needs the free-standing stack: the
                 # combination piece is 1x1 and would leave three quarters of a
                 # super-cell open where it replaced the course.
-                _, w_bare = chimney_pieces(chimney, stack)
+                w_bare = flue
                 # A coarse wing that carries the flue must have somewhere to
                 # put it: a plain slope, and the free-standing stack, since a
                 # 1x1 combination cannot replace a 2x2 course. Without either,
                 # the whole wing stays at the single scale rather than losing
                 # its chimney.
-                carries = wing is chimney_wing and chimney is not None
+                carries = _carries(wing) and chimney is not None
                 blocked = ((w_cap is None and _hip_wants_a_cap(w_grid))
                            or (carries and w_bare is None)
                            or (carries and not _sloped_cells(
@@ -5177,17 +5413,21 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             # `test_every_chimney_sits_on_its_ridge_the_same_way` forbids. The
             # user's hand-built chimney is on a slope, and so is every real
             # one: a flue rises inside the building and breaks the plane.
-            chimney_at = None
-            if chimney is not None and wing is chimney_wing:
+            stacks: list = []
+            if chimney is not None and _carries(wing):
                 crown = [c for c in sorted(grid) if rings[c] == top_ring]
+                flank = [c for c in sorted(grid) if rings[c] == top_ring - 1]
                 if scale > 1:
                     # Highest plain slope, and `coarse_blocks` was refused
                     # above if there is none -- so this cannot fall through to
-                    # the cap. See `_sloped_cells`.
+                    # the cap. See `_sloped_cells`. The flank has to be a
+                    # slope too, for the same reason.
                     slopes = _sloped_cells(grid, rings)
-                    crown = [c for c in slopes if rings[c] == rings[slopes[0]]]
-                if crown:
-                    chimney_at = crown[len(crown) // 2]
+                    peak = rings[slopes[0]]
+                    crown = [c for c in slopes if rings[c] == peak]
+                    flank = [c for c in slopes if rings[c] < peak]
+                stacks = chimney_cells(
+                    crown, flank, _wing_chimney_form(wing, quarter_at, seed))
 
             # **The last course is a ridge cap, not another ring.** Stepping
             # the top ring up a full rise and roofing it in slopes leaves
@@ -5195,7 +5435,11 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             # showed at the top of every slate roof. A ridge is capped, and
             # `place_roof_piece` seats it: by its top at the single scale, and
             # `WIDE_CAP_LAP` proud at the double one, both measured.
-            ridge_rot = _ridge_rotations(grid, rings, top_ring, chimney_at)
+            # The ridge caps lap towards the stack, so they mirror about the
+            # first of them; with two, the far half laps towards the near one,
+            # which is what a real ridge does between two chimneys.
+            ridge_rot = _ridge_rotations(grid, rings, top_ring,
+                                         stacks[0] if stacks else None)
 
             for (gx, gz) in sorted(grid):
                 r = rings[(gx, gz)]
@@ -5205,69 +5449,32 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                 # back down towards this wing's own eaves.
                 fall = tuple(s for s, dx, dz in SIDE_OFFSETS
                              if rings.get((gx + dx, gz + dz), -1) < r)
-                if (gx, gz) == chimney_at and chimney is not None:
-                    # **Which chimney piece, and which way round.** The tile
-                    # kit's `roof_chimney` is a COMBINATION -- a slope with a
-                    # stack on it -- so on a sloped cell it doubles as the roof
-                    # and must take that cell's own rotation, while on a capped
-                    # ridge it stands a bare slope on end beside the flue. The
-                    # free-standing `stack` is what a cap wants.
-                    sloped = (roof_top_is_supported(rings, gx, gz, fall)
-                              or r < top_ring)
-                    combo, bare = chimney_pieces(chimney, stack)
-                    rot = ((ROOF_EDGE_ROT[fall[0]] + g_eoff) % 24
-                           if sloped and len(fall) == 1 else 0)
-                    if scale > 1:
-                        # **A double-scale roof always takes the bare stack**,
-                        # driven through a slope that is still laid under it --
-                        # the combination is a 1x1 piece and cannot replace a
-                        # 2x2 course. This is the user's hand-built chimney:
-                        # four courses starting `WIDE_CHIMNEY_BASE` above the
-                        # slope's own base, in the block's low corner.
-                        piece, prot = _roof_piece(
-                            fall, g_side, g_corner, g_cap, g_inner,
-                            _is_reflex(rings, gx, gz, fall), g_eoff, g_coff)
-                        if piece is not None:
-                            b.add(place_roof_piece(piece, x, z, y, prot,
-                                                   rise=g_rise))
-                        # `WIDE_CHIMNEY_BASE` is measured against a 2.0 slope.
-                        # A cap is a lid a quarter tile proud of the course, so
-                        # a stack seated that way would stand on it; there the
-                        # 1x1 rule applies and the flue comes up through.
-                        on_slope = piece is not None and piece.size_y >= g_rise
-                        foot = (y + WIDE_CHIMNEY_BASE if on_slope
-                                else y - CHIMNEY_SEAT)
-                        for dy in _wide_stack_courses(bare):
-                            b.add(place_tile(bare, x, z, foot + dy))
-                    elif combo is not None:
-                        # Replaces the course, seats by its base. The slope
-                        # that used to be laid underneath is gone with it: a
-                        # combination IS the slope.
-                        b.add(place_tile(combo, x, z, y - CHIMNEY_SINK, rot))
-                    elif bare is not None:
-                        if g_cap is not None:
-                            b.add(place_roof_piece(g_cap, x, z, y,
-                                                   ridge_rot.get((gx, gz), 0),
-                                                   rise=g_rise))
-                        for dy in _bare_stack_courses(bare):
-                            b.add(place_tile(bare, x, z,
-                                             y - CHIMNEY_SEAT - dy))
-                    continue
                 # Cap the top ring only where a slope there would have nothing
                 # to lean on. See `roof_top_is_supported` -- capping the whole
                 # ring is what put a 4 x 2 flat deck on every 6 x 4 wing.
                 if (r == top_ring and g_cap is not None
                         and not roof_top_is_supported(rings, gx, gz, fall)):
+                    laid = g_cap
                     b.add(place_roof_piece(g_cap, x, z, y,
                                            ridge_rot.get((gx, gz), 0),
                                            rise=g_rise))
-                    continue
-                piece, rot = _roof_piece(fall, g_side, g_corner, g_cap,
-                                         g_inner,
-                                         _is_reflex(rings, gx, gz, fall),
-                                         g_eoff, g_coff)
-                if piece is not None:
-                    b.add(place_roof_piece(piece, x, z, y, rot, rise=g_rise))
+                else:
+                    laid, rot = _roof_piece(fall, g_side, g_corner, g_cap,
+                                            g_inner,
+                                            _is_reflex(rings, gx, gz, fall),
+                                            g_eoff, g_coff)
+                    if laid is not None:
+                        b.add(place_roof_piece(laid, x, z, y, rot,
+                                               rise=g_rise))
+                # **The flue comes through the roof, and the roof does not
+                # know.** This cell is laid exactly as it would be with no
+                # chimney on it -- no substituted combination piece, no
+                # skipped cap, no rotation borrowed from the slope. That is
+                # what "creatively placed" buys: see `lay_flue`.
+                if (gx, gz) in stacks:
+                    lay_flue(b, flue, x, z, y,
+                             on_slope=laid is not None
+                             and laid.size_y >= g_rise)
 
 
 #: Headroom to leave under a gate lintel, in tiles. Two tiles (10 ft) was the

@@ -17,7 +17,7 @@ This file is the internal engineering notes. User-facing docs:
   designed, not built),
 `docs/fencing.md` (field walls, and why they are not on the grid),
 `docs/roofscape.md` (roofing, chimney placement and rooftop terraces --
-  measured and designed, none of it built),
+  the roofing and the chimneys are built; the terraces are still design),
 `docs/camera-model.md` (the builder camera, measured, and the moves that
   drive it),
 `tasks.json` (what is designed, what is built, and `citysmith tasks --check`),
@@ -1255,8 +1255,10 @@ shape instead of reading it. The rules that fall out:
   correction the user made to one of these roofs and decoded: the caps sat at
   0.5 where the ring would have been 1.0. Ridge tiles lap from the ends
   towards the stack, so the caps mirror about the chimney
-  (`_ridge_rotations`), and the chimney is two courses lapped `CHIMNEY_LAP`
-  rather than one piece sitting on the ridge as a stub.
+  (`_ridge_rotations`). **The chimney is FOUR courses, not two** -- three
+  lapped by `CHIMNEY_LAP` and one flush on top for the mouth, measured off
+  `tests/fixtures/handbuilt_chimney.slab` rather than reasoned from "half a
+  tile is a stub". `build.lay_flue` is the one place that builds it.
 
 - **A gate passage has to be cut SQUARE, or it can never have a door.** The
   raster used to clear a *disc* of wall cells, which on a circuit that runs
@@ -1907,6 +1909,49 @@ it is tabletop dressing. Density runs 0.41-0.66 per cell against our 0.12.
 
 Worth knowing before spending a session on it: **an unfurnished interior with
 named rooms is one of the two forms people publish**, not a failure state.
+
+## A feature can be built, tested, written up and reach 2% (2026-08-30)
+
+The section below is about a feature absent from the *crop*. This is the
+harder version: a feature absent from the **output**, with the code right and
+the tests green.
+
+The four-course chimney flue was measured off a slab the user built by hand,
+implemented, tested, and written up in `docs/roofscape.md` §11 as done. Counted
+afterwards, through `_lay_roofs` itself:
+
+| town | stacks | built the measured way |
+|---|---|---|
+| Pelvesthollow | 36 | 6 |
+| Graybank | 154 | 20 |
+| East Tradebourne | **1,084** | **0** |
+
+**26 of 1,274 -- 2%.** It had been wired into the double-scale branch only,
+which fires on a wing that tiles exactly into 2x2 blocks. Every one of East
+Tradebourne's 1,084 chimneys was a single piece.
+
+Three things this teaches that the fence lesson does not:
+
+- **A count is not a shape.** "1,084 stacks" reads as a success. The report
+  line now says *"1,084 stacks -- 1,084 of 1 course"*, and that reads as the
+  bug it is. `verify.feature_report` carries the shape of what was laid, not
+  just that something was.
+- **Chimneys fail, they do not report "none here".** A map can decline to
+  offer a field boundary; nothing with a roof on it declines to have a hearth.
+  Which branch a feature gets in `feature_report` is a claim about the world
+  and worth thinking about once per feature.
+- **The duplicated branch is the thing to look for.** The gabled path, the hip
+  path and the wide path each carried their own copy of the seating logic --
+  `chimney-seating` had recorded "both paths still carry their own copy and
+  will drift again" and left it. They drifted. One `lay_flue` now, called from
+  all three.
+
+**And a metric it nearly drowned.** A flue is built out of overlap -- lapped
+into itself, sunk into its roof, both measured -- so it contributed 1,180 of
+Forest Church's 1,737 `tile_interpenetration` pairs, 68%, all of it correct.
+The check skips any pair a chimney is in and reads 557. A number inflated by
+deliberate overlap hides a real one; the same argument this file already makes
+about two corner panels meeting at right angles.
 
 ## A feature can be correct and absent, and nothing used to say so
 

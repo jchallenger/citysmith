@@ -7,6 +7,7 @@ today and its pieces are already resolved"; it was false, and nothing in the
 suite could have said so.
 """
 
+import collections
 import sys
 
 import pytest
@@ -18,8 +19,9 @@ from citysmith.palette import Palette
 from citysmith.build import (
     FRONTAGE_RANK, FRONTAGE_STOREYS, GABLE_ENDS, GABLE_MIN_RIDGE,
     END_PIECE_CELLS, _lay_gabled_wing, _tread_for, _wing_gable,
-    crowstep_tread, gable_end_for, gable_end_piece, gable_infill,
-    roof_set, roof_set_named, storeys_by_frontage,
+    crowstep_tread, flue_courses, flue_piece, gable_end_for, gable_end_piece,
+    gable_infill, roof_set, roof_set_named, roof_stack, storeys_by_frontage,
+    CHIMNEY_MIN_WING, wing_carries_a_stack,
     ROOF_EDGE_ROT, ROOF_ROT_OFFSET, roof_course_anchors, roof_course_cells,
     roof_courses, roof_offsets, rotated_footprint,
 )
@@ -347,15 +349,172 @@ def test_a_gabled_wing_still_gets_its_chimney(cat):
     The first cut placed no chimney on a gabled wing at all, which took East
     Tradebourne from 1,578 chimneys to 40. Nothing in `verify` would have
     caught it: every chimney that remained was correct.
+
+    It also states the twin rule through the shipped path: a ridge longer than
+    `CHIMNEY_SECOND_CROWN` carries two stacks and a shorter one carries a
+    single stack, which is `chimney-per-wing` rather than an accident of the
+    fixture's size.
     """
     palette = Palette.named(cat, "medieval", 33)
     side, corner, inner, cap, chimney = roof_set(palette, "common")
     assert chimney is not None, "no chimney in the common roof set"
+    flue = flue_piece(chimney, roof_stack(palette, "thatch"))
+    assert flue is not None, "no free-standing stack for thatch"
+    courses = len(flue_courses(flue))
+
+    for ridge, stacks in ((9, 2), (5, 1)):
+        got = _Collector()
+        _lay_gabled_wing(got, _rect(ridge, 5), "flush", 4.0, side.size_y,
+                         side, cap, 0, None, chimney, flue=flue)
+        laid = sum(1 for p in got.placements if p.asset_id == flue.id)
+        assert laid == courses * stacks, (
+            f"a {ridge}-cell ridge laid {laid} flue pieces, expected "
+            f"{stacks} stack(s) of {courses}")
+
+
+def test_every_wing_over_the_minimum_carries_a_stack():
+    """A stack per wing, not one per roof block.
+
+    `_lay_roofs` used to place one chimney per BLOCK, on its longest wing, so
+    an L-plan house had a stack on its main range and a cold blank ell: 378 of
+    East Tradebourne's 1,462 wings (26%), 61 of Graybank's 215 (28%) and 25 of
+    Pelvesthollow's 61 (41%) carried no flue, and no check named it.
+
+    Measured after: stacks 36 -> 82 on Pelvesthollow, 154 -> 262 on Graybank
+    and 1,084 -> 2,141 on East Tradebourne.
+    """
+    main = _rect(9, 5)
+    assert wing_carries_a_stack(main, main), "the main wing must keep its own"
+    big = _rect(CHIMNEY_MIN_WING, 1)
+    assert len(big) == CHIMNEY_MIN_WING
+    assert wing_carries_a_stack(big, main), "a wing at the minimum carries one"
+    small = _rect(CHIMNEY_MIN_WING - 1, 1)
+    assert not wing_carries_a_stack(small, main), (
+        "a lean-to under the minimum must not carry a stack")
+    # **The rule only ever adds.** A cottage whose whole roof is one wing
+    # smaller than the minimum keeps the chimney it already had.
+    assert wing_carries_a_stack(small, small)
+
+
+def test_the_flue_is_the_one_the_user_built(cat):
+    """`lay_flue` reproduces `tests/fixtures/handbuilt_chimney.slab` exactly.
+
+    The user laid this chimney in TaleSpire and handed the slab back twice,
+    the second time as "acceptable geometry for a chimney that can be
+    creatively placed". It is the only measurement there is of what a flue
+    should look like, so the shipped placement code is held against it rather
+    than against a number copied out of it into a constant -- which is the
+    same reason `_HAND_HIPS` exists.
+
+    Decoded, against the base of the 2x2 slope it stands in: four
+    `Thatched Chimney` courses at 0.25, 0.50, 0.75 and 1.25. The bottom three
+    lap by `CHIMNEY_LAP`, each buried to its middle in the one below, and the
+    fourth sits flush on the third to form the mouth.
+    """
+    from citysmith import slab as S
+    from citysmith.build import lay_flue
+
+    byid = {}
+    for a in cat.assets:
+        byid.setdefault(str(a.id).lower(), a)
+    sl = S.decode(open("tests/fixtures/handbuilt_chimney.slab").read().strip())
+
+    roof, hand = [], []
+    for pl in sl.placements:
+        a = byid.get(str(pl.asset_id).lower())
+        assert a is not None, pl.asset_id
+        (hand if "chimney" in a.name.lower() else roof).append((pl, a))
+    assert len(hand) == 4, f"the fixture is not four courses: {len(hand)}"
+    assert len({a.name for _, a in hand}) == 1
+    bare = hand[0][1]
+
+    # The slope the flue comes through is still there, unmodified -- which is
+    # the whole of why the combination piece is retired.
+    assert roof, "the fixture has no roof under its chimney"
+    assert all(a.size_y == 2.0 for _, a in roof), "not the double scale"
+    base = min(pl.y for pl, _ in roof)
+
     got = _Collector()
-    _lay_gabled_wing(got, _rect(9, 5), "flush", 4.0, side.size_y,
-                     side, cap, 0, None, chimney)
-    laid = sum(1 for p in got.placements if p.asset_id == chimney.id)
-    assert laid == 2, f"expected two lapped courses, got {laid}"
+    lay_flue(got, bare, 0, 0, base, on_slope=True)
+    assert sorted(round(p.y, 4) for p in got.placements) == sorted(
+        round(pl.y, 4) for pl, _ in hand), (
+        f"laid {sorted(round(p.y, 4) for p in got.placements)} against the "
+        f"hand-build's {sorted(round(pl.y, 4) for pl, _ in hand)}")
+
+
+def test_no_roof_and_chimney_combination_is_placed(cat):
+    """The combination piece is retired; a flue comes through a real roof.
+
+    `Village Roof Side/Chimney` is a slope with a stack cast onto it, so it
+    could only be laid where its own slope fitted and had to be turned to
+    match. Every chimney in every town was one, at rot 0 -- 1,084 of them on
+    East Tradebourne, and the user's word for what that looked like was that
+    one of them "doesnt need the (chimney on slant roof) tile, just the normal
+    chimney".
+
+    What replaces it is the hand-built flue, which modifies nothing: the cell
+    gets the slope or cap it would have had anyway, and the stack comes up
+    through it. That is what makes an end stack and a lateral stack a choice
+    of cell rather than a hunt for an asset -- see `CHIMNEY_FORMS`.
+    """
+    from citysmith.build import build_from_tilemap, is_roof_chimney
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+
+    palette = Palette.named(cat, "medieval", 33)
+    byid = {a.id: a for a in palette.catalog.assets}
+    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
+    b = build_from_tilemap(tm, palette, storeys=3)
+
+    combos = collections.Counter(
+        byid[pl.asset_id].name for pl in b.placements
+        if is_roof_chimney(byid[pl.asset_id]))
+    stacks = sum(1 for pl in b.placements
+                 if "chimney" in byid[pl.asset_id].name.lower())
+    assert stacks, "no chimney on the board -- the test proves nothing"
+    assert not combos, f"combination pieces still placed: {dict(combos)}"
+
+
+def test_a_town_uses_both_of_the_tavern_stacks(cat):
+    """`Chimney 02` had never been placed on any board.
+
+    Two pieces in one kit, the same 1x1x1 box, both plain stone stacks and
+    nothing to choose between them -- which is what `walls.stem_of` is for.
+    Dealt per BUILDING rather than per stack, so a house's own chimneys match
+    and its neighbour's need not.
+    """
+    from citysmith.build import build_from_tilemap
+    from citysmith.layout import Layout
+    from citysmith.raster import rasterize
+
+    palette = Palette.named(cat, "medieval", 33)
+    byid = {a.id: a for a in palette.catalog.assets}
+    if "Chimney 02" not in {a.name for a in palette.catalog.assets}:
+        pytest.skip("Tavern kit not installed")
+    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
+    b = build_from_tilemap(tm, palette, storeys=3)
+
+    seen = collections.Counter(
+        byid[pl.asset_id].name for pl in b.placements
+        if byid[pl.asset_id].name in ("Chimney 01", "Chimney 02"))
+    assert len(seen) == 2, f"only one of the two tile stacks is used: {dict(seen)}"
+
+
+def test_a_settlement_with_no_quarters_puts_every_stack_on_the_ridge(cat):
+    """The honest fallback, stated rather than left to be discovered.
+
+    `quarters.quarter_map` answers None on any town whose kinds do not
+    cluster, which is most of them -- Pelvesthollow and Graybank both -- and
+    then there is nothing to key a form on. Measured: dealing the forms moves
+    93% of East Tradebourne's stacks to a new cell and moves none at all on
+    the other two.
+    """
+    from citysmith.build import DEFAULT_CHIMNEY_FORM, _wing_chimney_form
+
+    assert _wing_chimney_form(_rect(6, 4), None, 33) == DEFAULT_CHIMNEY_FORM
+    assert _wing_chimney_form(_rect(6, 4), {}, 33) == DEFAULT_CHIMNEY_FORM
+    # A cell the map has no quarter for falls back the same way.
+    assert _wing_chimney_form(_rect(6, 4), {(99, 99): "craft"}, 33)         == DEFAULT_CHIMNEY_FORM
 
 
 def test_a_flush_gable_lays_nothing_outside_its_own_wing(cat):

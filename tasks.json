@@ -1458,7 +1458,7 @@
       "state": "done",
       "doc": "docs/roofscape.md 3.4",
       "evidence": "test:test_a_ridge_stack_is_not_two_lapped_stubs",
-      "note": "BUILT, two of three. (1) DONE -- `roof_stack` resolves `Thatched Roof Chimney` (1x1.5x1) for thatch and slate instead of lapping two `Thatched Chimney` (1x0.5x1) for 0.75 tiles of stack. The lap existed because 'a single 0.5 piece reads as a stub'; the kit's own answer is the taller piece, and it was sitting unused in the same kit. (3) DONE -- the stack takes a rotation now: the combination piece takes its slope's, and a free-standing stack on a cap needs none. (2) NOT DONE -- `Chimney 01` is pinned and `Chimney 02` is still unused, so the sibling deal that would vary the stack per building is open as `chimney-sibling-deal`.",
+      "note": "BUILT, two of three. (1) DONE -- `roof_stack` resolves `Thatched Roof Chimney` (1x1.5x1) for thatch and slate instead of lapping two `Thatched Chimney` (1x0.5x1) for 0.75 tiles of stack. The lap existed because 'a single 0.5 piece reads as a stub'; the kit's own answer is the taller piece, and it was sitting unused in the same kit. (3) DONE -- the stack takes a rotation now: the combination piece takes its slope's, and a free-standing stack on a cap needs none. (2) NOT DONE -- `Chimney 01` is pinned and `Chimney 02` is still unused, so the sibling deal that would vary the stack per building is open as `chimney-sibling-deal`. || CLOSED OUT 2026-08-30 by `chimney-sibling-deal`: (2) is done, so all three clauses of this task now hold. `Chimney 02` is placed on every town.",
       "tags": [
         "roofs",
         "chimneys"
@@ -1467,10 +1467,10 @@
     {
       "id": "chimney-per-wing",
       "what": "A stack per wing, not one per roof block",
-      "state": "open",
+      "state": "done",
       "doc": "docs/roofscape.md 3.1",
-      "evidence": "test:test_every_wing_over_the_minimum_carries_a_stack",
-      "note": "`_lay_roofs` places one chimney per roof BLOCK, on `max(wings, key=len)`, so a secondary wing gets nothing: 378 of East Tradebourne's 1,462 wings (26%), 61 of Graybank's 215 (28%), 25 of Pelvesthollow's 61 (41%). An L-plan house has a stack on its main range and a cold blank ell. Same shape as the regression the gable-ends A/B caught -- the first cut of `_lay_gabled_wing` placed no chimney and took the town 1,578 -> 40 -- except this one has been shipping all along and no check names it. Rule sized against all three towns: one stack per wing over 6 cells, two where the crown runs over 7 -> 84 / 290 / 1,949 against today's 36 / 154 / 1,084, about x1.8. At two tiles a stack that is +1,730 placements on East Tradebourne against 411,106 -- 0.4%, invisible to the byte budget. Highest factor on the village, which is right: 34 single-storey cottages, every one with a hearth.",
+      "evidence": "citysmith.build.CHIMNEY_MIN_WING",
+      "note": "BUILT. `wing_carries_a_stack` -- the block's longest wing always carries one so nothing loses the chimney it had, and every other wing earns one at `CHIMNEY_MIN_WING` = 6 cells. A long crown carries two, at the quarter points, per `CHIMNEY_SECOND_CROWN` = 7. Measured: stacks 36 -> 82 (Pelvesthollow), 154 -> 262 (Graybank), 1,084 -> 2,141 (East Tradebourne), against this entry's own estimate of 84 / 290 / 1,949. Roof placements 42,274 -> 50,077 on East Tradebourne, about 1.9% of the town's 411k assets. || The rule is a named function rather than a closure so a test can state it without reimplementing the block decomposition around it -- `test_every_wing_over_the_minimum_carries_a_stack`, and the reason is the same one `probe-seats-from-shipped` is open for.",
       "tags": [
         "roofs",
         "chimneys"
@@ -1479,10 +1479,10 @@
     {
       "id": "chimney-forms",
       "what": "Deal end, lateral and ridge stacks by quarter",
-      "state": "open",
+      "state": "done",
       "doc": "docs/roofscape.md 3.2",
       "evidence": "citysmith.build.CHIMNEY_FORMS",
-      "note": "`chimney_at = crown[len(crown)//2]` puts every stack in the town at its ridge midpoint. The vernacular forms are the end stack (on the gable end wall, the commonest there is), the lateral stack (part-way along a flank, projecting) and the ridge stack (what we build, always). A `CHIMNEY_FORMS` table beside `GABLE_ENDS`, dealt through the same crc32 on (quarter, seed), so a quarter reads as one place and a rebuild is byte-identical. THE FOURTH FORM IS A NO-OP AND WAS CHECKED BEFORE BEING DESIGNED FOR: a party stack needs a shared wall, and ZERO roof blocks span more than one building id on any of the three towns -- both importers give every building a detached footprint. Building it would be a feature that is correct and absent, which is what `verify.feature_report` exists to catch. The lateral stack is also what terrace-class-a needs when a terrace takes the cell the ridge stack was on, so build these two together.",
+      "note": "BUILT. `CHIMNEY_FORMS` deals end / lateral / ridge by QUARTER through the same crc32 on (quarter, seed) that `GABLE_ENDS` uses, for the same reason: a district that puts its chimneys in one place reads as a district, where a form dealt per building reads as noise. The material is already per building (`ROOF_MIX`) and the piece is now too (`deal_flue`); this is the third axis and the three stay separate. || IT IS A CHOICE OF CELL AND NOTHING ELSE, which is what retiring the combination bought: a free-standing flue seats itself off whatever course it comes through, so an end stack and a lateral stack need no new piece, no new rotation and no new path. This entry predicted that and it held. || Measured A/B against every stack on the ridge: 93% of East Tradebourne's 2,141 stacks move to a new cell, and NOTHING moves on Pelvesthollow or Graybank -- neither has quarters, so `DEFAULT_CHIMNEY_FORM` is the honest fallback rather than a degradation. Dealt: residential and market -> end, craft and docks -> lateral, civic and outskirts -> ridge. || The party stack stays a no-op for the reason this entry already gave: no roof block spans more than one building id on any town here.",
       "tags": [
         "roofs",
         "chimneys"
@@ -1568,7 +1568,7 @@
       "state": "open",
       "doc": "docs/roofscape.md 5",
       "evidence": "test:test_the_feature_report_names_terraces_and_stack_forms",
-      "note": "Every feature in docs/roofscape.md is more susceptible to the fences failure than fences were, because all three are SCARCE BY DESIGN: a terrace fires on 1 building in Pelvesthollow, an end stack only where a wing gables, a shingle roof only on the civic tier -- 5 buildings on Forest Church. Fences were built, shipped, reviewed over two sessions and written up while absent from every board looked at, because both crops chosen were dense town centre. A rooftop terrace on an outlying merchant's yard is in exactly the same position. So each needs its offered/built pair beside `_gables_built` and `_fences_built`, and the branch that matters is the third one -- 'none here; the layout has N, all outside this crop' -- which is the sentence that was missing last time.",
+      "note": "Every feature in docs/roofscape.md is more susceptible to the fences failure than fences were, because all three are SCARCE BY DESIGN: a terrace fires on 1 building in Pelvesthollow, an end stack only where a wing gables, a shingle roof only on the civic tier -- 5 buildings on Forest Church. Fences were built, shipped, reviewed over two sessions and written up while absent from every board looked at, because both crops chosen were dense town centre. A rooftop terrace on an outlying merchant's yard is in exactly the same position. So each needs its offered/built pair beside `_gables_built` and `_fences_built`, and the branch that matters is the third one -- 'none here; the layout has N, all outside this crop' -- which is the sentence that was missing last time. || ONE THIRD BUILT 2026-08-30, and NOT marked done because the other two thirds are not. `verify.feature_report` now carries a `chimneys` line: stack count, the SHAPE of each flue (how many stacks of how many courses), how many distinct pieces, and which forms the quarters dealt -- or that the map has no quarters and every stack is on the ridge. It fails when a town has roofs and no chimney at all, which is the right branch for a chimney: unlike a field boundary, a map cannot decline to offer one, because anything with a roof has a hearth. || WHY THE SHAPE AND NOT A COUNT. The bug it was written against was a count of 1,084 that read as a success -- the four-course flue reached 2% of stacks and every chimney on East Tradebourne was a single piece. 'N stacks of 1 course' says so; 'N stacks' cannot. That is this function's own failure mode from a direction it did not cover: not a feature absent from the crop, but one present in the code and absent from the output. || STILL OPEN: terraces (nothing builds them yet) and roof kits (which materials a town actually dealt, against what its style offers).",
       "tags": [
         "roofs",
         "terrace",
@@ -1686,10 +1686,10 @@
     {
       "id": "chimney-sibling-deal",
       "what": "Deal the tile stack between Chimney 01 and Chimney 02",
-      "state": "open",
+      "state": "done",
       "doc": "docs/roofscape.md 3.3",
       "evidence": "test:test_a_town_uses_both_of_the_tavern_stacks",
-      "note": "`roof_stack_tile` is pinned to `Chimney 01` and `Chimney 02` -- the same kit, the same 1x1x1 box, both plain stone stacks -- is still unused. Two interchangeable pieces in one kit is exactly what `walls.deal` and `walls.stem_of` exist for: one per building keyed on crc32 so a rebuild is byte-identical. Check `stem_of` accepts the pair first; `chimney 01` and `chimney 02` differ only by a trailing index, so it should, unlike the ridge caps (ridge-cap-siblings) where it correctly refused. Worth doing because the stack is now the most repeated single object on a roofscape after the slope -- 1,084 on East Tradebourne -- and this is a free variance axis on it.",
+      "note": "BUILT. `deal_flue` hands one of a kit's interchangeable stacks per BUILDING, keyed on crc32 so a rebuild is byte-identical. `walls.stem_of` is the test and it accepts the pair as predicted -- `Chimney 01` and `Chimney 02` reduce to the same stem, where `Thatched Chimney` and `Thatched Roof Chimney` do not. The collider is checked as well as the stem, because a kit is free to index two pieces of different heights and a taller course would change the shape `flue_courses` builds. || PER BUILDING, not per panel, which is the opposite of what `WallFamily.deal` does and is deliberate: a house's chimneys are one piece of masonry by one mason, so two flues on one roof match and two neighbours need not. `chimney-per-wing` is what makes that visible. || Measured: `Chimney 02` had never been placed on any board. Now Pelvesthollow 10/10, Graybank 46/74, East Tradebourne 642/632 -- and total placements are unchanged, which is what a sibling deal should do. Rural ships one stack, so most of a town is untouched.",
       "tags": [
         "roofs",
         "chimneys"
@@ -1726,7 +1726,7 @@
       "state": "done",
       "doc": "citysmith/build.py",
       "evidence": "test:test_every_chimney_sits_on_its_ridge_the_same_way",
-      "note": "MEASURED on Forest Church, 49 chimneys, base against the top of their own building's roof: 24 at +0.00 (base flush with the ridge, so the whole 1.5-tall stack stands proud -- these are the ones that read as too high), 23 at -1.00, and 2 at -4.00 and -7.00, buried. Three different relationships and no rule. A chimney wants its base INSIDE the roof and a consistent height proud of the ridge, which is one subtraction once the ridge height is known per block -- and `_lay_roofs` already knows it. || FIXED with `CHIMNEY_SEAT = 0.5`, applied in BOTH the gabled and hip paths -- they carry the same three branches independently, which is how they drifted. Measured against the LOCAL ridge (the per-building measurement was conflating a civic tower's walls, and gave phantom -4 and -7 outliers): was 24 at -1.00 and 25 at +0.00, now -1.5/-1.0/-0.5 and nothing at 0. No chimney stands with its base level with the ridge any more, which was the 'too high' look. The remaining spread is the three piece types and is legitimate -- a combination piece IS the roof at its cell. THE DUPLICATION IS NOT FIXED: both paths still carry their own copy of the branch logic and will drift again. || The HEIGHT is fixed and tested. WHICH PIECE is a different claim and is `chimney-piece`, opened rather than folded in here -- one task carrying two claims is how a tracker starts lying.",
+      "note": "MEASURED on Forest Church, 49 chimneys, base against the top of their own building's roof: 24 at +0.00 (base flush with the ridge, so the whole 1.5-tall stack stands proud -- these are the ones that read as too high), 23 at -1.00, and 2 at -4.00 and -7.00, buried. Three different relationships and no rule. A chimney wants its base INSIDE the roof and a consistent height proud of the ridge, which is one subtraction once the ridge height is known per block -- and `_lay_roofs` already knows it. || FIXED with `CHIMNEY_SEAT = 0.5`, applied in BOTH the gabled and hip paths -- they carry the same three branches independently, which is how they drifted. Measured against the LOCAL ridge (the per-building measurement was conflating a civic tower's walls, and gave phantom -4 and -7 outliers): was 24 at -1.00 and 25 at +0.00, now -1.5/-1.0/-0.5 and nothing at 0. No chimney stands with its base level with the ridge any more, which was the 'too high' look. The remaining spread is the three piece types and is legitimate -- a combination piece IS the roof at its cell. THE DUPLICATION IS NOT FIXED: both paths still carry their own copy of the branch logic and will drift again. || The HEIGHT is fixed and tested. WHICH PIECE is a different claim and is `chimney-piece`, opened rather than folded in here -- one task carrying two claims is how a tracker starts lying. || THE DUPLICATION IS FIXED 2026-08-30. `lay_flue` is the single place that seats a flue, called from the gabled path and both scales of the hip path, so the three copies that 'will drift again' cannot.",
       "tags": [
         "roofs",
         "buildings"
@@ -1763,7 +1763,7 @@
       "what": "Stop placing a roof-and-chimney combination on top of a cap",
       "state": "done",
       "doc": "citysmith/build.py",
-      "evidence": "test:test_the_ridge_carries_one_roof_course_not_two",
+      "evidence": "test:test_a_chimney_never_replaces_the_roof_surface",
       "note": "FIXED. `roof_stack` and `roof_chimney` mean OPPOSITE things depending on the material -- thatch's stack is `Thatched Roof Chimney` (a combination) and its chimney is `Thatched Chimney` (bare); tile's are the other way round. So a caller trusting the role laid a flat cap and stood a second roof course on it, which put a thatch skirt round every chimney. `build.is_roof_chimney` classifies the PIECE instead -- a chimney whose name says 'roof' brings one -- the same rule `walls._role_of` uses where a collider cannot tell a wall from a roof. A combination now REPLACES the course and seats by its BASE, sunk `CHIMNEY_SINK` = 0.25, picked off `PROBE chimney seated by base` (back row, middle). A bare stack still stands on a cap, lapped where one course is a stub. Forest Church: 0 cells carry a combination and a cap together; tile roofs now place `Village Roof Side/Chimney` (20) where they used to place the bare `Chimney 01`. FIVE PROBE ROUNDS, AND FOUR OF THEM MEASURED THE PROBE. Two bugs, both the same question -- which end of a piece seats at the course. A cap seats by its top; the probe used its base and the ridge stood half a tile proud. A combination seats by its base; the probe used its top and buried the stack. `_lay_roofs` had both right throughout. The lesson is not 'be careful': a probe should take its seating from the shipped placement rather than re-derive it, and `probe-seats-from-shipped` is open for that.",
       "tags": [
         "roofs",
@@ -1923,14 +1923,38 @@
     {
       "id": "chimney-stack-courses",
       "what": "Build the flue as a lapped stack, to the hand-built proportions",
-      "state": "open",
+      "state": "done",
       "doc": "citysmith/build.py",
-      "evidence": "test:test_a_chimney_stack_matches_the_hand_build",
-      "note": "The user handed back a chimney they accept (`tests/fixtures/handbuilt_chimney.slab`, 7 placements) and said the geometry is fine to place creatively. Decoded, against the base of the 2x2 slope it stands in: FOUR `Thatched Chimney` courses (1x0.5x1 each) at y = 0.25, 0.50, 0.75 and 1.25. So the bottom three lap by `CHIMNEY_LAP` = 0.25 -- half a course, each buried to its middle in the one below -- and the fourth sits FLUSH on the third (0.75 + 0.5 = 1.25) to form the mouth. Total flue 0.25 to 1.75, a tile and a half, and the first course starts a quarter tile above the roof piece's base rather than on top of the roof, which is `CHIMNEY_SINK`'s principle -- a chimney emerges from a roof, it does not stand on one -- at a measured number. WHAT WE BUILD TODAY IS SHORTER AND PLAINER: `_bare_stack_courses` returns `(0.0, CHIMNEY_LAP)`, two courses, 0.75 of flue. The docstring's reasoning is right (half a tile is a stub, so lap it) and it simply stops one lap early and never adds the flush cap course. THE LAPPING IS THE POINT and it is why this is worth doing rather than just raising a number: the piece has a rim at each end, so lapped courses read as continuous masonry while stacked ones show a seam per course. OPEN QUESTIONS, none of them blocking: whether the lap count should scale with storeys (a three-storey house wants a taller flue than a cottage); whether Tavern's 1x1x1 `Chimney 01`/`02` want lapping at all, since they are a full tile and `_bare_stack_courses` already stands those alone; and whether the 0.25 base offset holds against a 1x1 roof course, since the hand-build sits in a 2x2 one. Measure the last against a 1x1 roof before assuming it carries over -- the wide and small caps already disagree (`WIDE_CAP_LAP`), so the scales are not interchangeable here.",
+      "evidence": "test:test_the_flue_is_the_one_the_user_built",
+      "note": "BUILT, and it is now the ONLY chimney geometry the generator has. The user handed the slab back a second time as \"acceptable geometry for a chimney that can be creatively placed\" -- byte-identical to `tests/fixtures/handbuilt_chimney.slab`, so the pattern is confirmed rather than revised. `lay_flue` is the one place that builds it and `test_the_flue_is_the_one_the_user_built` drives it against the fixture rather than against numbers copied out of the fixture. || WHAT WAS ACTUALLY SHIPPING, measured on all three towns before any code moved, and it is worse than this entry used to claim: the four-course flue was reachable ONLY through the double-scale branch, which fires on 26 of 1,274 stacks -- 2%. East Tradebourne's 1,084 chimneys were 731 `Thatched Roof Chimney` and 353 `Village Roof Side/Chimney`, every one of them a SINGLE piece. Not one lapped stack on the biggest town. || THE COMBINATION PIECE IS RETIRED. `Village Roof Side/Chimney` is a slope with a stack cast onto it, so it could only go where its own slope fitted and had to be turned to match -- and the user had already said so off a screenshot: 'one doesnt need the (chimney on slant roof) tile, just the normal chimney'. Now the cell gets the slope or cap it would have had anyway and the flue comes up through it, which is what makes `chimney-forms` and `chimney-per-wing` choices of CELL rather than hunts for an asset. `CHIMNEY_SINK` went with it. Every material still has a free-standing stack (`flue_piece`), so nothing lost a chimney: stack COUNT is unchanged at 36 / 154 / 1,084, placements 55 -> 124, 224 -> 522, 1,084 -> 3,630. || It also collapsed three copies of the seating branch into one, which is the duplication `chimney-seating` recorded and left open.",
       "tags": [
         "roofs",
         "assets",
         "style"
+      ]
+    },
+    {
+      "id": "chimney-flue-at-the-single-scale",
+      "what": "Check the hand-built flue offsets against a 1x1 roof course",
+      "state": "open",
+      "doc": "citysmith/build.py",
+      "evidence": "test:test_a_single_scale_flue_was_measured_on_a_board",
+      "note": "`CHIMNEY_BASE` = 0.25 and the four-course shape are measured against the user's hand-build, whose roof course is 2.0 tall. `lay_flue` applies them to a 1.0 course as well, and that is an EXTRAPOLATION rather than a measurement: on a 2x2 slope the flue spans 0.25 to 1.75 and stays inside the piece's own box, while on a 1x1 one it stands 0.75 proud of the course top. Both may well be right -- a slope's box top is its ridge edge, not the surface over the flue's cell, so the double-scale case is only 'inside' on paper -- but nobody has looked at the single-scale one. || It is most of the town: 1,504 of East Tradebourne's 2,141 stacks are the 4-course thatch flue and only the coarse wings are at the double scale. || THE SAME QUESTION FOR THE 1.0-TALL PIECE. Tavern's `Chimney 01`/`02` are a full tile, so `flue_courses` gives them the shape without the lap -- one shaft course and one mouth, 2.0 of flue against thatch's 1.5. That is the analogue of the measured rule, not the rule, and whether a 1.0 piece wants lapping at all is unanswered: it may be a complete chimney rather than a course, in which case two of them read as two chimneys. 637 stacks on East Tradebourne. || Cheap to settle: one probe board with the thatch flue and the tile flue side by side at both scales, read square-on. `probe-seats-from-shipped` applies -- take the seating from `lay_flue`.",
+      "tags": [
+        "roofs",
+        "chimneys"
+      ]
+    },
+    {
+      "id": "chimney-clears-a-taller-neighbour",
+      "what": "Lengthen a flue on a low wing so it clears the range beside it",
+      "state": "open",
+      "doc": "citysmith/build.py",
+      "evidence": "test:test_no_flue_is_overtopped_by_the_roof_beside_it",
+      "note": "Found by the strengthened `test_every_chimney_sits_on_its_ridge_the_same_way`, which now checks both ends of the flue instead of only its foot. On Forest Church, 9 of 98 flues top out below the highest roof within one cell of them -- a stack on a low ell beside a two-storey main range, which would not draw and does not read. Six of those nine are an artifact and are excluded: they are 2x2 slopes whose bounding box tops out at the ridge edge rather than at the surface over the flue's cell, and they are the hand-build's own geometry. THREE ARE REAL. || The fix is a flue length that depends on what is beside it rather than a constant, which is a change to `flue_courses`' contract -- it takes a piece today and would need the clearance too. Worth measuring on all three towns first: this is 3 of 98 on one town and may be rarer or commoner elsewhere, and `chimney-per-wing` is what created the class by giving low ells their own stacks.",
+      "tags": [
+        "roofs",
+        "chimneys"
       ]
     }
   ]

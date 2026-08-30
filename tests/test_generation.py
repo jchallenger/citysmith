@@ -2874,6 +2874,13 @@ def test_every_chimney_sits_on_its_ridge_the_same_way():
                 for v in f.pieces.values() for a in v}
 
     top = collections.defaultdict(lambda: None)
+    # Cells whose roof piece is a LID -- a cap, half a tile at either scale.
+    # There the bounding box's top IS the roof surface. On a SLOPE it is not:
+    # a 2x2 piece's box tops out at its ridge edge and over-reports the
+    # surface over three of its four cells, which is the same "a full-cell
+    # collider does not mean a full-cell mesh" this project already records
+    # from the other direction.
+    lid = set()
     for pl in b.placements:
         a = byid[pl.asset_id]
         if "roof" not in (a.group_tag or "").lower() or a.id in wall_ids:
@@ -2885,27 +2892,56 @@ def test_every_chimney_sits_on_its_ridge_the_same_way():
             for z in range(int(z0), max(int(z0) + 1, int(round(z1)))):
                 cur = top[(x, z)]
                 top[(x, z)] = max(cur, pl.y + a.size_y) if cur else pl.y + a.size_y
+                if a.size_y <= 0.5:
+                    lid.add((x, z))
+                else:
+                    lid.discard((x, z))
 
-    proud = []
-    seen = 0
+    # **A flue is a stack of courses, so this is a claim about its FOOT.** The
+    # upper courses of a chimney are above the roof by construction -- that is
+    # what a chimney is -- and testing every placement was only ever possible
+    # while a stack was one or two pieces. Group by cell and take the lowest.
+    flues = collections.defaultdict(list)
     for pl in b.placements:
         a = byid[pl.asset_id]
         if "chimney" not in a.name.lower():
             continue
         x0, z0, x1, z1 = placed_bounds(a, pl)
         cx, cz = int((x0 + x1) / 2), int((z0 + z1) / 2)
+        flues[(cx, cz)].append((pl.y, pl.y + a.size_y))
+
+    proud, sunk = [], []
+    seen = 0
+    for (cx, cz), courses in flues.items():
         near = [top[(cx + dx, cz + dz)] for dx in (-1, 0, 1) for dz in (-1, 0, 1)
                 if top[(cx + dx, cz + dz)] is not None]
         if not near:
             continue
         seen += 1
-        if pl.y >= max(near) - 1e-6:
-            proud.append((a.name, (cx, cz), round(pl.y - max(near), 2)))
+        ridge = max(near)
+        foot = min(y for y, _ in courses)
+        head = max(y for _, y in courses)
+        if foot >= ridge - 1e-6:
+            proud.append(((cx, cz), round(foot - ridge, 2)))
+        # The other half of the same claim, and it only became checkable once
+        # the flue was more than a lid: a stack buried in the thatch is as
+        # wrong as one standing on it, and nothing here used to say so.
+        #
+        # **Only where the flue comes through a lid**, per `lid` above. Asked
+        # of every cell this reports 6 of 98 buried, and all six are 2x2
+        # slopes where the flue reaches 4.25 against a box that tops out at
+        # 4.5 -- which is the hand-built fixture's own geometry, laid on a
+        # board and accepted. The box is wrong there, not the chimney.
+        if (cx, cz) in lid and top[(cx, cz)] is not None                 and head <= top[(cx, cz)] + 1e-6:
+            sunk.append(((cx, cz), round(head - top[(cx, cz)], 2)))
 
     assert seen, "no chimney found -- the test proves nothing"
     assert not proud, (
         f"{len(proud)} of {seen} chimneys stand ON their ridge rather than in "
         f"it: {proud[:4]}")
+    assert not sunk, (
+        f"{len(sunk)} of {seen} chimneys never break their own roof line: "
+        f"{sunk[:4]}")
 
 
 def test_a_gable_verge_matches_its_own_roof_material():
@@ -2949,24 +2985,27 @@ def test_a_gable_verge_matches_its_own_roof_material():
     assert checked, "no building closed a verge -- the test proves nothing"
 
 
-def test_the_ridge_carries_one_roof_course_not_two():
-    """A roof-and-chimney piece REPLACES the course; it does not sit on one.
+def test_a_chimney_never_replaces_the_roof_surface():
+    """Every flue comes up through a roof that is still there.
 
-    `roof_stack` and `roof_chimney` mean opposite things depending on the
-    material -- for thatch the stack is `Thatched Roof Chimney`, a combination,
-    and for tile it is `Chimney 01`, a bare one. A caller that trusts the role
-    lays a flat cap and stands a second roof course on it, which put a thatch
-    skirt round every chimney in the town. `is_roof_chimney` classifies the
-    piece instead, the same way `walls._role_of` trusts the kit's own word
-    where a collider cannot tell a wall from a roof.
+    **This is the invariant that outlived the bug it was written for.** It
+    began as "a roof-and-chimney piece REPLACES the course; it does not sit on
+    one", because `roof_stack` and `roof_chimney` mean opposite things
+    depending on the material and a caller trusting the role laid a flat cap
+    and stood a second roof course on it -- a thatch skirt round every chimney
+    in the town.
+
+    The combination piece is retired now (`test_no_roof_and_chimney_combination
+    _is_placed`), so the question is no longer which piece but whether the cell
+    still has a roof at all. A flue standing in a hole is the failure that
+    replaces it, and it is the one the free-standing stack makes possible.
     """
     import collections
     import sys
 
     sys.path.insert(0, ".")
-    from citysmith.build import (
-        build_from_tilemap, is_roof_chimney, placed_bounds,
-    )
+    from citysmith import walls as W
+    from citysmith.build import build_from_tilemap, placed_bounds
     from citysmith.catalog import load_or_build
     from citysmith.layout import Layout
     from citysmith.palette import MEDIEVAL, Palette
@@ -2974,32 +3013,30 @@ def test_the_ridge_carries_one_roof_course_not_two():
 
     palette = Palette(load_or_build(), MEDIEVAL)
     byid = {a.id: a for a in palette.catalog.assets}
+    wall_ids = {a.id for f in W.families(palette.catalog).values()
+                for v in f.pieces.values() for a in v}
     tm = rasterize(Layout.load("out/fc-v2/layout.json"))
     b = build_from_tilemap(tm, palette, storeys=3)
 
-    cells = collections.defaultdict(list)
+    roofed, flues = set(), collections.defaultdict(list)
     for pl in b.placements:
         a = byid[pl.asset_id]
         x0, z0, x1, z1 = placed_bounds(a, pl)
-        cells[(int((x0 + x1) / 2), int((z0 + z1) / 2))].append(a)
-
-    combos = 0
-    doubled = []
-    for cell, here in cells.items():
-        combo = [a for a in here if is_roof_chimney(a)]
-        if not combo:
+        cell = (int((x0 + x1) / 2), int((z0 + z1) / 2))
+        if "chimney" in a.name.lower():
+            flues[cell].append(a.name)
             continue
-        combos += 1
-        flat = [a.name for a in here
-                if "flat" in a.name.lower()
-                and "roof" in (a.group_tag or "").lower()]
-        if flat:
-            doubled.append((cell, combo[0].name, flat))
+        if "roof" in (a.group_tag or "").lower() and a.id not in wall_ids:
+            # A wide piece covers four cells, so record the box, not a centre.
+            for x in range(int(x0), max(int(x0) + 1, int(round(x1)))):
+                for z in range(int(z0), max(int(z0) + 1, int(round(z1)))):
+                    roofed.add((x, z))
 
-    assert combos, "no combination chimney was placed -- proves nothing"
-    assert not doubled, (
-        f"{len(doubled)} ridge cell(s) carry a combination AND a flat cap: "
-        f"{doubled[:3]}")
+    assert flues, "no chimney on the board -- the test proves nothing"
+    bare = sorted(c for c in flues if c not in roofed)
+    assert not bare, (
+        f"{len(bare)} of {len(flues)} flues stand in a hole in the roof: "
+        f"{[(c, flues[c]) for c in bare[:3]]}")
 
 
 def test_a_chimney_piece_is_classified_by_its_own_name():
