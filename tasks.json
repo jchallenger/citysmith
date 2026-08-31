@@ -141,8 +141,8 @@
       "what": "Cluster yard clutter by the building's trade",
       "state": "done",
       "doc": "docs/building-massing.md 4",
-      "evidence": "citysmith.build.YARD_CLUTTER",
-      "note": "TRADE_CLUTTER already does this for street frontage; point it at the yard.",
+      "evidence": "citysmith.build.YARD_PROPS",
+      "note": "TRADE_CLUTTER already does this for street frontage; point it at the yard. || REDONE 2026-08-31. `YARD_CLUTTER` named the room categories `_dress` furnishes INTERIORS from and resolved them through `Palette.prop`, so a house's yard was dressed out of the bedroom set: 88 beds, dressers, chests and stools stood outdoors on Pelvesthollow, ungrouped, in the landscape layer. It is `YARD_PROPS` now and names outdoor palette ROLES -- `yard_smithy`, `yard_trade`, `yard_clutter` -- so the trade flavour survives and the vocabulary is outdoor goods. 88 -> 0. See docs/building-massing.md 12.1.",
       "tags": [
         "buildings",
         "yards"

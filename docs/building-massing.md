@@ -395,6 +395,64 @@ timber paling round the cottages, worked brown ground inside it against green
 pasture outside, and drystone field walls running away across the fields --
 three different boundary treatments doing three different jobs in one frame.
 
+## 12.1 A yard is not a room (design pass, 2026-08-31)
+
+Read off a board: *"clutter puts strange items around the home, and blocks
+doorways."* The photograph showed two beds and a dresser standing on a house's
+yard path, with barrels across the way in.
+
+### What is actually happening
+
+`_dress_yards` picks a prop with `palette.prop(category, rng)`, and
+`YARD_CLUTTER` maps a building kind to **room categories** -- the same table
+`_dress` furnishes interiors from. So a house's yard is dressed out of the
+bedroom set.
+
+Measured on Pelvesthollow, 35 buildings, 21,706 assets:
+
+| | |
+|---|---|
+| furniture props standing outdoors | **88**, ungrouped, in the `landscape` layer |
+| furniture props indoors, grouped to a building | 7 |
+| what they are | 6 kinds of bed, `Dresser 01`, `Gold Chest`, `Leather Chest`, `chair_study_01`, four stools, `Alchemy, table 01` |
+
+**Every category leaks, not just the house.** Sampled 200 draws each:
+
+| category | distinct assets | what it opens with |
+|---|---|---|
+| `house` | 60 | six beds, alchemy tables, benches |
+| `shop` | 42 | bookshelves, alchemy shelves |
+| `tavern` | 66 | bread, carrots, benches |
+| `smithy` | 36 | anvil, armour rack, arrow pile |
+
+`smithy` is the only one that reads outdoors by luck: a forge yard with an
+anvil in it is right. A bookshelf in the rain is not, and neither is a bed.
+
+### The door apron
+
+40 props stand within two cells of a doorway. **26 of them belong there** --
+`Lantern on hook 01` (23) and `Sign (Village) 01` (3) are placed at a door on
+purpose. The other **14 are blockers**: `hedge_piece_01` (7), `Wooden Cart`
+(5), `Wooden Fence` (1), `Barrels` (1).
+
+`YARD_CLUTTER_CLEARANCE = 1` is a radius around the whole footprint, which is
+both too weak and too strong: too weak because a cart two cells out still
+stands square in front of the door, and too strong because it bans the entire
+wall line rather than the way in. `_dress_market` already has the right shape
+in `door_fronts`; the yard and boundary passes do not use it.
+
+### The rules
+
+1. **A yard takes outdoor goods, never the room table.** Trade flavour is a
+   set of outdoor working things per trade -- a smith's coal and anvil, a
+   shop's crates and sacks -- and not a room's furniture. The `yard_clutter`
+   role already holds exactly the right vocabulary for the general case:
+   log pile, chopped pine, cart, ladder, bucket, barrels.
+2. **The way in is reserved.** The cells straight out from a doorway carry
+   only what belongs at a door: the lantern and the trade sign. Everything
+   else -- clutter, boundary, hedge -- keeps off, and the reservation is made
+   before anything scatters rather than tested afterwards.
+
 ## 13. Three iterations on large buildings and their lots
 
 `tools/lot_probe.py` composes several large buildings, each on its own lot,

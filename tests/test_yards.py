@@ -423,3 +423,71 @@ def test_a_yard_quad_is_not_sheeted_in_grass():
                    for i in range(w) for j in range(d)}
         assert not (covered & cells), (
             f"{asset.name} at ({p.x}, {p.z}) sheets a yard cell in lawn")
+
+
+# -- the design pass: a yard is not a room, and the way in stays clear --------
+#
+# `docs/building-massing.md` 12.1. Both of these were read off a board before
+# they were written down: two beds and a dresser standing on a house's yard
+# path, and barrels across the way in.
+
+def test_the_yard_vocabulary_is_outdoor_goods_not_a_room():
+    """`YARD_PROPS` names palette ROLES, never `Palette.prop` categories.
+
+    The old table named the categories `_dress` furnishes INTERIORS from, so a
+    house's yard was dealt out of the bedroom set -- 88 beds, dressers, chests
+    and stools standing outdoors on Pelvesthollow, ungrouped, in the landscape
+    layer. A role is a named pin; a category is a query that sweeps in whatever
+    the pack happens to hold, which is how `props["house"]` comes to offer six
+    kinds of bed.
+    """
+    from citysmith.build import YARD_PROPS, DEFAULT_YARD_PROPS
+    from citysmith.palette import MEDIEVAL
+
+    named = set(MEDIEVAL.roles)
+    rooms = set(MEDIEVAL.props)
+    used = {r for roles in YARD_PROPS.values() for r in roles}
+    used |= set(DEFAULT_YARD_PROPS)
+
+    assert used <= named, f"not palette roles: {sorted(used - named)}"
+    assert not (used & rooms), (
+        f"these are room categories, not outdoor roles: {sorted(used & rooms)}")
+    # Every kind that has a yard has somewhere outdoor to furnish it from.
+    for kind, roles in YARD_PROPS.items():
+        assert roles, f"{kind} has no yard vocabulary"
+
+
+def test_the_way_out_of_a_door_is_reserved():
+    """`door_apron` is the cells straight out from a doorway, both of them.
+
+    A radius round the footprint is the wrong shape: it bans the whole wall
+    line while still letting a cart stand two cells out, square in front of
+    the door. Measured on Pelvesthollow, 14 props stood on an apron -- seven
+    hedge pieces, five carts, a fence panel and a barrel -- while 26 more were
+    the doorpost lantern and the trade sign, which belong there.
+    """
+    from citysmith.build import door_apron, DOOR_APRON_DEPTH
+
+    tm = _map(20, 20)
+    _put(tm, "house-0001", 8, 8, 4, 4)
+    tm.doors["house-0001"] = [(9, 11, "s")]
+
+    apron = door_apron(tm)
+    assert apron == {(9, 12), (9, 13)}, apron
+    assert len(apron) == DOOR_APRON_DEPTH
+
+    # It runs OUT from the door, never into the building or along its wall.
+    for x, z in apron:
+        assert not tm.building[z][x], "the apron reaches into the footprint"
+    assert (8, 12) not in apron and (10, 12) not in apron, (
+        "the apron is the way in, not a skirt round the wall")
+
+
+def test_the_apron_is_clipped_to_the_board():
+    """A door on the map edge has a short apron, not an off-board one."""
+    from citysmith.build import door_apron
+
+    tm = _map(20, 20)
+    _put(tm, "house-0001", 8, 0, 4, 3)
+    tm.doors["house-0001"] = [(9, 0, "n")]
+    assert door_apron(tm) == set(), "an apron ran off the board"

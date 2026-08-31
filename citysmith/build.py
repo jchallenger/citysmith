@@ -3454,6 +3454,11 @@ def _lay_yards(b: Builder, tm, grade: float,
 
     all_yard = {c for cs in yards.values() for c in cs}
     ways = frozenset({R.STREET, R.PLAZA, R.LANE, R.PIER})
+    # **`ways` is a set of SURFACES and a door apron is not one.** The way out
+    # of a house crosses its own yard before it reaches a lane, so a boundary
+    # run could close across a doorway and pass `blocks_a_way` cleanly --
+    # seven hedge pieces and a fence panel did, on Pelvesthollow.
+    apron = door_apron(tm)
     laid = 0
     pieces = 0
 
@@ -3517,6 +3522,8 @@ def _lay_yards(b: Builder, tm, grade: float,
                     continue
                 if blocks_a_way(tm, fence_this, cx, cz, rot, ways):
                     continue
+                if cell in apron:
+                    continue
                 b.add(place_centered(fence_this, cx, cz, grade - drop, rot),
                       prop=True)
                 pieces += 1
@@ -3572,17 +3579,32 @@ def yard_boundary(palette, bid: str):
 #:
 #: `TRADE_CLUTTER` is the model and this is the same idea pointed at the back
 #: of the plot rather than the front of it.
-YARD_CLUTTER = {
-    "smithy": ("smithy", "smithy", "house"),
-    "stable": ("house", "house", "tavern"),
-    "warehouse": ("shop", "shop", "house"),
-    "shed": ("house", "smithy"),
-    "tavern": ("tavern", "tavern", "shop"),
-    "shop": ("shop", "house"),
-    "apothecary": ("shop", "house"),
-    "house": ("house",),
+#: What stands in a trade's yard, as palette ROLE names.
+#:
+#: **These are outdoor roles, not room categories, and that is the whole
+#: point.** This table used to name the categories `_dress` furnishes
+#: INTERIORS from, resolved through `Palette.prop` -- so a house's yard was
+#: dressed out of the bedroom set and 88 beds, dressers, chests and stools
+#: stood outdoors on Pelvesthollow. Every category leaked, not only the house:
+#: `shop` offers bookshelves and `tavern` offers bread. `smithy` read right
+#: only by luck, an anvil being a thing that does live in a forge yard.
+#: `docs/building-massing.md` 12.1.
+YARD_PROPS = {
+    "smithy": ("yard_smithy", "yard_clutter"),
+    "stable": ("yard_clutter",),
+    "warehouse": ("yard_trade", "yard_clutter"),
+    "shed": ("yard_clutter",),
+    "tavern": ("yard_trade", "yard_clutter"),
+    "shop": ("yard_trade", "yard_clutter"),
+    "apothecary": ("yard_trade", "yard_clutter"),
+    "house": ("yard_clutter",),
 }
-DEFAULT_YARD_CLUTTER = ("house",)
+DEFAULT_YARD_PROPS = ("yard_clutter",)
+
+#: How many variants to ask each yard role for. Four is what `market_goods`
+#: takes and the reason is the same: a role is a kit and resolving it once
+#: puts one object in every yard in the town.
+YARD_ROLE_VARIANTS = 4
 
 #: Chance a yard cell gets something standing on it. A yard is worked ground,
 #: not a junkyard; `docs/interior-slabs.md` measures hand-built *interiors* at
@@ -3683,6 +3705,40 @@ def detail_scale(tm) -> float:
 YARD_CLUTTER_CLEARANCE = 1
 
 
+#: How far out from a doorway the way in is kept clear, in cells.
+#:
+#: Two, measured: a prop one cell out is against the wall beside the door and
+#: a prop two cells out is square in front of it. Both read as blocking the
+#: way in, and the second is the one a radius round the footprint misses.
+DOOR_APRON_DEPTH = 2
+
+#: Roles that MAY stand on an apron, because standing at a door is their job.
+#: Measured on Pelvesthollow: of 40 props within two cells of a doorway, 26
+#: were these two and belonged; the other 14 were hedge, cart, fence and
+#: barrels. `docs/building-massing.md` 12.1.
+DOOR_APRON_ALLOWED = ("door_lantern", "trade_sign")
+
+
+def door_apron(tm, depth: int = DOOR_APRON_DEPTH) -> set[tuple[int, int]]:
+    """The cells straight out from every doorway -- the way in.
+
+    Reserved BEFORE anything scatters rather than tested afterwards, which is
+    the difference between a rule and a hope. `_dress_market` already keeps a
+    `door_fronts` set for the same reason; this is that idea where every pass
+    can reach it.
+    """
+    step = {"n": (0, -1), "s": (0, 1), "e": (1, 0), "w": (-1, 0)}
+    out: set[tuple[int, int]] = set()
+    for doors in tm.doors.values():
+        for x, z, side in doors:
+            dx, dz = step.get(side, (0, 0))
+            for k in range(1, depth + 1):
+                cx, cz = x + dx * k, z + dz * k
+                if tm.inside(cx, cz):
+                    out.add((cx, cz))
+    return out
+
+
 def _dress_yards(b: Builder, tm, scatter: "Scatter", rng, grade: float,
                  taper: dict[tuple[int, int], float | None]) -> int:
     """Put the working life of a trade into its own yard.
@@ -3697,11 +3753,26 @@ def _dress_yards(b: Builder, tm, scatter: "Scatter", rng, grade: float,
     # exactly what a small board has budget to say more of. Capped short of
     # certainty: a yard packed edge to edge is a junkyard.
     rate = min(0.5, YARD_CLUTTER_RATE * detail_scale(tm))
+    apron = door_apron(tm)
     placed = 0
     for bid, cells in sorted(yards.items()):
-        kinds = YARD_CLUTTER.get(bid.split("-")[0], DEFAULT_YARD_CLUTTER)
+        roles = YARD_PROPS.get(bid.split("-")[0], DEFAULT_YARD_PROPS)
+        goods = [a for a in (b.palette.resolve(r, v)
+                             for r in roles for v in range(YARD_ROLE_VARIANTS))
+                 if a is not None]
+        # dedupe, keeping the deal order stable
+        seen_ids: set[str] = set()
+        goods = [a for a in goods
+                 if not (a.id in seen_ids or seen_ids.add(a.id))]
+        if not goods:
+            continue
         for x, z in sorted(cells):
-            # A prop against the wall blocks the door it might be standing in.
+            # **The way in is reserved, not merely avoided.** A radius round
+            # the whole footprint is both too weak and too strong: a cart two
+            # cells out still stands square in the doorway, while the radius
+            # bans the entire wall line. See `door_apron`.
+            if (x, z) in apron:
+                continue
             if any(tm.inside(x + dx, z + dz) and tm.building[z + dz][x + dx]
                    for dx in range(-YARD_CLUTTER_CLEARANCE, YARD_CLUTTER_CLEARANCE + 1)
                    for dz in range(-YARD_CLUTTER_CLEARANCE, YARD_CLUTTER_CLEARANCE + 1)):
@@ -3711,16 +3782,13 @@ def _dress_yards(b: Builder, tm, scatter: "Scatter", rng, grade: float,
             drop = taper.get((x, z), 0.0)
             if drop is None:
                 continue
-            category = kinds[rng.randrange(len(kinds))]
             # **Through the scatter, not `b.prop`.** This pass was handed a
             # `scatter` and then placed with `b.prop` anyway, which does no
             # collision test at all -- so yard clutter was dropped straight
-            # through the yard's own fence. Beds, crates and straw against
+            # through the yard's own fence. Crates and straw against
             # `Wooden Fence` were the largest group of real overlaps left on
             # Pelvesthollow after the collision test itself was corrected.
-            asset = b.palette.prop(category, b.rng)
-            if asset is None:
-                continue
+            asset = goods[rng.randrange(len(goods))]
             if scatter.one(asset, x + 0.5 + rng.uniform(-0.25, 0.25),
                            z + 0.5 + rng.uniform(-0.25, 0.25),
                            grade - drop, rng.randrange(24)):
@@ -8376,8 +8444,17 @@ def _dress_districts(b: Builder, tm, grade: float,
                         return True
         return False
 
+    # **The way in is reserved here too.** This pass scatters the verge, and
+    # the verge runs right up to a doorstep: a cart, a barrel and a stump were
+    # standing in doorways on Pelvesthollow after the yard and boundary passes
+    # had already been taught to keep off. Reserving in one pass and not the
+    # others is how a rule becomes a coincidence. See `door_apron`.
+    apron = door_apron(tm)
+
     for z in range(tm.depth):
         for x in range(tm.width):
+            if (x, z) in apron:
+                continue
             surf = tm.surface[z][x]
             # Scenery stands on the ground as laid, which near the border is
             # the tapered height -- otherwise a fringe of trees floats over

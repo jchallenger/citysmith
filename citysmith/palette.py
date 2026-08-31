@@ -35,7 +35,8 @@ REQUIRED_ROLES = ("floor", "wall", "door", "roof")
 #: omits a missing well). ``validate()`` therefore does not fail a style for
 #: declaring one it cannot resolve -- that check exists for roles whose
 #: absence leaves a silent hole in the geometry, and these leave none.
-OPTIONAL_ROLES = frozenset({"market_stall", "plaza_well"})
+OPTIONAL_ROLES = frozenset({"market_stall", "plaza_well",
+                            "yard_smithy", "yard_trade"})
 
 #: Roles placed into a wall segment; all must share the wall's footprint.
 WALL_SEGMENT_ROLES = ("door", "wall_window", "wall_interior")
@@ -673,6 +674,22 @@ MEDIEVAL = Style(
         "yard_clutter": [
             _prop(name=("Log Pile", "Stackable Pine chopped", "Wooden Cart",
                         "Ladder wood short 01", "bucket_wood", "Barrels"), **_MED),
+        ],
+        # **A yard is not a room, and these exist so it need never borrow
+        # one.** `_dress_yards` used to pick through `Palette.prop`, which is
+        # the INTERIOR furnisher's API, so a house's yard was dressed out of
+        # the bedroom set: 88 beds, dressers, chests and stools stood outdoors
+        # on Pelvesthollow. Trade flavour is outdoor working goods, named
+        # rather than queried, for the reason every other pin here is named --
+        # a category sweeps in whatever the pack happens to hold.
+        # `docs/building-massing.md` 12.1.
+        "yard_smithy": [
+            _prop(name=("Anvil", "Armor Rack", "Barrels", "Barrel",
+                        "Log Pile", "bucket_wood"), **_MED),
+        ],
+        "yard_trade": [
+            _prop(name=("Crate - Large", "Barrels", "Barrel", "Sacks",
+                        "Straw stacks 01", "Wooden Cart", "Log Pile"), **_MED),
         ],
         # Low growth for softening a hard tile seam. Nothing here is taller
         # than knee height -- a seam wants breaking up, not hiding.
