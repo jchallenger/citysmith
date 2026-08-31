@@ -457,6 +457,57 @@ def test_the_yard_vocabulary_is_outdoor_goods_not_a_room():
         assert roles, f"{kind} has no yard vocabulary"
 
 
+def test_the_frontage_vocabulary_is_outdoor_goods_too():
+    """`TRADE_PROPS` names roles, for the same reason `YARD_PROPS` does.
+
+    The frontage table was left behind when the yard table was corrected, and
+    it had the same shape: room categories through `Palette.prop`, with
+    `stable` mapped to `"house"` so a stable's street wall was dressed from
+    the bedroom set. Two tables with one defect is how a fix becomes a
+    coincidence.
+    """
+    from citysmith.build import TRADE_PROPS
+    from citysmith.palette import MEDIEVAL
+
+    named, rooms = set(MEDIEVAL.roles), set(MEDIEVAL.props)
+    used = {r for roles in TRADE_PROPS.values() for r in roles}
+    assert used <= named, f"not palette roles: {sorted(used - named)}"
+    assert not (used & rooms), (
+        f"room categories on a frontage: {sorted(used & rooms)}")
+
+
+def test_the_smith_keeps_his_fire_and_nobody_else_gets_one():
+    """A forge outdoors is right at a smithy and wrong everywhere else.
+
+    Read off a board as "fireplaces should never be outside, unless this is a
+    blacksmith". `Forge` is pinned into `yard_smithy` deliberately -- a smith
+    works at his fire and it stands in the yard or on the frontage -- and no
+    other yard or frontage role may offer one.
+    """
+    from citysmith.build import TRADE_PROPS, YARD_PROPS, DEFAULT_YARD_PROPS
+    from citysmith.palette import MEDIEVAL
+
+    def names(role):
+        out = set()
+        for terms, kw in MEDIEVAL.roles.get(role, ()):
+            n = kw.get("name")
+            out |= {n} if isinstance(n, str) else set(n or ())
+        return out
+
+    assert "Forge" in names("yard_smithy"), "the smith lost his fire"
+    hearth = ("forge", "hearth", "fireplace", "oven", "furnace")
+    for table in (TRADE_PROPS, YARD_PROPS):
+        for kind, roles in table.items():
+            for role in roles:
+                if role == "yard_smithy":
+                    continue
+                bad = [n for n in names(role)
+                       if any(h in n.lower() for h in hearth)]
+                assert not bad, f"{kind} -> {role} offers a hearth: {bad}"
+    for role in DEFAULT_YARD_PROPS:
+        assert role != "yard_smithy", "every yard would get a forge"
+
+
 def test_the_way_out_of_a_door_is_reserved():
     """`door_apron` is the cells straight out from a doorway, both of them.
 

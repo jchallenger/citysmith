@@ -7778,13 +7778,26 @@ PORCHED_KINDS = frozenset({"tavern", "shop", "apothecary", "guildhall",
 #: against it, a warehouse has crates waiting, an inn has empties out the
 #: back. A cluster also tells a party what the building *is* from further off
 #: than a sign does.
-TRADE_CLUTTER = {
-    "smithy": "smithy",
-    "warehouse": "shop",
-    "shop": "shop",
-    "tavern": "tavern",
-    "stable": "house",
-    "apothecary": "shop",
+#: What a trade stacks against its own street wall, as palette ROLE names.
+#:
+#: **Outdoor roles, not room categories -- the same correction `YARD_PROPS`
+#: made one table up, and this one was left behind.** It used to name the
+#: categories `_dress` furnishes INTERIORS from, resolved through
+#: `Palette.prop`; its `stable` entry was `"house"`, so a stable's street
+#: frontage was dressed out of the bedroom set. Measured on a 90x90 crop of
+#: East Tradebourne it had only just begun to show -- two stools and a table
+#: with chairs at a tavern, an alchemy shelf at a shop -- because the trades
+#: that leak worst are the rarest. The forges and anvils on that crop were
+#: NOT the bug: all 25 forges and 29 of 32 anvils belong to smithies, which
+#: is a smith working at his fire and is correct.
+#: `docs/building-massing.md` 12.1.
+TRADE_PROPS = {
+    "smithy": ("yard_smithy", "yard_trade"),
+    "warehouse": ("yard_trade", "yard_clutter"),
+    "shop": ("yard_trade", "yard_clutter"),
+    "tavern": ("yard_trade", "yard_clutter"),
+    "stable": ("yard_clutter",),
+    "apothecary": ("yard_trade", "yard_clutter"),
 }
 
 
@@ -7799,10 +7812,17 @@ def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
     from . import raster as R
 
     placed = 0
+    apron = door_apron(tm)
     for bid, cells in sorted(tm.perimeter.items()):
         b.group = bid
-        category = TRADE_CLUTTER.get(bid.split("-")[0])
-        if category is None:
+        roles = TRADE_PROPS.get(bid.split("-")[0])
+        if roles is None:
+            continue
+        seen_ids: set[str] = set()
+        goods = [a for a in (b.palette.resolve(r, v)
+                             for r in roles for v in range(YARD_ROLE_VARIANTS))
+                 if a is not None and not (a.id in seen_ids or seen_ids.add(a.id))]
+        if not goods:
             continue
         spots: list[tuple[int, int]] = []
         for x, z, side in cells:
@@ -7824,14 +7844,16 @@ def _stack_trade_goods(b: Builder, tm, scatter: "Scatter", rng, grade: float,
             if (ox, oz, side) in [(dx_, dz_, s_) for dx_, dz_, s_ in
                                   tm.doors.get(bid, [])]:
                 continue                      # keep the doorway clear
+            # And the way OUT of it, not merely the cell it stands in: a crate
+            # one step further along still faces the door. `door_apron`.
+            if (ox, oz) in apron:
+                continue
             spots.append((ox, oz))
         if not spots:
             continue
         rng.shuffle(spots)
         for ox, oz in spots[:rng.randint(2, 4)]:
-            asset = b.palette.prop(category, rng)
-            if asset is None:
-                continue
+            asset = goods[rng.randrange(len(goods))]
             drop = taper.get((ox, oz), 0.0) or 0.0
             if scatter.one(asset, ox + 0.5, oz + 0.5, grade - drop,
                            rng.randrange(24)):

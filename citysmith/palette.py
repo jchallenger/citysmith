@@ -684,7 +684,10 @@ MEDIEVAL = Style(
         # a category sweeps in whatever the pack happens to hold.
         # `docs/building-massing.md` 12.1.
         "yard_smithy": [
-            _prop(name=("Anvil", "Armor Rack", "Barrels", "Barrel",
+            # `Forge` is here on purpose and is the one hearth allowed out of
+            # doors: a smith works at his fire and it stands in the yard or on
+            # the frontage. Every other hearth belongs inside.
+            _prop(name=("Forge", "Anvil", "Armor Rack", "Barrels", "Barrel",
                         "Log Pile", "bucket_wood"), **_MED),
         ],
         "yard_trade": [
