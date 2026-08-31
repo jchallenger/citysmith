@@ -2008,6 +2008,14 @@
       "doc": "docs/roofscape.md",
       "evidence": "test:test_a_gable_takes_the_fabric_its_own_walls_wear",
       "note": "**The roof-material bug, reborn one material over, and filed the day it was introduced rather than found on a board later.** `gable_infill` now returns the wall carried up (decided 2026-08-31, a gable being the wall and not the roof), and it resolves that wall from `_WALL_ROLE_BY_TIER` -- a TIER default, with no bid.\n\n`walls.SPLIT_KITS` deals a common house one of two fabrics per BUILDING: Forest Church comes out 6:3:1 Tavern to Village. So a Village-fabric house can take a Tavern gable, which is precisely the shape of the defect the old `test_a_gable_verge_matches_its_own_roof_material` recorded -- 153 houses dealt a tile roof wearing a thatch verge -- one material to the left.\n\nNot measured yet: how many buildings actually differ. The fix has a worked example either way -- the roof case was fixed by having the CALLER pass the piece it had already dealt, two lines before it asked, and `_lay_gabled_wing` is holding the building's own wall in the same way."
+    },
+    {
+      "id": "ui-slab-preview",
+      "what": "Read a written slab in the sidecar, over a labelled tile grid",
+      "state": "done",
+      "doc": "docs/sidecar-ui.md",
+      "evidence": "citysmith.render.slab_svg",
+      "note": "BUILT. `render.slab_svg` draws one slab in plan over a tile grid with the coordinates on both axes and the origin ringed; `render.slab_legend` returns the same colouring as data so the picture and the list cannot disagree about which piece is which. Three endpoints -- `/api/slabs`, `/api/slabs/legend/<path>`, `/api/slabs/svg/<path>` -- and a Slabs tab, added through the seam `index.html` already documented: one button, one section, one row in `_ROUTES`.\n\n**Every placement is its REAL footprint after rotation**, from `build.placed_bounds` -- not its nominal size -- so a two-cell piece reads as two cells and an off-grid prop reads as off-grid. That is the same distinction two `verify` checks were once wrong about, and drawing the nominal box would have made this view agree with a bug.\n\n**It is not a substitute for pasting and the page says so.** It cannot show a mesh, what a rotation does to a face, or whether a run one cell thick reads as solid, which is what every probe in `tools/` exists for. It answers what is in the file and where -- the half a photograph is worst at, and the half that would have caught the verge bolsters as arithmetic rather than as a kit fault.\n\nThe list is scanned on first sight of the screen rather than on page load: this output directory holds 1,584 slabs and someone who came to build a town should not pay for walking them. Paths come from the server's own scan and go back through `resolve_in`, the same guard every other file endpoint uses."
     }
   ]
 }
