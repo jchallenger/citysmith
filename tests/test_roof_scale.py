@@ -982,3 +982,36 @@ def test_a_chimney_on_a_slope_takes_that_slope_s_rotation(cat):
             sloped.append((ROOF_EDGE_ROT[fall[0]] + edge_off) % 24)
     assert sloped, "a 6x4 crown should slope now"
     assert set(sloped) != {0}, "every crown slope came out at rot 0"
+
+
+def test_a_gable_takes_the_fabric_its_own_walls_wear(cat):
+    """`gable_infill` prefers the wall the CALLER dealt over a tier lookup.
+
+    `walls.SPLIT_KITS` deals a common house one of two fabrics per building --
+    Forest Church comes out 6:3:1 Tavern to Village -- so resolving the gable
+    by tier gives a Village-clad house a Tavern gable. That is the defect
+    `gable-infill-follows-the-tier-not-the-roof` recorded for the ROOF, one
+    material to the left, and it arrived the same hour the gable became the
+    wall carried up.
+    """
+    palette = Palette.named(cat, "medieval", 33)
+    default = gable_infill(palette, "common")
+    assert default is not None
+
+    # Any other wall panel of the right shape stands in for "what this
+    # particular building was dealt".
+    other = next(a for a in cat.assets
+                 if a.group_tag == "wall" and a.size_y == 2.0
+                 and min(a.size_x, a.size_z) < 1.0 and a is not default)
+    assert gable_infill(palette, "common", None, None, other) is other, (
+        "the gable ignored the wall the caller dealt it")
+
+    # And a caller with nothing to offer still gets the tier's own.
+    assert gable_infill(palette, "common", None, None, None) is default
+
+    # A piece too tall to step -- the 2.5 Wall/Floor castings -- is refused
+    # rather than left to overshoot the roof line.
+    tall = next((a for a in cat.assets
+                 if a.group_tag == "wall" and a.size_y > 2.0), None)
+    if tall is not None:
+        assert gable_infill(palette, "common", None, None, tall) is not tall

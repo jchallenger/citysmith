@@ -4931,6 +4931,21 @@ def crowstep_tread(palette, wall_asset):
 _WALL_ROLE_BY_TIER = {"civic": "wall_civic", "utility": "wall_utility"}
 
 
+_GABLE_FABRICS: dict[int, dict] = {}
+
+
+def _gable_fabrics(catalog):
+    """`walls.families` for this catalog, memoised.
+
+    It walks every asset, and `_lay_gabled_wing` asks once per gabled wing --
+    989 buildings on East Tradebourne.
+    """
+    key = id(catalog)
+    if key not in _GABLE_FABRICS:
+        _GABLE_FABRICS[key] = W.families(catalog)
+    return _GABLE_FABRICS[key]
+
+
 def _tread_for(palette, tier: str, cache: dict):
     """`crowstep_tread` for a tier, memoised."""
     if tier not in cache:
@@ -4940,7 +4955,7 @@ def _tread_for(palette, tier: str, cache: dict):
     return cache[tier]
 
 
-def gable_infill(palette, tier: str, tread=None, cap=None):
+def gable_infill(palette, tier: str, tread=None, cap=None, wall=None):
     """What closes the triangle between a gable's wall head and its roof.
 
     **A gable always needs one.** The hole is not an oversight in the geometry:
@@ -4995,7 +5010,14 @@ def gable_infill(palette, tier: str, tread=None, cap=None):
     # THIN piece on the wall line with `place_wall`, which a 0.5-deep panel
     # already satisfies. Capped at 2.0 because the Wall/Floor combinations are
     # 2.5 -- a storey and a deck in one casting -- and would overshoot.
-    wall = palette.resolve(_WALL_ROLE_BY_TIER.get(tier, "wall"))
+    # **The building's OWN wall, where the caller has it.** Resolving by tier
+    # here is the defect `gable-infill-follows-the-tier-not-the-roof` records
+    # one material over: `walls.SPLIT_KITS` deals a common house one of two
+    # fabrics per BUILDING, so a tier lookup gives a Village-clad house a
+    # Tavern gable. The caller holds the dealt fabric already; the lookup
+    # below is only the fallback for one that does not.
+    if wall is None:
+        wall = palette.resolve(_WALL_ROLE_BY_TIER.get(tier, "wall"))
     if (wall is not None and wall.size_y <= 2.0
             and min(wall.size_x, wall.size_z) < 1.0):
         return wall
@@ -5431,7 +5453,17 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         # boarded barn cannot end up with a dressed-stone parapet. Resolved
         # per block and cached, because a town is 989 buildings.
         tread = _tread_for(b.palette, tier_of(b.group), _tread_cache)
-        infill = gable_infill(b.palette, tier_of(b.group), tread, cap)
+        # **The gable is clad in the same fabric as the walls under it.** Deal
+        # it the way `_lay_shells` does -- `fabric_for` off a crc32 of the
+        # building id -- so a Village-fabric house cannot take a Tavern gable.
+        _gwall = None
+        _fabric = W.fabric_for(tier_of(b.group),
+                               zlib.crc32(b.group.encode()),
+                               _gable_fabrics(b.palette.catalog))
+        if _fabric is not None:
+            _gwall = _fabric.piece("wall", 1, "mid",
+                                   zlib.crc32(b.group.encode()))
+        infill = gable_infill(b.palette, tier_of(b.group), tread, cap, _gwall)
         # The double-course end comes from the ROOF's kit, not the tier's, so
         # it follows the material this block was actually dealt. That is the
         # bug `gable-infill-follows-the-tier-not-the-roof` records against
