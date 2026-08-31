@@ -616,6 +616,54 @@ footprint** -- `tall 1x2` is 1.00 x 2.00 x 1.00 -- which is one more entry for
 "asset names are inconsistent, the collider is the only thing that says the
 shape".
 
+### 9.1 ANSWERED on a board, 2026-08-31: row 1 is whole
+
+**Eight panels in every row. TaleSpire's drop test is on the oriented
+collider, not the bounding box.** Read from directly overhead on a fresh
+board, per the warning above.
+
+- The non-overlapping control (45 degrees, spacing 2.41): **eight** discrete
+  panels, evenly spaced, uniform gaps, none missing.
+- An overlapping row (45 degrees, spacing 2.00, AABBs overlap by 0.29 on both
+  axes): **one unbroken run**, panels butted end to end with a thin seam at
+  each join and no bare grass anywhere along it.
+
+A dropped panel at 2.00 spacing would leave a ~2-unit hole in a run of 1.98
+pieces. There is no such hole. So the design stands and a diagonal fence may
+run butted.
+
+**No exemption is needed, and that is the part worth writing down.** This
+section anticipated teaching `verify._prop_collisions` to exempt collinear
+fence panels once the answer came in. The check overtook the question: since
+it moved to the ORIENTED box (section 4.1) it already measures what the game
+measures, so butted collinear panels never reach the flag. Measured on
+Sedgewater the same day -- 5,815 props, and the whole town flags **three**
+pairs:
+
+| pair | depth | what it is |
+|---|---|---|
+| `hedge_piece_01` x2 | 0.97 | a turn penetrating well past one thickness |
+| `Stone Wall 01` x2 | 0.447 | a turn, over the 0.43 thickness allowance by 0.017 |
+| `Stone fence 01` / `Wheat Bunch` | 0.015 | a panel clipping a scatter prop |
+
+None is a butted run. Adding the collinear exemption this section imagined
+would also re-open the hole section 10.1 closed -- a lap separates on its thin
+axis first, so it presents the same penetration as a corner, and waving those
+through is exactly how the yard boundary came to be laid twice over on every
+board. The residual three are a tolerance question and a scatter-reservation
+question, not a collider question.
+
+**Method note, because it nearly went wrong.** The first read was taken from a
+low oblique, where the overlapping rows also looked continuous -- and that is
+worthless here for precisely the reason stated above: end-on, the next panel
+covers the gap. From the capped overhead zoom a panel subtends about 9 px and
+its own ribbed texture is indistinguishable from a panel boundary; a
+peak-count returned 27-41 "panels" for a single row and was discarded. The
+reading that stands was taken on a **fresh board** (a stray click had armed a
+build tool on the first one, so that board could no longer be trusted to show
+what was pasted), from a vertical pitch, two wheel ticks back from the
+`newboard` default height.
+
 ## 10. The yard boundary, reviewed on a board (2026-08-27)
 
 Everything above is about `_lay_fences` -- the *field* boundary, run along its
