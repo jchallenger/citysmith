@@ -160,11 +160,19 @@ switch ($Recipe) {
     $cx = $cl.CX; $cy = $cl.CY
     TS newboard
     Start-Sleep -Seconds 3
+    # **`newboard` can drop build mode, and the plane probe reads a toolbar
+    # icon that only exists in it.** Checking before the new board is useless
+    # -- that is exactly how a four-town run died on its first town with the
+    # plane verified moments earlier. So read, and if the toolbar is not there
+    # to read, toggle once and read again. Still unreadable is a stop: an
+    # unreadable probe is not a pass.
     $plane = & $ts planestate
-    # Require an explicit "off". Matching 'ON' would sail straight past
-    # "build plane UNKNOWN", which is what `planestate` now says when the
-    # toolbar is not drawn and it has nothing to read.
-    if ($plane -notmatch 'off') { throw "$plane -- fix this before pasting" }
+    if ($plane -notmatch '^build plane off') {
+      TS key -Keys b -Hold 0.12
+      Start-Sleep -Milliseconds 1000
+      $plane = & $ts planestate
+    }
+    if ($plane -notmatch '^build plane off') { throw "$plane -- fix this before pasting" }
     $out = Join-Path $PSScriptRoot "..\out"
     $chunks = @(Get-ChildItem (Join-Path $out "$Stem-landscape-*.slab.txt")) +
               @(Get-ChildItem (Join-Path $out "$Stem-structure-*.slab.txt"))

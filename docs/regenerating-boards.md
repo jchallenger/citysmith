@@ -242,6 +242,36 @@ untouched by the carve, the wall verify line, and Graybank's drystone
 boundaries on real parcel lines. Each needs flying to a known place on a
 739x598 town at a camera that frames about 40 tiles.
 
+### All four, rebuilt and re-pasted on one command, 2026-08-31
+
+`tools/paste_all.ps1`. Four towns, 199 chunks, one game window and one cursor,
+so the run is sequential by construction rather than by discipline.
+
+| town | board | assets | chunks | largest slab |
+|---|---|---|---|---|
+| Forest Church | `Forest Church 08-31c` | 26,860 | 54 | 4,593 |
+| Pelvesthollow | `Pelvesthollow 08-31c` | 21,707 | 9 | 13,818 |
+| Graybank | `Graybank 08-31c` | 91,159 | 22 | 22,626 |
+| East Tradebourne | `East Tradebourne 08-31c` | 402,693 | 114 | 23,883 |
+
+All four now carry the same code: capped chimneys, outdoor yards, outdoor
+frontages and reserved door aprons.
+
+**Two things the run taught, both about the order of a check.**
+
+`-WhatIf` prints the plan and the board names and touches nothing. It caught a
+name collision before the run rather than after -- four boards already carried
+the plain date from earlier the same day.
+
+And the first real attempt died on its first town with the build plane
+verified moments earlier. `review.ps1 tiled` does its own `newboard` and THEN
+checks the plane; `newboard` can drop build mode, and the plane probe reads a
+toolbar icon that only exists in build mode. So a check made before that call
+describes the wrong moment entirely. The check now self-heals where it
+belongs -- read, and if the toolbar is not there to read, toggle once and read
+again; still unreadable is a stop, an unreadable probe not being a pass. The
+wrapper's own pre-check was deleted rather than left to disagree.
+
 ## Phase 4 — README
 
 New screenshots into `docs/images`, and the feature list catches up: grown

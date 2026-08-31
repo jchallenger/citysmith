@@ -30,20 +30,9 @@ foreach ($t in $towns) {
     "SKIP $($t.stem): no paste order -- rebuild with --by-region"
     continue
   }
-  # The plane probe reads a build-toolbar icon, so build mode has to be up for
-  # it to answer at all. Toggle, read, toggle back if it answered UNKNOWN.
-  & $ts key -Keys b -Hold 0.12 | Out-Null
-  Start-Sleep -Milliseconds 1000
-  $plane = & $ts planestate
-  if ($plane -notmatch '^build plane off') {
-    & $ts key -Keys b -Hold 0.12 | Out-Null
-    Start-Sleep -Milliseconds 1000
-    $plane = & $ts planestate
-  }
-  if ($plane -notmatch '^build plane off') {
-    "STOP at $($t.stem): $plane"
-    break
-  }
+  # No plane check here on purpose. `review.ps1 tiled` makes the new board and
+  # then checks, which is the only order that means anything: `newboard` can
+  # drop build mode, so a reading taken before it describes the wrong moment.
   $name = "$($t.board -replace '[^A-Za-z]','')$stamp"
   "=== $($t.stem) -> board '$($t.board) $stamp' ==="
   if ($WhatIf) { continue }
