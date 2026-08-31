@@ -4426,13 +4426,17 @@ def flue_courses(bare) -> tuple[float, ...]:
     point**, and it is why the hand-build is four pieces rather than a taller
     one.
 
-    **TWO COURSES, whatever the piece: one shaft and one mouth.** The
-    half-tile piece used to take three lapped courses and a mouth, which is
-    what the hand-build measures and is why `CHIMNEY_BASE` describes four.
-    Read on a board 2026-08-31 the answer came back "no house should have this
-    many, and too tall chimneys, max at 2", so the lapped form is retired: a
-    thatch stack goes from 1.5 tiles proud of its seat to 1.0, and a tile stack
-    was already two courses and does not move.
+    **A WHOLE CHIMNEY IS ONE COURSE; ONLY A STUB NEEDS TWO.** A piece a tile
+    or more tall is a complete chimney in one casting -- flared foot, shaft,
+    and the mouth cast into its head. Stacking two of them stands a whole
+    chimney on top of another, which read on a board as "square chimneys are
+    one block too high". So `Chimney 01` and its siblings lay ONE course. The
+    half-tile piece has no mouth of its own and still takes two, a shaft and a
+    head; it used to take four, three lapped and a mouth, which is what the
+    hand-build measures and why `CHIMNEY_BASE` describes four.
+
+    Both families now finish 1.0 tile proud of their seat, which is the same
+    chimney in two materials rather than two different ideas of one.
 
     The hand-build is not wrong and is not deleted -- `CHIMNEY_LAP` and
     `CHIMNEY_BASE` still record what it measured, and the lap is what makes
@@ -4442,6 +4446,8 @@ def flue_courses(bare) -> tuple[float, ...]:
     """
     if bare is None:
         return ()
+    if bare.size_y >= 1.0:
+        return (0.0,)
     return (0.0, bare.size_y)
 
 
