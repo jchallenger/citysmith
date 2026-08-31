@@ -584,6 +584,19 @@
    "disposable": false,
    "note": ""
   },
+  "Pelvesthollow chimneys": {
+   "board": "Pelvesthollow chimneys",
+   "holds": "town",
+   "source": "Pelvesthollow.geojson",
+   "folder": "",
+   "stem": "pelvesthollow",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T10:16:08",
+   "disposable": false,
+   "note": ""
+  },
   "Probe - Halfling old paste": {
    "board": "Probe - Halfling old paste",
    "holds": "probe",
