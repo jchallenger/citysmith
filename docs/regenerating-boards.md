@@ -94,6 +94,45 @@ What the verify output should say now, and why:
 - **Stale artifacts lie.** Clear `out/` per town before judging counts; a
   previous build's chunks alongside new ones has cost an hour before.
 
+### Phase 2 RUN, 2026-08-31 -- all four green enough to paste
+
+Built with `--seed 33 --by-region --fence-style drystone`, each town into its
+own `out/regen/<town>/` so no previous build's chunks could be counted.
+
+| town | assets | chunks | largest slab | of cap |
+|---|---|---|---|---|
+| Forest Church | 27,130 | 54 | 4,737 | 15% |
+| Pelvesthollow | 21,874 | 9 | 14,517 | 47% |
+| Graybank | 91,777 | 22 | 23,559 | 77% |
+| East Tradebourne | 407,396 | 114 | 24,180 | 79% |
+
+**The byte worry above was misplaced, and the measured chunk sizes all hold.**
+Forest Church's largest slab is 15% of the cap, not the 30,210 this file
+feared -- that figure came from a different chunking, not from `--by-region`
+at the default cell. East Tradebourne lands at 24,180 bytes against the 24,204
+`docs/ftg-geojson-import.md` predicts for 112 tiles at `--max-assets 6500`,
+which is the same number after a market, a flue, yards and field walls were
+added to every town. Nothing needed dropping a step.
+
+**Every town reports the same three FAIL lines, and they are understood:**
+
+- `N of M props overlap` -- 4, 2, 48 and 144 pairs against 3,989 to 39,317
+  props. Section 9.1 of `docs/fencing.md` settles what these are: corners
+  penetrating past one thickness, and a panel clipping a scatter prop. Not
+  butted fence runs, which the board says are never dropped.
+- `(N boundary corner join(s) not counted)` -- the continuation line of the
+  finding above, which the CLI prints as its own `[FAIL]` row. Cosmetic; it
+  inflates a FAIL count by one.
+- `shell footing: N building(s) do not stand on their own floor`, every one at
+  y=0.47 over a floor top of 0.5 and every one `Tavern Wall 01`, which is 2.03
+  tall where every other medieval wall is 2.00. The head is seated on the
+  course line and the 0.03 is absorbed at the base where the floor hides it.
+  `shell-footing-tolerance` in `tasks.json`.
+
+Storeys on East Tradebourne now read `1:456 2:340 3:193`, mean 1.73, against
+the `1:167 2:575 3:247`, mean 2.08 in CLAUDE.md. That is expected and not a
+regression: **storeys are fixed at IMPORT**, and this is a fresh import.
+
 ## Phase 3 — paste, one town per board (game)
 
 Per town: name the board per `.claude/skills/talespire-boards/SKILL.md`,
