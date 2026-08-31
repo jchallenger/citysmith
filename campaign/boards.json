@@ -51,6 +51,19 @@
    "disposable": false,
    "note": "backfilled 2026-08-27 from the layout still in out/; NOT recorded at paste time, so the digest is unknown and a rebuild cannot be told from the board"
   },
+  "East Tradebourne 08-31": {
+   "board": "East Tradebourne 08-31",
+   "holds": "town",
+   "source": "East Tradebourne.geojson",
+   "folder": "",
+   "stem": "tradebourne",
+   "chunks": 114,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T12:20:45",
+   "disposable": false,
+   "note": ""
+  },
   "FENCE A drystone": {
    "board": "FENCE A drystone",
    "holds": "probe",
@@ -193,6 +206,19 @@
    "recorded": "2026-08-27T11:14:15",
    "disposable": false,
    "note": "backfilled 2026-08-27 from the layout still in out/; NOT recorded at paste time, so the digest is unknown and a rebuild cannot be told from the board"
+  },
+  "Graybank 08-31": {
+   "board": "Graybank 08-31",
+   "holds": "town",
+   "source": "Graybank.geojson",
+   "folder": "",
+   "stem": "graybank",
+   "chunks": 22,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T11:52:18",
+   "disposable": false,
+   "note": ""
   },
   "PROBE 2x2 hip rotations": {
    "board": "PROBE 2x2 hip rotations",

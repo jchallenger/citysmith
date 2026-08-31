@@ -204,6 +204,44 @@ touch the height again, because Ctrl+scroll moves the camera without moving
 the focal target and a later height change throws the whole frame out of
 focus.
 
+### Phase 3 RUN: Graybank and East Tradebourne, 2026-08-31
+
+Both rebuilt first, because the boards standing before this carried neither
+the chimney caps nor the yard pass.
+
+| town | board | assets | chunks | largest slab | of cap |
+|---|---|---|---|---|---|
+| Graybank | `Graybank 08-31` | 91,147 | 22 | 22,611 | 74% |
+| East Tradebourne | `East Tradebourne 08-31` | 402,644 | 114 | 23,931 | 78% |
+
+Both came DOWN from the Phase 2 figures (91,777 and 407,396): the chimney and
+yard passes remove more than the new yard goods add, and Graybank's largest
+slab gained headroom from 23,559.
+
+The design work reads in the reports. Chimneys: Graybank `219 stack(s) -- 64
+of 1 course, 155 of 2`; East Tradebourne `1696 stack(s) -- 489 of 1, 1207 of
+2`, and on ET `placed end/lateral/ridge by quarter`, it being the one town
+whose trades cluster hard enough to key on. Yards: 89 of 150 and 230 of 989.
+
+**East Tradebourne's 114 chunks take about seventeen minutes to paste**, which
+is past a foreground command's limit -- run it in the background rather than
+splitting it, because a split run has to re-establish the camera and the
+anchor cell and that is where a tiled paste goes wrong.
+
+Seen on the board:
+
+- **The yard pass.** A gravel yard behind post-and-rail with a cart, a log
+  pile and a barrel in it. No bed, no dresser, no chest anywhere outdoors.
+- **An authored crossing**, decked in timber with rope rails on both sides,
+  running the raster's stair-stepped diagonal over open water.
+- The civic tier's dressed castle stone with its crenellated head, beside
+  terracotta trade roofs each carrying a single stack.
+
+**NOT checked on these two**, and listed rather than implied: Warden Market
+untouched by the carve, the wall verify line, and Graybank's drystone
+boundaries on real parcel lines. Each needs flying to a known place on a
+739x598 town at a camera that frames about 40 tiles.
+
 ## Phase 4 — README
 
 New screenshots into `docs/images`, and the feature list catches up: grown
