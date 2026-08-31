@@ -415,6 +415,19 @@
    "disposable": false,
    "note": "One bay per quarter at seed 2 (civic=crow, docks=flush, outskirts=hip), gable ends all facing WEST so one square-on elevation holds all three. THE elevation for crowstep-end-elevation."
   },
+  "PROBE gable handbuilt": {
+   "board": "PROBE gable handbuilt",
+   "holds": "probe",
+   "source": "out\\gable\\rural-thatch.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T17:19:16",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\gthatch4-*"
+  },
   "PROBE gable thatch": {
    "board": "PROBE gable thatch",
    "holds": "probe",

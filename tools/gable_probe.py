@@ -259,6 +259,13 @@ def lay_bay(out, pieces, ground, wall, ox: int, oz: int, treatment: str,
             if cap is not None:
                 out.append(place_tile(cap, ox + x, oz + z, y - cap.size_y))
             continue
+        # **The end column carries NO slope when a verge closes it.** Read
+        # off the hand-build the user sent: at x=0 there is not one
+        # `Thatched Roof 01`, only the two `Thatched Roof Wall` pieces. The
+        # verge REPLACES the slopes rather than standing in front of them.
+        if (treatment in ("gable-end",) and x in (lo_x, hi_x)
+                and (infill is not None or end is not None)):
+            continue
         # `half-hip` hips only the outermost column of each end, which is the
         # compromise a real barn has: a short hipped face above a gable.
         if hip_last and x in (lo_x, hi_x):
@@ -276,60 +283,34 @@ def lay_bay(out, pieces, ground, wall, ox: int, oz: int, treatment: str,
 
     # **The triangle, and this is the whole of `gable-verge-look`.**
     #
-    # First cut of this stood an `end` piece at every cell of the end column
-    # with `place_wall`, ON TOP of the slope already there rather than in
-    # place of it, and the board showed thatch bolsters proud of the ridge
-    # like horns. `lay_bay_wide` does not do that: at the end column it
-    # SUBSTITUTES the end piece for the slope. The horns were the probe.
+    # **Measured off a hand-build the user made and sent** (14 placements, a
+    # 3x5 thatched gable): at the end column there are NO slopes, only TWO
+    # `Thatched Roof Wall` pieces -- one per fall side, both at the LOWEST
+    # course height, each taking the same rotation as the slope it replaces.
+    # The piece is 2.0 tall against a 1.0 rise, so one covers both courses and
+    # reaches the ridge in a single placement. The ridge cap still runs across
+    # the end column on top of it.
     #
-    # A wall-shaped verge piece is not a cap and does not stack like one.
-    # `Thatched Roof Wall` is 2.0 x 2.0 x 1.0 -- two cells along its own x,
-    # two tiles tall, one deep -- so laid in a plane of constant x it takes a
-    # quarter turn to put its long axis across the ridge, spans TWO cells of
-    # z, and covers TWO courses of a 1.0 rise. One per cell, unturned, is the
-    # column of stacked panels the first paste showed.
+    # Every earlier cut of this was wrong in a way the hand-build answers
+    # flatly. Standing an `end` piece on top of the slope with `place_wall`
+    # gave a column of panels; stacking panels up the rake gave thatch
+    # bolsters proud of the ridge. Neither is a kit fault and both were the
+    # probe: the piece is not stacked at all, it is laid once.
     verge = infill if infill is not None else end
     if verge is None:
-        verge = cap
-    if verge is None:
         return
-    wide = verge.size_x >= 2.0 - 1e-6
     zs = sorted({c[1] for c in cells})
-    step = 2 if wide else 1
-    lift = verge.size_y
-
     for x in (lo_x, hi_x):
-        for i in range(0, len(zs), step):
-            group = zs[i:i + step]
-            if len(group) < step:
-                continue        # an odd cell at the end has no partner piece
-            course = max(courses[(x, zz)][0] for zz in group)
-            if course <= 0:
+        for fall in ("n", "s"):
+            side_cells = [z for z in zs
+                          if courses.get((x, z), (0, None))[1] == fall]
+            if not side_cells:
                 continue
-            cz = oz + (group[0] + group[-1]) / 2.0 + 0.5
-            cx = ox + x + 0.5
-            # A quarter turn where the piece is wide, so its length runs
-            # across the ridge and not along it.
-            rot = 6 if wide else 0
-            # **Only a panel that FITS under the roof line.** A 2.0-tall
-            # panel started at the last course rises a course past the slope
-            # it is closing, and on the board that is a thatch bolster
-            # standing proud of the ridge like a horn -- which is what the
-            # first two pastes of this showed and what was read as a kit
-            # fault before it was read as arithmetic.
-            tall = max(1, int(round(lift / rise)))
-            k = 0
-            while k + tall <= course:
-                out.append(place_centered(verge, cx, cz, roof_y + k * rise, rot))
-                k += tall
-            # The remainder, shorter than one panel, takes the flat cap: it is
-            # the one place the boarding is unavoidable, and it is one course
-            # under the ridge rather than the whole rake.
-            if k < course and cap is not None:
-                for j in range(k, course):
-                    out.append(place_centered(cap, cx, cz,
-                                              roof_y + j * rise, rot))
-
+            # Centred on the run of cells that fall this way, at the base
+            # course -- one piece, not one per course.
+            cz = oz + (min(side_cells) + max(side_cells)) / 2.0 + 0.5
+            out.append(place_centered(verge, ox + x + 0.5, cz, roof_y,
+                                      (ROOF_EDGE_ROT[fall] + edge_off) % 24))
 
 def lay_bay_wide(out, pieces, ox: int, oz: int, offset: int,
                  wall, wall_courses: int, across: int,
