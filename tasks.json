@@ -1968,6 +1968,14 @@
         "roofs",
         "chimneys"
       ]
+    },
+    {
+      "id": "market-stall-deal",
+      "what": "Deal the market stall per pitch, instead of resolving one for the whole map",
+      "state": "open",
+      "doc": "docs/market-squares.md",
+      "evidence": "test:test_a_market_row_uses_more_than_one_stall_mesh",
+      "note": "MEASURED on a board 2026-08-31 with `tools/market_probe.py --seed 33`. `_dress_market` does `stall = b.palette.resolve(\"market_stall\")` ONCE (build.py:7992) with no variant index, while `market_goods` on the very next line deals four with `resolve(role, v) for v in range(4)`. So every stall in every square in every town is the same mesh -- under seed 33 that is `Stall Magic`, a trestle counter with an open book, potion bottles and a purple cloth, repeated down every market row.\n\n**This is the roof defect in a new place.** CLAUDE.md already records `_lay_roofs` resolving the roof set once for the map rather than once per building, which put `Thatched Roof 01` on every building on the map. Same shape, same fix.\n\nThe role does NOT need repinning. `market_stall` is already a structured group query on the stall group -- pinned by kit, which is what `docs/regenerating-boards.md` Phase 1 asked for. The kit is fine; it collapses to one mesh at the deal. Probed candidates, all plausible as a market stall: Stall Empty 02 (2.01x0.76x1.01, a bare counter), Stall Magic (2.01x1.05x1.12), Stall Weapons (2.01x0.92x1.10, spears and a round shield). The control, `castle merlon 1x1`, read wrong as designed.\n\nWhy it is not a one-liner: all three are 2.01 wide so the pitch is unaffected, but the DEPTHS differ (1.01 to 1.12) and the keep-clear reservation is what `verify.market_square_open` guards -- that check exists because a stall box wider than its pitch sealed 8 cells of Forest Church's square against its own frontage. `covered(stall, mx, mz, rot)` is already computed per placement, so dealing per pitch should be safe, but it wants the market tests run and a fresh look at one square."
     }
   ]
 }
