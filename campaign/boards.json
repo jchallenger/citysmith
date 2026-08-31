@@ -610,6 +610,19 @@
    "disposable": false,
    "note": ""
   },
+  "Pelvesthollow yards": {
+   "board": "Pelvesthollow yards",
+   "holds": "town",
+   "source": "Pelvesthollow.geojson",
+   "folder": "",
+   "stem": "pelvesthollow",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T11:03:02",
+   "disposable": false,
+   "note": ""
+  },
   "Probe - Halfling old paste": {
    "board": "Probe - Halfling old paste",
    "holds": "probe",
