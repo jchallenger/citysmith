@@ -213,6 +213,11 @@ def _prop_asset(n: int, name: str, sx: float, sy: float, sz: float) -> Asset:
 
 
 STALL = _prop_asset(1, "Stub Stall", 2.0, 1.8, 1.0)
+#: A kit, not a mesh. Depths differ on purpose: the real stall group holds
+#: 1.01, 1.10 and 1.12, and the period has to hold for the deepest whichever
+#: one a pitch deals.
+STALL_B = _prop_asset(6, "Stub Stall B", 2.0, 1.8, 1.12)
+STALL_C = _prop_asset(7, "Stub Stall C", 2.0, 1.8, 1.05)
 CRATE = _prop_asset(2, "Stub Crate", 0.8, 0.7, 0.8)
 BASKET = _prop_asset(3, "Stub Basket", 0.45, 0.4, 0.45)
 WELL = _prop_asset(4, "Stub Well", 1.4, 1.6, 1.4)
@@ -236,13 +241,21 @@ class MarketPalette:
     """StubPalette pattern from conftest, for the market roles only."""
 
     def __init__(self, stall=STALL, goods=(CRATE, BASKET), well=WELL):
-        self._stall, self._goods, self._well = stall, list(goods), well
+        # `stall` may be one asset or a kit of them. The pass deals one per
+        # pitch, so the stub has to be able to offer more than one.
+        self._stalls = ([] if stall is None else
+                        list(stall) if isinstance(stall, (list, tuple))
+                        else [stall])
+        self._stall = self._stalls[0] if self._stalls else None
+        self._goods, self._well = list(goods), well
         self.catalog = _MarketCatalog(
-            [a for a in [stall, well, *self._goods] if a is not None])
+            [a for a in [*self._stalls, well, *self._goods] if a is not None])
 
     def resolve(self, role, variant=0):
         if role == "market_stall":
-            return self._stall
+            if not self._stalls:
+                return None
+            return self._stalls[variant % len(self._stalls)]
         if role == "plaza_well":
             return self._well
         if role == "market_goods" and self._goods:
@@ -438,6 +451,34 @@ def test_the_real_square_stays_one_room_when_dressed(town):
     assert market_square_open(b, town) == []
     assert _of(b, WELL), "the town well stands in the square"
     assert _of(b, STALL), "a 51-building town holds a stall market"
+
+
+def test_a_market_row_uses_more_than_one_stall_mesh():
+    """The stall is dealt PER PITCH, not resolved once for the map.
+
+    `_dress_market` used to do `resolve("market_stall")` with no variant while
+    `market_goods` on the next line dealt four, so every stall in every square
+    in every town was one repeated mesh -- on Forest Church, seven copies of
+    the same counter. That is the defect `_lay_roofs` had when it resolved the
+    roof set once for the map and put one thatch on every building.
+
+    The kit's depths differ, which is why the fix is not one line: the period
+    and the pitch are settled before a stall is dealt, so they take the
+    deepest and the widest candidate and hold for any of them.
+    """
+    tm = TileMap.blank(30, 30)
+    for z in range(10, 20):
+        for x in range(8, 22):
+            tm.surface[z][x] = PLAZA
+    b = Builder(MarketPalette(stall=(STALL, STALL_B, STALL_C), well=None))
+    _dress_market(b, tm, Scatter(b), 0.5, {})
+
+    kit = {STALL.id, STALL_B.id, STALL_C.id}
+    placed = [p.asset_id for p in b.placements if p.asset_id in kit]
+    assert len(placed) >= 4, f"too few stalls to say anything: {len(placed)}"
+    assert len(set(placed)) > 1, (
+        "every stall on the square is the same mesh -- the kit was resolved "
+        "once instead of dealt per pitch")
 
 
 def test_the_market_is_deterministic():

@@ -7893,6 +7893,14 @@ MARKET_STALL_RATE = 0.75
 #: this put three in a run on Forest Church and the 30 ft wall of counters
 #: sealed 8 cells of the square against its own frontage -- caught by
 #: `verify.market_square_open`, on the first real town it ran on.
+#: How many variants of `market_stall` to ask the palette for. The role is a
+#: group query, so the kit may hold several meshes and the seed deals one per
+#: pitch -- resolving it ONCE gave every square in every town the same stall,
+#: which is the defect `_lay_roofs` had when it resolved the roof set once for
+#: the map and put one thatch on every building. Six is comfortably past the
+#: three the medieval stall group holds; duplicates are dropped.
+MARKET_STALL_VARIANTS = 6
+
 MARKET_MAX_STALL_RUN = 2
 
 #: Measured on 2,382 hand-placed props from community interiors
@@ -7989,11 +7997,20 @@ def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
     if not comps:
         return False
 
-    stall = b.palette.resolve("market_stall")
+    # The stall is dealt PER PITCH, not resolved once for the map. `goods`
+    # below has always done this; the stall did not, so a whole town's markets
+    # were one repeated mesh.
+    seen: set[str] = set()
+    stalls = []
+    for v in range(MARKET_STALL_VARIANTS):
+        s = b.palette.resolve("market_stall", v)
+        if s is not None and s.id not in seen:
+            seen.add(s.id)
+            stalls.append(s)
     goods = [g for g in (b.palette.resolve("market_goods", v) for v in range(4))
              if g is not None]
     well = b.palette.resolve("plaza_well")
-    if stall is None and not goods and well is None:
+    if not stalls and not goods and well is None:
         return False
 
     door_fronts: set[tuple[int, int]] = set()
@@ -8143,24 +8160,24 @@ def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
         # A stall deeper than a cell eats lines behind its counter, so the
         # period stretches to keep two clear aisle lines whatever the asset
         # measures -- the depth is data, not an assumption.
-        if stall is not None:
-            probe_rot = _stall_rotation(stall, axis, 1)
-            psx, psz = rotated_footprint(stall, probe_rot)
-            deep = max(1, math.ceil(psz if axis == "x" else psx))
-        else:
-            deep = 1
+        # Across every candidate, because the aisle has to stay clear whichever
+        # one the row deals -- the deepest sets the period for all of them.
+        deep = 1
+        for s in stalls:
+            probe_rot = _stall_rotation(s, axis, 1)
+            psx, psz = rotated_footprint(s, probe_rot)
+            deep = max(deep, math.ceil(psz if axis == "x" else psx))
         period = max(MARKET_ROW_PERIOD, 2 + deep)
 
         for k, ln in enumerate(ln for i, ln in enumerate(lines)
                                if i % period == 1):
             face = 1 if k % 2 == 0 else -1
-            rot = _stall_rotation(stall, axis, face) if stall is not None else 0
-            if stall is not None:
-                sx, sz = rotated_footprint(stall, rot)
-                pitch = max(1, math.ceil(sx if axis == "x" else sz))
-                cross = sz if axis == "x" else sx
-            else:
-                pitch = 1
+            # The run-length test happens BEFORE a stall is dealt, so the pitch
+            # has to be one every candidate fits in: the widest sets it.
+            pitch = 1
+            for s in stalls:
+                sx, sz = rotated_footprint(s, _stall_rotation(s, axis, face))
+                pitch = max(pitch, math.ceil(sx if axis == "x" else sz))
 
             row = sorted((c for c in comp if line_of(c) == ln and clear(c)),
                          key=along)
@@ -8171,9 +8188,14 @@ def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
                 run = [row[pos + j] for j in range(pitch)
                        if pos + j < len(row)
                        and along(row[pos + j]) == along(c) + j]
-                if (stall is not None and len(run) == pitch
+                if (stalls and len(run) == pitch
                         and in_run < MARKET_MAX_STALL_RUN
                         and rng.random() < MARKET_STALL_RATE):
+                    # One stall from the kit, this pitch only.
+                    stall = stalls[rng.randrange(len(stalls))]
+                    rot = _stall_rotation(stall, axis, face)
+                    sx, sz = rotated_footprint(stall, rot)
+                    cross = sz if axis == "x" else sx
                     # Front edge on the aisle boundary, depth reaching back
                     # -- a counter is stood behind, not centred on a line.
                     front = ln + 1 - cross / 2.0 if face > 0 else ln + cross / 2.0
