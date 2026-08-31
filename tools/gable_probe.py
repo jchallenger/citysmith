@@ -168,6 +168,136 @@ WIDE_ACROSS = 4
 _INWARD = {"n": (0, 1), "s": (0, -1), "e": (-1, 0), "w": (1, 0)}
 
 
+def lay_bay(out, pieces, ground, wall, ox: int, oz: int, treatment: str,
+            span: int = 1, long_: int = BAY_LONG, across: int = BAY_ACROSS,
+            wall_courses: int = WALL_COURSES) -> None:
+    """One SINGLE-COURSE bay, ended four ways. The `--scale 1` half.
+
+    This did not exist: `main` has always called it and only `lay_bay_wide`
+    was ever written, so `--kit Rural` -- the thatched cottage every complaint
+    about verges has been about -- died on a `NameError` and the one material
+    that mattered was the one material this probe could not build.
+
+    **The gable arithmetic is `build.roof_courses`, not a copy of it**, the
+    same rule `lay_bay_wide` states: a probe that reimplements what it is
+    probing can only tell you about the probe. `roof_courses` already takes
+    the ridge axis and answers `(course, fall)` per cell with `None` for the
+    ridge band, which is exactly the three gable treatments.
+
+    **The hip control is the exception, and it is declared rather than
+    hidden.** The shipped hip is `_lay_roofs`, which needs a Builder and a
+    TileMap and cannot be called from here; so the control is built from
+    `_roof_rings` -- the real flood, not a copy -- plus the one rule the flood
+    does not carry, which side a ring cell falls toward. If the hip bay ever
+    looks wrong, suspect this before suspecting the kit.
+
+        hip        every side an eave; no gable, no end piece, no triangle
+        gable-end  ridge runs out; `end` closes it; `infill` fills the
+                   triangle, or the cap is stacked where the kit has no
+                   infill -- which is the boarding `gable-verge-look` is about
+        gable-bare ridge runs out and the end is left open. If this reads the
+                   same as `gable-end`, the end piece is closing nothing
+        half-hip   ridge runs out, then the last course hips
+    """
+    cells = {(x, z) for x in range(long_) for z in range(across)}
+    floor = pieces["floor"]
+    wall_h = wall.size_y
+    for x, z in sorted(cells):
+        out.append(place_tile(floor, ox + x, oz + z, -floor.size_y))
+    for level in range(wall_courses):
+        y = level * wall_h
+        for x, z in sorted(cells):
+            for side, dx, dz in SIDE_OFFSETS:
+                if (x + dx, z + dz) not in cells:
+                    out.append(place_wall(wall, ox + x, oz + z, side, y))
+
+    roof_y = wall_courses * wall_h
+    slope = pieces["slope"]
+    corner = pieces.get("corner")
+    cap = pieces.get("cap")
+    end = pieces.get("end")
+    infill = pieces.get("infill")
+    rise = slope.size_y
+    edge_off, corner_off = roof_offsets(slope)
+
+    xs = sorted({c[0] for c in cells})
+    lo_x, hi_x = xs[0], xs[-1]
+
+    if treatment == "hip":
+        rings = _roof_rings(cells)
+        peak = max(rings.values())
+        for (x, z), ring in sorted(rings.items()):
+            y = roof_y + ring * rise
+            # Which sides this cell is `ring` steps from -- the flood does not
+            # record it, and a cell equidistant from two is a corner.
+            near = [s for s, dx, dz in SIDE_OFFSETS
+                    if (x + dx * (ring + 1), z + dz * (ring + 1)) not in cells]
+            if ring == peak and cap is not None and len(near) != 1:
+                out.append(place_tile(cap, ox + x, oz + z, y - cap.size_y))
+                continue
+            if len(near) >= 2 and corner is not None:
+                key = frozenset(near[:2])
+                which = CORNER_OF.get(key)
+                if which is not None:
+                    rot = (ROOF_CORNER_ROT[which] + corner_off) % 24
+                    out.append(place_tile(corner, ox + x, oz + z, y, rot))
+                    continue
+            fall = near[0] if near else None
+            if fall is None:
+                if cap is not None:
+                    out.append(place_tile(cap, ox + x, oz + z, y - cap.size_y))
+                continue
+            rot = (ROOF_EDGE_ROT[fall] + edge_off) % 24
+            out.append(place_tile(slope, ox + x, oz + z, y, rot))
+        return
+
+    courses = roof_courses(cells, "x", roof_course_cells(slope))
+    hip_last = treatment == "half-hip"
+    for (x, z), (course, fall) in sorted(courses.items()):
+        y = roof_y + course * rise
+        if fall is None:                       # the ridge band
+            if cap is not None:
+                out.append(place_tile(cap, ox + x, oz + z, y - cap.size_y))
+            continue
+        # `half-hip` hips only the outermost column of each end, which is the
+        # compromise a real barn has: a short hipped face above a gable.
+        if hip_last and x in (lo_x, hi_x):
+            side = "w" if x == lo_x else "e"
+            rot = (ROOF_EDGE_ROT[side] + edge_off) % 24
+            out.append(place_tile(slope, ox + x, oz + z, y, rot))
+            continue
+        out.append(place_tile(slope, ox + x, oz + z, y,
+                              (ROOF_EDGE_ROT[fall] + edge_off) % 24))
+
+    if treatment == "gable-bare":
+        return                                  # the control: nothing closes it
+
+    # The end piece stands in the gable wall's plane, one per course.
+    for (x, z), (course, fall) in sorted(courses.items()):
+        # A half-hip has no gable wall at that column -- it is hipped -- so
+        # there is nothing for an end piece to stand in.
+        if hip_last or x not in (lo_x, hi_x):
+            continue
+        side = "w" if x == lo_x else "e"
+        if end is not None:
+            out.append(place_wall(end, ox + x, oz + z, side, roof_y + course * rise))
+
+    # The triangle under it: the kit's own infill panel where it has one, and
+    # the roof's flat cap stacked where it does not -- which is precisely the
+    # boarding `gable-verge-look` exists to replace, kept here as the control
+    # the candidate has to beat.
+    filler = infill if infill is not None else cap
+    if filler is None:
+        return
+    for (x, z), (course, fall) in sorted(courses.items()):
+        if x not in (lo_x, hi_x):
+            continue
+        side = "w" if x == lo_x else "e"
+        for k in range(course):
+            out.append(place_wall(filler, ox + x, oz + z, side,
+                                  roof_y + k * filler.size_y))
+
+
 def lay_bay_wide(out, pieces, ox: int, oz: int, offset: int,
                  wall, wall_courses: int, across: int,
                  long_: int = BAY_LONG) -> None:
