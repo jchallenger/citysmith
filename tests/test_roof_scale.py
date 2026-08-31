@@ -410,6 +410,15 @@ def test_the_flue_is_the_one_the_user_built(cat):
     `Thatched Chimney` courses at 0.25, 0.50, 0.75 and 1.25. The bottom three
     lap by `CHIMNEY_LAP`, each buried to its middle in the one below, and the
     fourth sits flush on the third to form the mouth.
+
+    **The shipped flue is TWO of those courses, not four, and that is a
+    judgement rather than a re-measurement.** Read on a board 2026-08-31 the
+    answer came back "no house should have this many, and too tall chimneys,
+    max at 2", so `flue_courses` lays one shaft and one mouth. What this test
+    still holds is everything the hand-build actually measures: the foot sits
+    at `CHIMNEY_BASE` above the slope's base, and **every course laid is one
+    the hand-build also has** -- the pair falls on its lattice rather than
+    near it. Only how many is a matter of taste, and taste was asked.
     """
     from citysmith import slab as S
     from citysmith.build import lay_flue
@@ -436,10 +445,13 @@ def test_the_flue_is_the_one_the_user_built(cat):
 
     got = _Collector()
     lay_flue(got, bare, 0, 0, base, on_slope=True)
-    assert sorted(round(p.y, 4) for p in got.placements) == sorted(
-        round(pl.y, 4) for pl, _ in hand), (
-        f"laid {sorted(round(p.y, 4) for p in got.placements)} against the "
-        f"hand-build's {sorted(round(pl.y, 4) for pl, _ in hand)}")
+    laid = sorted(round(p.y, 4) for p in got.placements)
+    built = sorted(round(pl.y, 4) for pl, _ in hand)
+    assert len(laid) == 2, f"a flue is one shaft and one mouth, laid {laid}"
+    assert laid[0] == built[0], (
+        f"the flue's foot moved off the hand-build: {laid[0]} vs {built[0]}")
+    assert set(laid) <= set(built), (
+        f"laid {laid} sits off the hand-build's lattice {built}")
 
 
 def test_no_roof_and_chimney_combination_is_placed(cat):

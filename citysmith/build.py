@@ -4426,18 +4426,23 @@ def flue_courses(bare) -> tuple[float, ...]:
     point**, and it is why the hand-build is four pieces rather than a taller
     one.
 
-    A piece a tile or more tall is not a stub and takes the same shape without
-    the lap: one shaft course and one mouth. Only the half-tile case is
-    measured, and only for thatch -- Tavern's 1.0-tall `Chimney 01` gets the
-    analogue rather than a measurement, and `chimney-flue-at-the-single-scale`
-    carries that too.
+    **TWO COURSES, whatever the piece: one shaft and one mouth.** The
+    half-tile piece used to take three lapped courses and a mouth, which is
+    what the hand-build measures and is why `CHIMNEY_BASE` describes four.
+    Read on a board 2026-08-31 the answer came back "no house should have this
+    many, and too tall chimneys, max at 2", so the lapped form is retired: a
+    thatch stack goes from 1.5 tiles proud of its seat to 1.0, and a tile stack
+    was already two courses and does not move.
+
+    The hand-build is not wrong and is not deleted -- `CHIMNEY_LAP` and
+    `CHIMNEY_BASE` still record what it measured, and the lap is what makes
+    lapped courses read as continuous masonry if a taller stack is ever wanted
+    again. What changed is how tall a chimney should be, which is a judgement
+    about the town and not a measurement of the piece.
     """
     if bare is None:
         return ()
-    if bare.size_y >= 1.0:
-        return (0.0, bare.size_y)
-    laps = tuple(i * CHIMNEY_LAP for i in range(3))
-    return laps + (laps[-1] + bare.size_y,)
+    return (0.0, bare.size_y)
 
 
 #: How far a 2x2 flat cap sits below the course it closes.
@@ -4640,6 +4645,16 @@ CHIMNEY_MIN_WING = 6
 #: stacks rather than one.
 CHIMNEY_SECOND_CROWN = 7
 
+#: The most stacks one building may carry.
+#:
+#: A stack per wing plus a second on a long crown compounds: measured on
+#: Forest Church, 16 of 48 buildings came out with more than two -- 13 with
+#: three and 3 with four -- and read on a board that is a roofline of chimneys
+#: rather than a house. The wings are taken largest first, and the long-crown
+#: twin is only allowed when a single wing is carrying, so a lone long range
+#: still gets its pair while an L-plan gets one per range and stops.
+CHIMNEY_MAX_PER_BUILDING = 2
+
 
 #: Where a quarter puts its stacks, as ``(form, weight)``.
 #:
@@ -4705,7 +4720,8 @@ def wing_carries_a_stack(wing: set, main_wing: set) -> bool:
 
 
 def chimney_cells(crown: list, flank: list,
-                  form: str = DEFAULT_CHIMNEY_FORM) -> list:
+                  form: str = DEFAULT_CHIMNEY_FORM,
+                  twin_allowed: bool = True) -> list:
     """Which cells of a wing carry a flue.
 
     ``crown`` is the top course, ``flank`` the one below it -- both already
@@ -4726,7 +4742,7 @@ def chimney_cells(crown: list, flank: list,
     """
     if not crown:
         return []
-    twin = len(crown) > CHIMNEY_SECOND_CROWN
+    twin = twin_allowed and len(crown) > CHIMNEY_SECOND_CROWN
     if form == "lateral" and flank:
         if twin and len(flank) > 1:
             return [flank[len(flank) // 4], flank[3 * len(flank) // 4]]
@@ -5018,7 +5034,8 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                      roof_y: float, rise: float, side, cap,
                      edge_off: int, tread, chimney=None, infill=None,
                      end=None, flue=None,
-                     form: str = DEFAULT_CHIMNEY_FORM) -> None:
+                     form: str = DEFAULT_CHIMNEY_FORM,
+                     twin_allowed: bool = True) -> None:
     """One gabled wing: ridge along the long axis, ends per ``treatment``.
 
     ``crow`` carries the end wall one course proud of the roof and **owns the
@@ -5114,7 +5131,8 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                     and not (crow and on_end(c)) and c not in covered]
 
         top = max(c for c, _ in courses.values())
-        for chimney_at in chimney_cells(_course(top), _course(top - 1), form):
+        for chimney_at in chimney_cells(_course(top), _course(top - 1), form,
+                                        twin_allowed):
             # **The cell keeps its ordinary roof.** A sloped cell already has
             # its slope from the anchors loop above and a ridge cell is capped
             # by the cap loop below -- neither of which knows or cares that a
@@ -5347,8 +5365,17 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
         # `CHIMNEY_MIN_WING`.
         main_wing = max(wings, key=len) if wings else set()
 
+        # **At most `CHIMNEY_MAX_PER_BUILDING`, largest wing first.** A stack
+        # per wing and a twin on a long crown compound into three and four on
+        # a third of a town's houses; see the constant.
+        _eligible = sorted((w for w in wings if wing_carries_a_stack(w, main_wing)),
+                           key=len, reverse=True)[:CHIMNEY_MAX_PER_BUILDING]
+        _carrying = [id(w) for w in _eligible]
+        # A twin only where one wing is carrying the whole building's budget.
+        _twin_ok = len(_carrying) < CHIMNEY_MAX_PER_BUILDING
+
         def _carries(wing) -> bool:
-            return wing_carries_a_stack(wing, main_wing)
+            return id(wing) in _carrying
 
         for wing in wings:
             # **How this wing ends its ridge, dealt by QUARTER.** `quarter_at`
@@ -5383,7 +5410,8 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                                  edge_off, tread,
                                  chimney if _carries(wing) else None,
                                  infill, end, flue,
-                                 _wing_chimney_form(wing, quarter_at, seed))
+                                 _wing_chimney_form(wing, quarter_at, seed),
+                                 _twin_ok)
                 continue
 
             # **The whole wing at the double scale, or none of it.** Mixing
@@ -5447,7 +5475,8 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                     crown = [c for c in slopes if rings[c] == peak]
                     flank = [c for c in slopes if rings[c] < peak]
                 stacks = chimney_cells(
-                    crown, flank, _wing_chimney_form(wing, quarter_at, seed))
+                    crown, flank, _wing_chimney_form(wing, quarter_at, seed),
+                    _twin_ok)
 
             # **The last course is a ridge cap, not another ring.** Stepping
             # the top ring up a full rise and roofing it in slopes leaves

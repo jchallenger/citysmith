@@ -170,7 +170,7 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
   chunk budget: 9,000 assets (from board size)
   wrote {npcs}  (4 post(s))
 
-993 assets in 2 chunk(s)
+977 assets in 2 chunk(s)
 
 [FAIL] placements: 60 tile placements are off the half-tile grid (first at x=3.34, z=9.32) -- minis with grid snap will not line up with the floors
 [FAIL] placements: 51 boundary piece(s) stand in a street or lane (first at x=2.50, z=10.50) -- a wall across a way is an obstacle on the one thing the map is for
@@ -178,13 +178,13 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
 [WARN] storeys: 1:4, mean 1.00  -- every building the same height
-[WARN] tile seams: 226 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
+[WARN] tile seams: 192 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
 [ok  ] connectivity: one connected town covering 100% of walkable space
 [ok  ] building access: 4 of 4 buildings (100.0%) can be entered from the street network
 [ok  ] street width: 0 of 134 street tiles (0.0%) are under 2 tiles (10 ft) wide -- a creature fills one tile, so two cannot pass abreast there
 [ok  ] vehicle width: main street 96/96 tiles hold 4 (20 ft), lane 38/38 tiles hold 2 (10 ft); 0 of 96 through-route tiles (0.0%) are under 3 tiles (15 ft), where a 10 ft cart cannot get past a pedestrian
 [ok  ] board size: 30x30 tiles (150x150 ft) fits the 2000x2000 board
-[ok  ] asset budget: 993 assets = 0.1% of the 1,000,000 per-board limit
+[ok  ] asset budget: 977 assets = 0.1% of the 1,000,000 per-board limit
 [ok  ] slab export: 2 slab paste(s), largest 2,580 compressed bytes (cap 30,720)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] gabled ends: none here; no quarters to key on, so every ridge is hipped -- a crop rarely clusters enough to have any
@@ -207,7 +207,7 @@ Chunk grid: 2 row(s) x 2 col(s) of 24x24 tiles (120x120 ft)
   [landscape]
           r00c00+3  x    0-25   z    0-27      731 assets (4 cells)  pin-landscape-r00c00+3.slab.txt
   [structure]
-            r00c00  x    0-23   z    0-23      262 assets, 4 buildings  pin-structure-r00c00.slab.txt
+            r00c00  x    0-23   z    0-23      246 assets, 4 buildings  pin-structure-r00c00.slab.txt
 
 Every chunk shares one origin (a registration marker at the map's corner),
 so paste each file at the SAME anchor point. Do not move the camera between
@@ -230,7 +230,7 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
   surfaces: 638 ground, 128 floor, 96 street, 38 plaza
   0 wall cells, 0 gate cells, 4 buildings with doors
 
-987 assets in 7 chunk(s)
+971 assets in 7 chunk(s)
 
 [FAIL] placements: 60 tile placements are off the half-tile grid (first at x=3.34, z=9.32) -- minis with grid snap will not line up with the floors
 [FAIL] placements: 48 boundary piece(s) stand in a street or lane (first at x=2.50, z=10.50) -- a wall across a way is an obstacle on the one thing the map is for
@@ -238,14 +238,14 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [WARN] gates: no gates found; routing from the map edge instead
 [WARN] surfaces: 2 distinct outdoor material(s): CobbleStone Floor Small, Grass 1x1
 [WARN] storeys: 1:4, mean 1.00  -- every building the same height
-[WARN] tile seams: 226 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
+[WARN] tile seams: 192 pairs of structural tiles occupy the same space -- buried geometry shows through as a seam that shifts with the camera
 [ok  ] connectivity: one connected town covering 100% of walkable space
 [ok  ] building access: 4 of 4 buildings (100.0%) can be entered from the street network
 [ok  ] street width: 0 of 134 street tiles (0.0%) are under 2 tiles (10 ft) wide -- a creature fills one tile, so two cannot pass abreast there
 [ok  ] vehicle width: main street 96/96 tiles hold 4 (20 ft), lane 38/38 tiles hold 2 (10 ft); 0 of 96 through-route tiles (0.0%) are under 3 tiles (15 ft), where a 10 ft cart cannot get past a pedestrian
 [ok  ] board size: 30x30 tiles (150x150 ft) fits the 2000x2000 board
-[ok  ] asset budget: 987 assets = 0.1% of the 1,000,000 per-board limit
-[ok  ] slab export: 7 slab paste(s), largest 768 compressed bytes (cap 30,720)
+[ok  ] asset budget: 971 assets = 0.1% of the 1,000,000 per-board limit
+[ok  ] slab export: 7 slab paste(s), largest 750 compressed bytes (cap 30,720)
 [ok  ] cart clearance: 0 of 120 through-route tiles (0.0%) have an open cross-section under 3 tiles (15 ft) -- a building overlapping a widened street re-narrows it, and a 10 ft cart cannot pass there
 [ok  ] gabled ends: none here; no quarters to key on, so every ridge is hipped -- a crop rarely clusters enough to have any
 [ok  ] chimneys: none; nothing here is roofed
@@ -264,10 +264,10 @@ Chunk grid: 2 row(s) x 2 col(s) of 24x24 tiles (120x120 ft)
  r01   #   # 
         # = written    . = open country, skipped
 
-          r00c00ne  x   12-23   z    0-11      208 assets, 1 buildings  pin-r00c00ne.slab.txt
-          r00c00nw  x    0-11   z    0-11      205 assets, 1 buildings  pin-r00c00nw.slab.txt
-          r00c00se  x   12-23   z   12-23      161 assets, 1 buildings  pin-r00c00se.slab.txt
-          r00c00sw  x    0-11   z   12-23      175 assets, 1 buildings  pin-r00c00sw.slab.txt
+          r00c00ne  x   12-23   z    0-11      204 assets, 1 buildings  pin-r00c00ne.slab.txt
+          r00c00nw  x    0-11   z    0-11      201 assets, 1 buildings  pin-r00c00nw.slab.txt
+          r00c00se  x   12-23   z   12-23      157 assets, 1 buildings  pin-r00c00se.slab.txt
+          r00c00sw  x    0-11   z   12-23      171 assets, 1 buildings  pin-r00c00sw.slab.txt
             r00c01  x   24-25   z    0-23       89 assets  pin-r00c01.slab.txt
             r01c00  x    0-23   z   24-27      136 assets  pin-r01c00.slab.txt
             r01c01  x   24-25   z   24-27       13 assets  pin-r01c01.slab.txt
