@@ -584,6 +584,19 @@
    "disposable": false,
    "note": ""
   },
+  "Pelvesthollow chim2": {
+   "board": "Pelvesthollow chim2",
+   "holds": "town",
+   "source": "Pelvesthollow.geojson",
+   "folder": "",
+   "stem": "pelvesthollow",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T10:29:00",
+   "disposable": false,
+   "note": ""
+  },
   "Pelvesthollow chimneys": {
    "board": "Pelvesthollow chimneys",
    "holds": "town",
