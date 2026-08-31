@@ -428,6 +428,32 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\gthatch-*"
   },
+  "PROBE gable thatch2": {
+   "board": "PROBE gable thatch2",
+   "holds": "probe",
+   "source": "out\\gable\\rural-thatch.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T16:58:58",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\gthatch2-*"
+  },
+  "PROBE gable thatch3": {
+   "board": "PROBE gable thatch3",
+   "holds": "probe",
+   "source": "out\\gable\\rural-thatch.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T17:00:28",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\gthatch3-*"
+  },
   "PROBE gable verge": {
    "board": "PROBE gable verge",
    "holds": "probe",
