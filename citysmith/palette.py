@@ -35,6 +35,38 @@ REQUIRED_ROLES = ("floor", "wall", "door", "roof")
 #: omits a missing well). ``validate()`` therefore does not fail a style for
 #: declaring one it cannot resolve -- that check exists for roles whose
 #: absence leaves a silent hole in the geometry, and these leave none.
+#: The roof kit's own VERGE piece: its material cast onto a wall, for closing
+#: a gable end. Keyed by `folder`, the same key `build.ROOF_ROT_OFFSET` uses,
+#: because the kit is the folder and the name is not the kit.
+#:
+#: **Rural only, and that is a measurement rather than caution.** The rule
+#: this piece is laid by comes from a hand-build the user sent
+#: (`tests/fixtures/handbuilt_verge.slab`): the verge REPLACES the end
+#: column's slopes, one piece per fall side, laid once at the lowest course
+#: with that side's own slope rotation, its 2.0 height covering both courses
+#: at a 1.0 rise. `haunted roof extra wall` is 1 cell wide where this one is
+#: 2, and `Village Roof Side End 02` is 2 tiles tall at a scale whose course
+#: is 1 -- neither follows the measured rule without a second measurement,
+#: and a guess here is the thing that produced boarding in the first place.
+GABLE_VERGE = {
+    "rural": "Thatched Roof Wall",   # `_kit_of` lower-cases the folder
+}
+
+
+def gable_verge(palette, roof_piece):
+    """The verge piece for whatever kit ``roof_piece`` came from, or None."""
+    if roof_piece is None:
+        return None
+    from .build import _kit_of
+    name = GABLE_VERGE.get(_kit_of(roof_piece))
+    if name is None:
+        return None
+    for a in palette.catalog.assets:
+        if a.name == name:
+            return a
+    return None
+
+
 OPTIONAL_ROLES = frozenset({"market_stall", "plaza_well",
                             "yard_smithy", "yard_trade"})
 
