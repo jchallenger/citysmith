@@ -571,6 +571,19 @@
    "disposable": false,
    "note": "the stale Pelvesthollow build, kept deliberately -- see commit 81965f1"
   },
+  "Pelvesthollow 08-31": {
+   "board": "Pelvesthollow 08-31",
+   "holds": "town",
+   "source": "Pelvesthollow.geojson",
+   "folder": "",
+   "stem": "pelvesthollow",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-08-31T09:52:20",
+   "disposable": false,
+   "note": ""
+  },
   "Probe - Halfling old paste": {
    "board": "Probe - Halfling old paste",
    "holds": "probe",

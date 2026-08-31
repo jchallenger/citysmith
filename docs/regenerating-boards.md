@@ -168,6 +168,42 @@ report READY, not STALE — nothing on this branch touches interiors. If one
 reads STALE, that is a finding, not a rebuild instruction: diff the digest
 first.
 
+### Phase 3 RUN: Pelvesthollow, 2026-08-31
+
+Board **`Pelvesthollow 08-31`** -- a third name, because `Pelvesthollow` and
+`Pelvesthollow (old)` were both already in the index and two boards with one
+name is worse than a dated one. The older pair are prune candidates, not
+deletions: a board is where something happened and there is no erase.
+
+`review.ps1 tiled` pasted all 9 chunks in manifest order at one cursor cell,
+camera vertical throughout, `r01c01` last as the manifest says. The rename was
+verified by reading the title bar back rather than trusting the script's own
+return string -- `grab.ps1 -Name titlecheck -X 1500 -Y 0 -W 420 -H 34`, 4 KB
+against 440 for a whole frame.
+
+**The board assembled with no step and no seam at any chunk join**, read from
+a high oblique across three of the nine regions. What is on it, and visible:
+three roof materials including the trade tier's terracotta beside common
+thatch; chimney stacks seated on the ridge rather than standing proud of it;
+enclosed yards with a well, a workbench and clutter in them; hedged property
+boundaries; cobbled lanes with carts and stumps along them.
+
+`docs/images/pelvesthollow-lane.jpg` is the first capture, cropped 1250x703
+from (200,150) so no HUD is in it.
+
+**NOT yet checked on this board**, and listed so nobody reads the above as
+more than it is: the three authored forest rings as closed stands with thinned
+pasture outside the line, and a TRAIL meeting grass flush and stopping at the
+stream bank rather than fording it. Both need flying to the map edges -- the
+camera caps at about 40 tiles of frame and this town is 176x184.
+
+**Camera note that cost several frames.** `nudge -Mode vertical` does nothing
+useful without `-X`/`-Y`: the scroll needs a cursor anchor. `panel_review.ps1`
+passes them and is the form to copy -- height first, then pitch, then never
+touch the height again, because Ctrl+scroll moves the camera without moving
+the focal target and a later height change throws the whole frame out of
+focus.
+
 ## Phase 4 — README
 
 New screenshots into `docs/images`, and the feature list catches up: grown
