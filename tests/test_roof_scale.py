@@ -611,11 +611,23 @@ def test_every_gabled_fabric_can_close_its_own_triangle(cat, tier):
     tread = _tread_for(palette, tier, {})
     infill = gable_infill(palette, tier, tread)
     assert infill is not None, f"{tier} cannot close a gable triangle"
-    # One course tall at most, or it cannot step with a 1.0 rise. It may be a
-    # thin WALL panel (civic carries its own wall up) or a full-cell roof cap
-    # (a timber verge is closed in the roof's material) -- `_lay_gabled_wing`
-    # reads which off the collider and picks place_wall or place_tile.
-    assert 1e-6 < infill.size_y <= 1.0, infill.name
+    # **A whole number of courses, or a whole number of them to a course.**
+    # This used to demand one course at most, on the reasoning that anything
+    # taller "cannot step with a 1.0 rise". It steps fine: the caller stacks
+    # by `infill.size_y`, so a 2.0 panel is laid twice as far apart and covers
+    # two courses a time. That reading is what kept every timber gable on the
+    # roof's flat cap, whose EDGE is what shows when it is stacked.
+    #
+    # Capped at one storey, because the Wall/Floor combinations are 2.5 -- a
+    # storey and a deck in one casting -- and would overshoot the roof line.
+    step = infill.size_y
+    assert 1e-6 < step <= 2.0, infill.name
+    courses = step / 1.0
+    assert (abs(courses - round(courses)) < 1e-6
+            or abs(1 / courses - round(1 / courses)) < 1e-6), infill.name
+    # Thin panel or full cell, but never wider than the cell it closes --
+    # `_lay_gabled_wing` reads which off the collider and picks place_wall or
+    # place_tile from it.
     assert max(infill.size_x, infill.size_z) == 1.0, infill.name
 
 
@@ -631,18 +643,33 @@ def test_the_masonry_fabric_carries_its_own_wall_up(cat):
     assert gable_infill(palette, "civic", tread) is tread
 
 
-def test_a_timber_fabric_closes_its_verge_in_the_ROOFS_material(cat):
-    """Tavern and Rural ship no wall piece under two tiles.
+def test_a_timber_fabric_carries_its_own_wall_up_the_gable(cat):
+    """The gable triangle is the wall, not the roof. Decided 2026-08-31.
 
-    Only floors, roofs and stairs -- so the house and the barn cannot carry
-    their wall up, and the verge is closed in the roof's own material instead.
-    Tile hanging and a wrapped thatch verge are both how a real gable of those
-    materials is finished.
+    **This test asserted the opposite**, and its premise was right while its
+    conclusion was not. Tavern and Rural do ship no wall piece under two
+    tiles -- only floors, roofs and stairs -- and the old reading took that to
+    mean the house and the barn "cannot carry their wall up", closing the
+    verge in the roof's material instead. But at a 1.0 rise their 2.0-tall
+    panel is EXACTLY TWO COURSES, and the caller stacks by `infill.size_y`, so
+    it steps perfectly well; it just steps two at a time. The same arithmetic
+    settles the verge piece in `tests/fixtures/handbuilt_verge.slab`.
+
+    Stacking the roof's flat cap shows a flat tile's EDGE once per course,
+    which reads as boarding on a board and was reported as such twice. Tile
+    hanging and a wrapped thatch verge are real finishes, so this was a taste
+    call rather than a defect -- and the call was made: a gable is the wall
+    carried up.
     """
     palette = Palette.named(cat, "medieval", 33)
     for tier in ("trade", "common", "utility"):
         infill = gable_infill(palette, tier, None)
-        assert infill is roof_set(palette, tier)[3], tier
+        assert infill is not None, tier
+        assert infill is not roof_set(palette, tier)[3], (
+            f"{tier} is still closing its gable in the roof's material")
+        # A wall panel: thin, so `_lay_gabled_wing` puts it on the wall line.
+        assert min(infill.size_x, infill.size_z) < 1.0, (tier, infill.name)
+        assert infill.size_y == 2.0, (tier, infill.name)
 
 
 def test_the_infill_stops_below_the_roof_rather_than_inside_it(cat):

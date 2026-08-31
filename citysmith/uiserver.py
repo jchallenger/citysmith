@@ -1308,6 +1308,12 @@ _ROUTES = (
     ("POST", re.compile(r"^/api/build$"), "api_build_start"),
     ("GET", re.compile(r"^/api/build/([0-9a-f]{16})$"), "api_build_poll"),
     ("GET", re.compile(r"^/api/files/(.+)$"), "api_file"),
+    # The slab screen: read a written slab without opening the game. Two rows
+    # rather than one endpoint returning both, because the picture is an
+    # `image/svg+xml` a page can put in an <img> and the legend is JSON.
+    ("GET", re.compile(r"^/api/slabs$"), "api_slabs"),
+    ("GET", re.compile(r"^/api/slabs/legend/(.+)$"), "api_slab_legend"),
+    ("GET", re.compile(r"^/api/slabs/svg/(.+)$"), "api_slab_svg"),
     # The paste screen. Note that no two rows share a pattern: `_dispatch`
     # answers 405 on the first pattern that matches with the wrong verb, so a
     # second row for the same path with a different verb would be unreachable.
@@ -1727,6 +1733,65 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self._json(200, {"text": text, "landed": end.as_json(),
                          "residual": residual, "moves": out["moves"],
                          "ok": out["ok"]})
+
+    def _read_slab(self, relative: str):
+        """Decode one written slab, or raise the errors `_dispatch` maps.
+
+        `resolve_in` is the same guard every other file endpoint uses: the
+        browser names a path relative to the output directory and cannot
+        escape it, and it is refused by NAME before the disk is touched --
+        which is what stopped `//host/share` costing a handler sixteen
+        seconds on a UNC lookup.
+        """
+        from . import slab as slab_mod
+
+        path = resolve_in(self.server.out_dir, relative)
+        if not path.is_file():
+            raise FileNotFoundError(f"{relative} has not been written")
+        if not path.name.endswith(".slab.txt"):
+            raise BadRequest("not a slab: expected a .slab.txt file")
+        return slab_mod.decode(path.read_text(encoding="utf-8").strip()), path
+
+    def api_slabs(self):
+        """Every slab under the output directory, newest first.
+
+        A scan the server does, exactly like `scan_sources`: the request
+        carries a name from THIS list and never a path of its own.
+        """
+        out = self.server.out_dir
+        rows = []
+        for path in sorted(out.rglob("*.slab.txt")):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            rows.append({
+                "path": path.relative_to(out).as_posix(),
+                "name": path.name[: -len(".slab.txt")],
+                "bytes": stat.st_size,
+                "modified": int(stat.st_mtime),
+            })
+        rows.sort(key=lambda r: r["modified"], reverse=True)
+        self._json(200, {"slabs": rows})
+
+    def api_slab_legend(self, relative: str):
+        from . import render
+
+        sl, path = self._read_slab(relative)
+        catalog = self.server.palette_factory("medieval", 0).catalog
+        self._json(200, {
+            "path": path.relative_to(self.server.out_dir).as_posix(),
+            "placements": len(sl.placements),
+            "legend": render.slab_legend(sl, catalog),
+        })
+
+    def api_slab_svg(self, relative: str):
+        from . import render
+
+        sl, path = self._read_slab(relative)
+        catalog = self.server.palette_factory("medieval", 0).catalog
+        svg = render.slab_svg(sl, catalog, title=path.name + " --")
+        self._send(200, "image/svg+xml", svg.encode("utf-8"))
 
     def api_file(self, relative: str):
         path = resolve_in(self.server.out_dir, relative)

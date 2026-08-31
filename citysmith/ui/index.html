@@ -14,6 +14,7 @@
     <button type="button" class="tab is-on" data-screen="build">Build</button>
     <button type="button" class="tab" data-screen="paste">Paste</button>
     <button type="button" class="tab" data-screen="camera">Camera</button>
+    <button type="button" class="tab" data-screen="slabs">Slabs</button>
     <!-- SEAM. A screen is one button here, one <section class="screen">
          below, and one row in uiserver._ROUTES. Nothing in app.js knows what a
          screen is beyond swapping which section is shown. -->
@@ -544,6 +545,44 @@
     </section>
 
   </div>
+</section>
+
+
+<section class="screen" id="screen-slabs">
+
+  <section class="panel">
+    <h2>Read a slab without opening the game</h2>
+    <p class="hint">
+      Every <code>.slab.txt</code> under the output directory, newest first.
+      The picture is a plan over the tile grid with the coordinates on it and
+      the origin ringed, and every placement is its <em>real footprint after
+      rotation</em> &mdash; so a two-cell piece reads as two cells and an
+      off-grid prop reads as off-grid. Hover a piece for its name, position
+      and rotation.
+    </p>
+    <p class="hint">
+      <strong>This is not a substitute for pasting it.</strong> It cannot show
+      a mesh, what a rotation does to a face, or whether a run one cell thick
+      reads as solid &mdash; which is what every probe in <code>tools/</code>
+      exists for. It answers what is in the file and where.
+    </p>
+    <div class="row">
+      <select id="slab-pick"></select>
+      <button type="button" class="ghost" id="slab-rescan">Rescan</button>
+      <span class="hint" id="slab-note"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="slab-legend-panel" hidden>
+    <h2>Pieces</h2>
+    <div id="slab-legend"></div>
+  </section>
+
+  <section class="panel" id="slab-view-panel" hidden>
+    <h2>Plan</h2>
+    <div class="scroller"><img id="slab-view" alt="slab plan"></div>
+  </section>
+
 </section>
 
 <script src="/app.js"></script>

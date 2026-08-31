@@ -1,3 +1,4 @@
+let slabsLoaded = false;
 /* citysmith build UI.
  *
  * Vanilla, because the core is stdlib-only and has no build step, so this has
@@ -347,6 +348,60 @@ function log(text) {
 /* The one case where the BUILD did fail: the job stopped and produced nothing.
  * The verify row is emptied rather than left showing the previous build's
  * verdict beside this one's failure. */
+// -- the Slabs screen -------------------------------------------------------
+//
+// Deliberately the smallest screen in the page: one list, one picture, one
+// legend. The server does the decoding and the drawing, so nothing here knows
+// what a placement is -- the same split every other screen makes.
+
+async function loadSlabs() {
+  const pick = document.getElementById("slab-pick");
+  const note = document.getElementById("slab-note");
+  try {
+    const data = await getJSON("/api/slabs");
+    pick.innerHTML = "";
+    for (const s of data.slabs) {
+      const opt = document.createElement("option");
+      opt.value = s.path;
+      opt.textContent = s.path + "  (" + s.bytes.toLocaleString() + " B)";
+      pick.append(opt);
+    }
+    note.textContent = data.slabs.length + " slab(s)";
+    if (data.slabs.length) showSlab(pick.value);
+  } catch (err) {
+    note.textContent = "could not list slabs: " + err.message;
+  }
+}
+
+async function showSlab(path) {
+  const img = document.getElementById("slab-view");
+  const legend = document.getElementById("slab-legend");
+  const note = document.getElementById("slab-note");
+  // Encoded per SEGMENT: a slab lives in a subdirectory and the slashes have
+  // to survive, but nothing else does.
+  const enc = path.split("/").map(encodeURIComponent).join("/");
+  img.src = "/api/slabs/svg/" + enc;
+  document.getElementById("slab-view-panel").hidden = false;
+  try {
+    const data = await getJSON("/api/slabs/legend/" + enc);
+    note.textContent = data.placements.toLocaleString() + " placements";
+    legend.innerHTML = "";
+    for (const row of data.legend) {
+      const el = document.createElement("div");
+      el.className = "legend-row";
+      el.innerHTML =
+        '<span class="swatch" style="background:' + row.colour + '"></span>' +
+        '<b>' + row.count + '</b> ' + row.name +
+        ' <span class="hint">' + row.size.join(" x ") +
+        "  [" + row.folder + "]</span>";
+      legend.append(el);
+    }
+    document.getElementById("slab-legend-panel").hidden = false;
+  } catch (err) {
+    legend.textContent = "could not read it: " + err.message;
+  }
+}
+
 function showFailure(message) {
   const panel = $("verdict-panel");
   panel.hidden = false;
@@ -798,7 +853,19 @@ $("tabs").addEventListener("click", (event) => {
   if (!tab) return;
   for (const other of $("tabs").children) other.classList.toggle("is-on", other === tab);
   for (const screen of document.querySelectorAll(".screen")) {
-    screen.classList.toggle("is-on", screen.id === "screen-" + tab.dataset.screen);
+    screen.classList.toggle("is-on", screen.id === "screen-" + tab.dataset.screen);
+
+  // The slab list is scanned on first sight of the screen, not on page load:
+  // a thousand-slab output directory should not be walked by someone who only
+  // came to build a town.
+  if (tab.dataset.screen === "slabs" && !slabsLoaded) {
+    slabsLoaded = true;
+    document.getElementById("slab-pick")
+      .addEventListener("change", (e) => showSlab(e.target.value));
+    document.getElementById("slab-rescan")
+      .addEventListener("click", loadSlabs);
+    loadSlabs();
+  }
   }
   /* Rescan on arrival: the usual route here is straight off a build, and a
    * stale list would offer the previous town's paste order for the new one. */

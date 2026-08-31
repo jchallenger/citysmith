@@ -4978,6 +4978,27 @@ def gable_infill(palette, tier: str, tread=None, cap=None):
     # THATCH verge and 60 trade buildings dealt thatch got a tile one. The
     # caller has the dealt cap in hand two lines before it asks, so it passes
     # it; the lookup here is only the fallback for a caller that does not.
+    # **The wall carried up, where the kit's FULL panel is a whole number of
+    # courses.** This fell straight to the roof's flat cap for a timber
+    # fabric, on the stated grounds that "Tavern and Rural ship no wall piece
+    # under two tiles" -- which is true, and beside the point at a 1.0 rise,
+    # where their 2.0-tall panel is EXACTLY TWO COURSES. That is the same
+    # arithmetic the verge piece turns on, measured off the hand-build in
+    # `tests/fixtures/handbuilt_verge.slab`. The premise was right and the
+    # conclusion did not follow.
+    #
+    # Stacking the cap instead shows a flat tile's EDGE once per course, which
+    # reads as boarding and was reported off a board twice. A gable is the
+    # wall carried up; this makes it that.
+    #
+    # No new placement path: the caller stacks by `infill.size_y` and puts a
+    # THIN piece on the wall line with `place_wall`, which a 0.5-deep panel
+    # already satisfies. Capped at 2.0 because the Wall/Floor combinations are
+    # 2.5 -- a storey and a deck in one casting -- and would overshoot.
+    wall = palette.resolve(_WALL_ROLE_BY_TIER.get(tier, "wall"))
+    if (wall is not None and wall.size_y <= 2.0
+            and min(wall.size_x, wall.size_z) < 1.0):
+        return wall
     if cap is None:
         cap = roof_set(palette, tier)[3]
     if cap is not None and (cap.size_x, cap.size_z) == (1.0, 1.0):

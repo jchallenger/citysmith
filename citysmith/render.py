@@ -421,6 +421,164 @@ def floorplan_svg(fp: Floorplan, *, scale: int = 28, marks=None) -> str:
     return "\n".join(parts)
 
 
+#: Distinct hues for the assets in one slab, walked in order of first
+#: appearance. Not a hash of the name: a hash gives two neighbouring pieces
+#: near-identical colours often enough to be useless, and the whole point of
+#: this view is telling pieces APART.
+_SLAB_HUES = (
+    "#e0813c", "#4fa3c7", "#8bbf5a", "#c463b0", "#d8c04a", "#7d78d0",
+    "#5fc2a0", "#cf5f5f", "#9a8b6b", "#4f8fd0", "#b8d05a", "#c78ad8",
+)
+
+
+def slab_svg(slab, catalog, *, scale: int = 22, label_every: int = 5,
+             title: str = "") -> str:
+    """One slab in plan, over a labelled tile grid, with the origin marked.
+
+    **The point is probing without pasting.** A probe slab can otherwise only
+    be read by making a board, pasting it and flying a camera at it -- and
+    this project's history is largely screenshots read wrong: a rank of
+    identical fence panels, a hip that hid its own holes, a verge whose
+    bolsters were the probe rather than the kit. A plan with the grid and the
+    coordinates on it answers "what is actually in this file, and where"
+    before the game is opened, which is the half of the question a photograph
+    is worst at.
+
+    It is emphatically NOT a substitute for the board. It cannot show a mesh,
+    what a rotation does to a face, or whether a run one cell thick reads as
+    solid -- the three things every probe in `tools/` exists for. It shows
+    footprints, heights and identities.
+
+    Each placement is drawn as its **real footprint after rotation**, from
+    `build.placed_bounds`, so a two-cell piece reads as two cells and an
+    off-grid prop reads as off-grid. Lowest is drawn first, so what is on top
+    of the picture is what is on top of the board.
+    """
+    from .build import placed_bounds
+
+    byid = {str(a.id).lower(): a for a in catalog.assets}
+    items = []
+    for p in slab.placements:
+        asset = byid.get(str(p.asset_id).lower())
+        if asset is None:
+            continue
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        items.append((p.y, asset, p, x0, z0, x1, z1))
+    if not items:
+        return ('<svg xmlns="http://www.w3.org/2000/svg" width="260" '
+                'height="44"><text x="8" y="26" fill="#e6e3dc" '
+                'font-family="monospace" font-size="12">empty slab</text></svg>')
+
+    items.sort(key=lambda it: it[0])
+    lo_x = min(it[3] for it in items)
+    hi_x = max(it[5] for it in items)
+    lo_z = min(it[4] for it in items)
+    hi_z = max(it[6] for it in items)
+    import math
+    gx0, gz0 = math.floor(lo_x), math.floor(lo_z)
+    gx1, gz1 = math.ceil(hi_x), math.ceil(hi_z)
+    cols, rows = max(1, gx1 - gx0), max(1, gz1 - gz0)
+
+    pad = 34
+    w, h = cols * scale + pad * 2, rows * scale + pad * 2
+
+    def sx(x):
+        return pad + (x - gx0) * scale
+
+    def sz(z):
+        return pad + (z - gz0) * scale
+
+    names = {}
+    for _y, asset, _p, _a, _b, _c, _d in items:
+        if asset.name not in names:
+            names[asset.name] = _SLAB_HUES[len(names) % len(_SLAB_HUES)]
+
+    out = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
+           'viewBox="0 0 %d %d">' % (w, h, w, h),
+           '<rect width="%d" height="%d" fill="%s"/>' % (w, h, _BG)]
+
+    for i in range(cols + 1):
+        v = gx0 + i
+        major = v % label_every == 0
+        out.append('<line x1="%.1f" y1="%d" x2="%.1f" y2="%d" stroke="%s" '
+                   'stroke-width="%s"/>'
+                   % (sx(v), pad, sx(v), h - pad,
+                      _STREET_MAJOR if major else _STREET,
+                      "1.2" if major else "0.6"))
+    for j in range(rows + 1):
+        v = gz0 + j
+        major = v % label_every == 0
+        out.append('<line x1="%d" y1="%.1f" x2="%d" y2="%.1f" stroke="%s" '
+                   'stroke-width="%s"/>'
+                   % (pad, sz(v), w - pad, sz(v),
+                      _STREET_MAJOR if major else _STREET,
+                      "1.2" if major else "0.6"))
+
+    for i in range(cols + 1):
+        v = gx0 + i
+        if v % label_every:
+            continue
+        out.append('<text x="%.1f" y="%d" fill="%s" font-family="monospace" '
+                   'font-size="10" text-anchor="middle" opacity="0.75">%d'
+                   '</text>' % (sx(v), pad - 8, _TEXT, v))
+    for j in range(rows + 1):
+        v = gz0 + j
+        if v % label_every:
+            continue
+        out.append('<text x="%d" y="%.1f" fill="%s" font-family="monospace" '
+                   'font-size="10" text-anchor="end" opacity="0.75">%d'
+                   '</text>' % (pad - 6, sz(v) + 3, _TEXT, v))
+
+    # The origin, because a slab that does not reach (0,0) is the thing
+    # `verify.chunk_anchors` fails a build over.
+    if gx0 <= 0 <= gx1 and gz0 <= 0 <= gz1:
+        out.append('<circle cx="%.1f" cy="%.1f" r="3.5" fill="none" '
+                   'stroke="#e0813c" stroke-width="1.5"/>'
+                   % (sx(0), sz(0)))
+
+    for y, asset, p, x0, z0, x1, z1 in items:
+        fill = names[asset.name]
+        out.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" '
+                   'fill="%s" fill-opacity="0.55" stroke="%s" '
+                   'stroke-width="0.8"><title>%s  (%g, %g, %g)  rot %d'
+                   '</title></rect>'
+                   % (sx(x0), sz(z0), (x1 - x0) * scale, (z1 - z0) * scale,
+                      fill, fill, _esc(asset.name), p.x, p.y, p.z, p.rot))
+
+    out.append('<text x="%d" y="%d" fill="%s" font-family="monospace" '
+               'font-size="11">%s %d placements, %dx%d tiles, y %g..%g</text>'
+               % (pad, h - 10, _TEXT, _esc(title), len(items), cols, rows,
+                  min(i[0] for i in items), max(i[0] for i in items)))
+    out.append("</svg>")
+    return "".join(out)
+
+
+def slab_legend(slab, catalog):
+    """``[{name, count, size, kind, folder, colour}]``, coloured as `slab_svg`.
+
+    Returned as data rather than drawn into the picture: the legend is the
+    part a page wants to make interactive, and a caller that only wants the
+    SVG should not have to parse it back out of one.
+    """
+    byid = {str(a.id).lower(): a for a in catalog.assets}
+    order = []
+    seen = {}
+    for p in slab.placements:
+        asset = byid.get(str(p.asset_id).lower())
+        if asset is None:
+            continue
+        row = seen.get(asset.name)
+        if row is None:
+            row = {"name": asset.name,
+                   "size": [asset.size_x, asset.size_y, asset.size_z],
+                   "kind": asset.kind, "folder": asset.folder, "count": 0,
+                   "colour": _SLAB_HUES[len(order) % len(_SLAB_HUES)]}
+            seen[asset.name] = row
+            order.append(asset.name)
+        row["count"] += 1
+    return [seen[n] for n in order]
+
+
 def write(svg: str, path: str | os.PathLike[str]) -> pathlib.Path:
     p = pathlib.Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)

@@ -3218,46 +3218,38 @@ def test_every_chimney_sits_on_its_ridge_the_same_way():
         f"{sunk[:4]}")
 
 
-def test_a_gable_verge_matches_its_own_roof_material():
-    """A verge closed in the tier's usual material, not the roof's own.
+def test_a_gable_verge_is_the_wall_and_not_the_roof():
+    """The gable is the wall carried up. Decided 2026-08-31.
 
-    `gable_infill` resolved its cap from `roof_set(palette, tier)` -- no bid,
-    so ROOF_BY_TIER, the tier default -- while `_lay_roofs` deals the material
-    per building through `roof_suffix_for` and `roof_override`. Measured on
-    East Tradebourne before the fix: 153 common houses dealt a tile roof got a
-    THATCH verge and 60 trade buildings dealt thatch got a tile one. The caller
-    has the dealt cap in hand two lines before it asks.
+    **This test asserted the opposite and its concern outlived it.** It was
+    written because `gable_infill` resolved its cap from `roof_set(palette,
+    tier)` with no bid -- the tier default -- while `_lay_roofs` deals the
+    material per building: 153 common houses dealt a tile roof got a THATCH
+    verge and 60 trade buildings dealt thatch got a tile one. The fix was to
+    pass the dealt cap.
+
+    The verge is no longer a roof piece at all, so the cap cannot be wrong any
+    more. But **the same risk has a new form**, and it is filed as
+    `gable-wall-follows-the-building` rather than pretended away: the wall now
+    comes from `_WALL_ROLE_BY_TIER`, a tier default, while `walls.SPLIT_KITS`
+    deals common houses two fabrics. A Village-fabric house can take a Tavern
+    gable by exactly the mechanism this test was written about.
     """
     import sys
 
     sys.path.insert(0, ".")
-    from citysmith.build import gable_infill, roof_set, tier_of
+    from citysmith.build import gable_infill, roof_set
     from citysmith.catalog import load_or_build
-    from citysmith.layout import Layout
     from citysmith.palette import MEDIEVAL, Palette
-    from citysmith.raster import rasterize
 
     palette = Palette(load_or_build(), MEDIEVAL)
-    tm = rasterize(Layout.load("out/fc-v2/layout.json"))
-    bids = sorted({tm.building[z][x] for z in range(tm.depth)
-                   for x in range(tm.width) if tm.building[z][x]})
-    assert bids
-
-    checked = 0
-    for bid in bids:
-        tier = tier_of(bid)
-        dealt = roof_set(palette, tier, bid)
-        # The tread wins where a fabric has one -- that is the wall carried up
-        # and is not what this test is about.
-        if gable_infill(palette, tier, None, dealt[3]) is None:
-            continue
-        infill = gable_infill(palette, tier, None, dealt[3])
-        assert infill.folder == dealt[3].folder, (
-            f"{bid}: verge {infill.name!r} [{infill.folder}] closing a roof "
-            f"of {dealt[3].name!r} [{dealt[3].folder}]")
-        checked += 1
-    assert checked, "no building closed a verge -- the test proves nothing"
-
+    for tier in ("common", "trade", "utility"):
+        for cap in (None, roof_set(palette, tier)[3]):
+            infill = gable_infill(palette, tier, None, cap)
+            assert infill is not None, tier
+            assert infill is not cap, (
+                f"{tier} closed its gable in the roof's material")
+            assert min(infill.size_x, infill.size_z) < 1.0, (tier, infill.name)
 
 def test_a_chimney_never_replaces_the_roof_surface():
     """Every flue comes up through a roof that is still there.
