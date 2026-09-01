@@ -90,6 +90,19 @@
    "disposable": false,
    "note": ""
   },
+  "East Tradebourne 09-01": {
+   "board": "East Tradebourne 09-01",
+   "holds": "town",
+   "source": "East Tradebourne.geojson",
+   "folder": "",
+   "stem": "tradebourne",
+   "chunks": 114,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T08:33:47",
+   "disposable": false,
+   "note": ""
+  },
   "FENCE A drystone": {
    "board": "FENCE A drystone",
    "holds": "probe",
