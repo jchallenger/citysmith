@@ -1589,6 +1589,19 @@
       ]
     },
     {
+      "id": "market-feature-report",
+      "what": "Report the market as offered-vs-built, with the count on the square",
+      "state": "open",
+      "doc": "docs/market-squares.md",
+      "evidence": "test:test_the_feature_report_counts_what_stands_on_the_plaza",
+      "note": "MEASURED 2026-09-01 on a 26x21 crop of Forest Church's square: the build report carries lines for chimneys, gabled ends, field walls, yards, marsh, quarters and surfaces, and **not one line about the market** -- on a crop that is 130 plaza cells. What actually stands on them is three stalls and a well.\n\nThis is the fence failure exactly: a feature correct, absent and unreported at once. It is also the chimney failure, which is the sharper one -- a COUNT is not a SHAPE. `1,084 stacks` read as success until the line said `1,084 of 1 course`. `4 market props` reads as a market until the line says `4 items on 130 plaza cells`.\n\nA plaza does not decline to have a market on it, so the branch is the failing kind: offered (plaza cells exist) and not built (nothing stands on them) is a FAIL, not an `ok, none here`. A town with no plaza at all is the `not offered` branch and says so.\n\nDo this BEFORE `market-stalls`, `market-cross` or `market-hall`: it is the cheapest of the four and it is the one that stops the other three from being built, shipped and reviewed while invisible.",
+      "tags": [
+        "market",
+        "verify",
+        "report"
+      ]
+    },
+    {
       "id": "tasks-evidence-form-unchecked",
       "what": "Reject an evidence string --check cannot resolve",
       "state": "open",
@@ -1802,7 +1815,7 @@
       "state": "open",
       "doc": "docs/great-buildings.md 1.4",
       "evidence": "citysmith.raster.PLAZA_MIN_TILES",
-      "note": "MEASURED: Pelvesthollow, Graybank and Forest Church have **exactly 49 plaza cells each** -- a 7x7 square, the same number three times, so `_carve_plaza` is cutting a fixed size rather than a fitted one. East Tradebourne has 631 because its export carries real PAVEMENT polygons. A 7x7 square cannot hold what section 1.4 says a market place contains: a cross at the centre, stall rows around it and a hall on the edge is 3-4 cells of cross, two rows of stalls with an aisle between them, and a 6x10 m building. The square has to be sized from its contents, and a settlement too small to hold one should have no square rather than a token one -- the same honesty `quarter_map` shows when it returns None.",
+      "note": "SUPERSEDED 2026-09-01, and the premise is the part that died. This note said Pelvesthollow, Graybank and Forest Church had **exactly 49 plaza cells each** because `_carve_plaza` stamped a fixed 7x7 block, and argued the square was too small to hold a market. `_carve_plaza` has since been rewritten to GROW the square outward from a seed over open ground, sized to the town and shaped by the surrounding frontages. Re-measured on a fresh Forest Church import: **130 plaza cells in an 18x13 envelope**, not 49 in a 7x7. Size is no longer the complaint.\n\nWhat the re-measure DID find is the opposite failure -- the square is big and empty. 130 paved cells carry **three stalls and a well**: `Stall Magic` x2, `Stall Empty 02` x1, `Well 01` x1, a density of 0.03 per cell, and all three stalls are loose `Furniture` props rather than the `Merchant` kit (see `stall-as-a-building`). So the work this task should describe is fitting the CONTENTS to the square that already exists, not the square to the contents.\n\nThe honesty clause is worth keeping as written: a settlement too small to hold a market place should have no square rather than a token one, the same way `quarter_map` returns None.",
       "tags": [
         "market"
       ]
@@ -2016,6 +2029,19 @@
       "doc": "docs/sidecar-ui.md",
       "evidence": "citysmith.render.slab_svg",
       "note": "BUILT. `render.slab_svg` draws one slab in plan over a tile grid with the coordinates on both axes and the origin ringed; `render.slab_legend` returns the same colouring as data so the picture and the list cannot disagree about which piece is which. Three endpoints -- `/api/slabs`, `/api/slabs/legend/<path>`, `/api/slabs/svg/<path>` -- and a Slabs tab, added through the seam `index.html` already documented: one button, one section, one row in `_ROUTES`.\n\n**Every placement is its REAL footprint after rotation**, from `build.placed_bounds` -- not its nominal size -- so a two-cell piece reads as two cells and an off-grid prop reads as off-grid. That is the same distinction two `verify` checks were once wrong about, and drawing the nominal box would have made this view agree with a bug.\n\n**It is not a substitute for pasting and the page says so.** It cannot show a mesh, what a rotation does to a face, or whether a run one cell thick reads as solid, which is what every probe in `tools/` exists for. It answers what is in the file and where -- the half a photograph is worst at, and the half that would have caught the verge bolsters as arithmetic rather than as a kit fault.\n\nThe list is scanned on first sight of the screen rather than on page load: this output directory holds 1,584 slabs and someone who came to build a town should not pay for walking them. Paths come from the server's own scan and go back through `resolve_in`, the same guard every other file endpoint uses."
+    },
+    {
+      "id": "ui-slab-3d",
+      "what": "A 3D layer on the slab screen, orbiting the four review faces",
+      "state": "done",
+      "doc": "docs/regenerating-boards.md",
+      "evidence": "citysmith.render.slab_axon",
+      "note": "The plan view is silent about HEIGHT, and height is what every roofscape defect here has been about: a roof floating half a tile over the wall head, a chimney a course too tall, a warehouse at 10 ft eaves. `slab_axon` extrudes each placement from `p.y` to `p.y + size_y` and draws three faces, with a height ruler in tiles so a course is countable off the picture.\n\n**It orbits, and that is the design rather than a convenience.** A probe read from one angle is a probe that lies -- a rank of blades hides its own gaps from the front. A single fixed axonometric would reproduce, in a viewer built to prevent that failure, the exact failure it was built to prevent. `AXON_AZIMUTHS` is the same four faces `review.ps1 360` walks in game, and an azimuth that is not a quarter turn is REFUSED rather than rounded.\n\nIts limit is stated on the page and in the docstring: it draws COLLIDERS, not meshes. `md_wall_1x1_diag_01` measures 1.0x2.0x1.0 and is a blade cutting the cell corner to corner; here it looks solid. Massing is answerable from this view, material and surface are not, and no probe in `tools/` is retired for it.\n\nFound on first use, 2026-09-01: Forest Church's temple carries 108 upper-floor tiles on three levels inside what should be one volume (`church-one-volume`), and its 130-cell market square carries three stalls and a well (`market-feature-report`).",
+      "tags": [
+        "ui",
+        "render",
+        "review"
+      ]
     }
   ]
 }

@@ -579,7 +579,19 @@
   </section>
 
   <section class="panel" id="slab-view-panel" hidden>
-    <h2>Plan</h2>
+    <div class="row">
+      <h2 id="slab-view-title">Plan</h2>
+      <span class="spacer"></span>
+      <button type="button" class="ghost is-on" id="slab-mode-plan">Plan</button>
+      <button type="button" class="ghost" id="slab-mode-axon">3D</button>
+      <span class="turn" hidden id="slab-turn">
+        <button type="button" class="ghost" data-az="0">N</button>
+        <button type="button" class="ghost" data-az="90">E</button>
+        <button type="button" class="ghost" data-az="180">S</button>
+        <button type="button" class="ghost" data-az="270">W</button>
+      </span>
+    </div>
+    <p class="hint" id="slab-view-hint"></p>
     <div class="scroller"><img id="slab-view" alt="slab plan"></div>
   </section>
 

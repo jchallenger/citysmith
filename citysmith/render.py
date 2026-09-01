@@ -553,6 +553,212 @@ def slab_svg(slab, catalog, *, scale: int = 22, label_every: int = 5,
     return "".join(out)
 
 
+#: Isometric basis. cos30 / sin30, so a tile is a true 2:1 diamond and a
+#: cube of side one reads as a cube. The vertical is one screen unit per tile
+#: of HEIGHT, which is what makes a course countable off the picture.
+_ISO_KX = 0.8660254037844387
+_ISO_KY = 0.5
+
+#: The four azimuths, named for the compass direction the CAMERA is at. Four
+#: rather than free rotation on purpose: these are the faces `review.ps1 360`
+#: walks in game, so a slab reviewed here and a slab reviewed on a board are
+#: compared from the same places.
+AXON_AZIMUTHS = (0, 90, 180, 270)
+
+
+def _axon_rot(x: float, z: float, azimuth: int) -> tuple[float, float]:
+    """Turn the world's (x, z) into the view's (u, v).
+
+    A quarter turn keeps an axis-aligned box axis-aligned, which is the whole
+    reason the azimuth is quantised: every face stays a rectangle and the
+    projection stays four polygons per placement.
+    """
+    if azimuth == 90:
+        return z, -x
+    if azimuth == 180:
+        return -x, -z
+    if azimuth == 270:
+        return -z, x
+    return x, z
+
+
+def slab_axon(slab, catalog, *, scale: int = 16, azimuth: int = 0,
+              title: str = "", label_every: int = 5) -> str:
+    """One slab as solid boxes in axonometric, from one of four azimuths.
+
+    **This is the half of a slab a plan cannot show.** `slab_svg` answers what
+    is in the file and where; it is silent about height, and height is what
+    every roofscape defect in this project has been about -- a roof floating
+    half a tile over the wall head, a chimney a course too tall, eaves at 10 ft
+    on a building whose footprint says tithe barn. Those are all one glance in
+    elevation and invisible in plan.
+
+    Each placement is drawn as its true box: the footprint after rotation from
+    `build.placed_bounds`, extruded from `p.y` to `p.y + size_y`. Three faces
+    are drawn -- top, and the two the camera can see -- shaded from the piece's
+    own legend colour, so a stack of one material reads as one mass and a piece
+    from another kit stands out of it.
+
+    **It orbits, and that is not a convenience.** This project's most expensive
+    rule is that a probe read from one angle is a probe that lies: a rank of
+    blades hides its own gaps from the front, a ruined wall covers its own
+    holes from overhead. A single fixed axonometric would reproduce that
+    failure in a viewer built to prevent it. `AXON_AZIMUTHS` is the same four
+    faces `review.ps1 360` walks.
+
+    What it still cannot do, and the reason no probe is retired for it: it
+    draws colliders, not meshes. A piece whose collider fills the cell and
+    whose mesh is a diagonal blade -- `md_wall_1x1_diag_01`, which cost this
+    project a whole rampart -- looks perfectly solid here. Massing is
+    answerable from this view; material and surface are not.
+
+    Depth is painter's algorithm on the box's far corner, which is exact for
+    boxes that do not interpenetrate and approximate for those that do. Slabs
+    here interpenetrate deliberately (a chimney is lapped into its own roof),
+    so read a seam as a drawing-order artifact rather than as geometry.
+    """
+    from .build import placed_bounds
+
+    azimuth = azimuth % 360
+    if azimuth not in AXON_AZIMUTHS:
+        raise ValueError(f"azimuth must be one of {AXON_AZIMUTHS}")
+
+    byid = {str(a.id).lower(): a for a in catalog.assets}
+    boxes = []
+    for p in slab.placements:
+        asset = byid.get(str(p.asset_id).lower())
+        if asset is None:
+            continue
+        x0, z0, x1, z1 = placed_bounds(asset, p)
+        corners = [_axon_rot(x, z, azimuth)
+                   for x, z in ((x0, z0), (x1, z0), (x1, z1), (x0, z1))]
+        u0 = min(c[0] for c in corners)
+        u1 = max(c[0] for c in corners)
+        v0 = min(c[1] for c in corners)
+        v1 = max(c[1] for c in corners)
+        boxes.append({"asset": asset, "p": p, "u0": u0, "u1": u1,
+                      "v0": v0, "v1": v1,
+                      "y0": p.y, "y1": p.y + asset.size_y})
+    if not boxes:
+        return ('<svg xmlns="http://www.w3.org/2000/svg" width="260" '
+                'height="44"><text x="8" y="26" fill="#e6e3dc" '
+                'font-family="monospace" font-size="12">empty slab</text></svg>')
+
+    # Colours are assigned in the SAME order as `slab_svg` and `slab_legend`,
+    # so one legend serves all three views. Walk the placements, not the
+    # boxes, in case an asset went missing from the catalog above.
+    names: dict[str, str] = {}
+    for p in slab.placements:
+        asset = byid.get(str(p.asset_id).lower())
+        if asset is not None and asset.name not in names:
+            names[asset.name] = _SLAB_HUES[len(names) % len(_SLAB_HUES)]
+
+    lo_u = min(b["u0"] for b in boxes)
+    hi_u = max(b["u1"] for b in boxes)
+    lo_v = min(b["v0"] for b in boxes)
+    hi_v = max(b["v1"] for b in boxes)
+    lo_y = min(b["y0"] for b in boxes)
+    hi_y = max(b["y1"] for b in boxes)
+
+    def proj(u, v, y):
+        return ((u - lo_u - (v - lo_v)) * _ISO_KX * scale,
+                ((u - lo_u) + (v - lo_v)) * _ISO_KY * scale - (y - lo_y) * scale)
+
+    xs, ys = [], []
+    for u in (lo_u, hi_u):
+        for v in (lo_v, hi_v):
+            for y in (lo_y, hi_y):
+                sx, sy = proj(u, v, y)
+                xs.append(sx)
+                ys.append(sy)
+    pad = 40
+    off_x = pad - min(xs)
+    off_y = pad - min(ys)
+    w = int(max(xs) - min(xs)) + pad * 2
+    h = int(max(ys) - min(ys)) + pad * 2 + 18
+
+    def pt(u, v, y):
+        sx, sy = proj(u, v, y)
+        return sx + off_x, sy + off_y
+
+    def poly(points, fill, opacity, tip=""):
+        d = " ".join("%.1f,%.1f" % q for q in points)
+        return ('<polygon points="%s" fill="%s" fill-opacity="%s" '
+                'stroke="%s" stroke-width="0.5" stroke-opacity="0.55">%s'
+                '</polygon>' % (d, fill, opacity, fill, tip))
+
+    out = ['<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" '
+           'viewBox="0 0 %d %d">' % (w, h, w, h),
+           '<rect width="%d" height="%d" fill="%s"/>' % (w, h, _BG)]
+
+    # -- the ground plane, so a piece that does not touch it is visible as
+    #    floating rather than merely high.
+    import math
+    gu0, gu1 = math.floor(lo_u), math.ceil(hi_u)
+    gv0, gv1 = math.floor(lo_v), math.ceil(hi_v)
+    for i in range(gu0, gu1 + 1):
+        major = i % label_every == 0
+        a, bq = pt(i, gv0, lo_y), pt(i, gv1, lo_y)
+        out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" '
+                   'stroke-width="%s"/>'
+                   % (a[0], a[1], bq[0], bq[1],
+                      _STREET_MAJOR if major else _STREET,
+                      "1.1" if major else "0.5"))
+    for j in range(gv0, gv1 + 1):
+        major = j % label_every == 0
+        a, bq = pt(gu0, j, lo_y), pt(gu1, j, lo_y)
+        out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" '
+                   'stroke-width="%s"/>'
+                   % (a[0], a[1], bq[0], bq[1],
+                      _STREET_MAJOR if major else _STREET,
+                      "1.1" if major else "0.5"))
+
+    # -- the height ruler. The point of the whole view is that a course is
+    #    countable, so put the numbers on it rather than leaving it to the eye.
+    rule_u, rule_v = gu0, gv1
+    top = int(math.ceil(hi_y - lo_y))
+    a, bq = pt(rule_u, rule_v, lo_y), pt(rule_u, rule_v, lo_y + max(1, top))
+    out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" '
+               'stroke-width="1" stroke-opacity="0.6"/>'
+               % (a[0], a[1], bq[0], bq[1], _STREET_MAJOR))
+    for k in range(0, top + 1):
+        q = pt(rule_u, rule_v, lo_y + k)
+        out.append('<line x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f" stroke="%s" '
+                   'stroke-width="1" stroke-opacity="0.6"/>'
+                   % (q[0] - 4, q[1], q[0], q[1], _STREET_MAJOR))
+        if k % label_every == 0 or k == top:
+            out.append('<text x="%.1f" y="%.1f" fill="%s" '
+                       'font-family="monospace" font-size="9" '
+                       'text-anchor="end" opacity="0.75">%g</text>'
+                       % (q[0] - 6, q[1] + 3, _TEXT, lo_y + k))
+
+    # -- the boxes. Far corner first; see the docstring on interpenetration.
+    boxes.sort(key=lambda b: (b["u0"] + b["v0"] + b["y0"],
+                              b["u0"] + b["v0"], b["y0"]))
+    for b in boxes:
+        asset, p = b["asset"], b["p"]
+        fill = names.get(asset.name, _SLAB_HUES[0])
+        u0, u1, v0, v1 = b["u0"], b["u1"], b["v0"], b["v1"]
+        y0, y1 = b["y0"], b["y1"]
+        tip = ('<title>%s  (%g, %g, %g)  rot %d  h %g</title>'
+               % (_esc(asset.name), p.x, p.y, p.z, p.rot, asset.size_y))
+        # top, then the two faces the camera is on the near side of
+        out.append(poly([pt(u0, v0, y1), pt(u1, v0, y1),
+                         pt(u1, v1, y1), pt(u0, v1, y1)], fill, "0.95", tip))
+        out.append(poly([pt(u1, v0, y1), pt(u1, v1, y1),
+                         pt(u1, v1, y0), pt(u1, v0, y0)], fill, "0.62"))
+        out.append(poly([pt(u0, v1, y1), pt(u1, v1, y1),
+                         pt(u1, v1, y0), pt(u0, v1, y0)], fill, "0.40"))
+
+    out.append('<text x="%d" y="%d" fill="%s" font-family="monospace" '
+               'font-size="11">%s %d placements, azimuth %d, '
+               'y %g..%g (%g tiles tall)</text>'
+               % (pad, h - 10, _TEXT, _esc(title), len(boxes), azimuth,
+                  lo_y, hi_y, round(hi_y - lo_y, 2)))
+    out.append("</svg>")
+    return "".join(out)
+
+
 def slab_legend(slab, catalog):
     """``[{name, count, size, kind, folder, colour}]``, coloured as `slab_svg`.
 

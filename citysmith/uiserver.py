@@ -1314,6 +1314,10 @@ _ROUTES = (
     ("GET", re.compile(r"^/api/slabs$"), "api_slabs"),
     ("GET", re.compile(r"^/api/slabs/legend/(.+)$"), "api_slab_legend"),
     ("GET", re.compile(r"^/api/slabs/svg/(.+)$"), "api_slab_svg"),
+    # The 3D layer. A separate row rather than a mode flag on the one above,
+    # because the two answer different questions and a caller should not have
+    # to know a query string to get the one it wants.
+    ("GET", re.compile(r"^/api/slabs/axon/(.+)$"), "api_slab_axon"),
     # The paste screen. Note that no two rows share a pattern: `_dispatch`
     # answers 405 on the first pattern that matches with the wrong verb, so a
     # second row for the same path with a different verb would be unreachable.
@@ -1791,6 +1795,31 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         sl, path = self._read_slab(relative)
         catalog = self.server.palette_factory("medieval", 0).catalog
         svg = render.slab_svg(sl, catalog, title=path.name + " --")
+        self._send(200, "image/svg+xml", svg.encode("utf-8"))
+
+    def api_slab_axon(self, relative: str):
+        """One slab as solid boxes, from one of four azimuths.
+
+        The azimuth arrives in the query string and is validated by
+        `render.slab_axon`, which raises `ValueError` on anything that is not
+        a quarter turn -- so a hand-typed `?az=37` is a 400 and never a
+        silently-wrong picture.
+        """
+        from . import render
+
+        sl, path = self._read_slab(relative)
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        raw = query.get("az", ["0"])[0]
+        try:
+            azimuth = int(raw)
+        except ValueError:
+            raise BadRequest(f"az must be a whole number of degrees, not {raw!r}")
+        catalog = self.server.palette_factory("medieval", 0).catalog
+        try:
+            svg = render.slab_axon(sl, catalog, azimuth=azimuth,
+                                   title=path.name + " --")
+        except ValueError as err:
+            raise BadRequest(str(err))
         self._send(200, "image/svg+xml", svg.encode("utf-8"))
 
     def api_file(self, relative: str):

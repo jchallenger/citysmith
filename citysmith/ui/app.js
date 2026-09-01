@@ -373,15 +373,52 @@ async function loadSlabs() {
   }
 }
 
+// Which of the two pictures is on show, and which way the 3D one is facing.
+// Held here rather than read back off the <img>, so that switching slabs keeps
+// the view you were using -- comparing two churches from the south is the
+// whole point, and it is lost if the mode resets on every pick.
+let slabMode = "plan";
+let slabAz = 0;
+
+function slabViewSrc(path) {
+  const enc = path.split("/").map(encodeURIComponent).join("/");
+  return slabMode === "axon"
+    ? "/api/slabs/axon/" + enc + "?az=" + slabAz
+    : "/api/slabs/svg/" + enc;
+}
+
+const SLAB_VIEW_HINT = {
+  plan: "Footprints after rotation, over the tile grid. Silent about height.",
+  axon: "Solid boxes from one of four faces, with a height ruler. Colliders, " +
+        "not meshes \u2014 a piece whose collider fills the cell and whose " +
+        "mesh is a blade looks solid here.",
+};
+
+function paintSlabView() {
+  const path = document.getElementById("slab-pick").value;
+  if (!path) return;
+  document.getElementById("slab-view").src = slabViewSrc(path);
+  document.getElementById("slab-view-title").textContent =
+    slabMode === "axon" ? "3D" : "Plan";
+  document.getElementById("slab-view-hint").textContent = SLAB_VIEW_HINT[slabMode];
+  document.getElementById("slab-turn").hidden = slabMode !== "axon";
+  document.getElementById("slab-mode-plan")
+    .classList.toggle("is-on", slabMode === "plan");
+  document.getElementById("slab-mode-axon")
+    .classList.toggle("is-on", slabMode === "axon");
+  for (const b of document.querySelectorAll("#slab-turn button")) {
+    b.classList.toggle("is-on", Number(b.dataset.az) === slabAz);
+  }
+}
+
 async function showSlab(path) {
-  const img = document.getElementById("slab-view");
   const legend = document.getElementById("slab-legend");
   const note = document.getElementById("slab-note");
   // Encoded per SEGMENT: a slab lives in a subdirectory and the slashes have
   // to survive, but nothing else does.
   const enc = path.split("/").map(encodeURIComponent).join("/");
-  img.src = "/api/slabs/svg/" + enc;
   document.getElementById("slab-view-panel").hidden = false;
+  paintSlabView();
   try {
     const data = await getJSON("/api/slabs/legend/" + enc);
     note.textContent = data.placements.toLocaleString() + " placements";
@@ -864,6 +901,23 @@ $("tabs").addEventListener("click", (event) => {
       .addEventListener("change", (e) => showSlab(e.target.value));
     document.getElementById("slab-rescan")
       .addEventListener("click", loadSlabs);
+    // The two pictures, and the four faces of the second one. Repainting is
+    // just a new `src`: the server draws both, so nothing here has to know
+    // what a placement is.
+    document.getElementById("slab-mode-plan").addEventListener("click", () => {
+      slabMode = "plan";
+      paintSlabView();
+    });
+    document.getElementById("slab-mode-axon").addEventListener("click", () => {
+      slabMode = "axon";
+      paintSlabView();
+    });
+    for (const b of document.querySelectorAll("#slab-turn button")) {
+      b.addEventListener("click", () => {
+        slabAz = Number(b.dataset.az);
+        paintSlabView();
+      });
+    }
     loadSlabs();
   }
   }
