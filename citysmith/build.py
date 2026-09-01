@@ -6468,6 +6468,36 @@ def lay_spire(b: "Builder", cells: set[tuple[int, int]], base_y: float,
     return laid
 
 
+def placement_cells(asset: Asset, p: "Placement") -> set[tuple[int, int]]:
+    """The tile cells a placement actually OCCUPIES.
+
+    **A box that ends at x=6.0 does not occupy cell 6.** It ends on that
+    cell's near edge. Written down as a function because doing it by hand
+    invents a defect: measuring "roof pieces overhanging a taller neighbour"
+    with `range(int(x0), int(x1) + 1)` counted the cell every box merely
+    *touches*, reported 28 overhangs across four buildings, and had a task
+    filed against it. Re-measured with the half-open range the answer is zero
+    -- every one of the 28 was the off-by-one.
+
+    `placed_bounds` gives the box; this gives the cells. They are different
+    questions and the second one is the one a collision or coverage test
+    wants.
+
+    Not to be confused with `covered_cells` above, which answers the same
+    question for a boundary PROP -- a panel centred on a point at an arbitrary
+    rotation, with a coverage threshold, because a fence panel legitimately
+    clips the corner of a cell without standing on it. This one is for a
+    placed tile, whose box is already on the lattice. (The first draft of this
+    was called `covered_cells` and silently shadowed that one; 67 tests
+    caught it.)
+    """
+    x0, z0, x1, z1 = placed_bounds(asset, p)
+    eps = 1e-6
+    return {(cx, cz)
+            for cx in range(math.floor(x0 + eps), math.ceil(x1 - eps))
+            for cz in range(math.floor(z0 + eps), math.ceil(z1 - eps))}
+
+
 def _roof_rings(cells: set[tuple[int, int]],
                 against: frozenset[tuple[int, int]] = frozenset(),
                 ) -> dict[tuple[int, int], int]:
@@ -6492,6 +6522,27 @@ def _roof_rings(cells: set[tuple[int, int]],
     Not a special case for churches: a lower range against a taller one is the
     general shape, and it is why the argument is "against a taller thing"
     rather than "against a sibling".
+
+    **This whole function is a grid form of the STRAIGHT SKELETON**, which is
+    the standard algorithm for generating hip and valley roofs from a
+    footprint (Aichholzer et al.; see `docs/roofscape.md`). A straight
+    skeleton shrinks the outline inward at a constant rate and records where
+    the offset edges meet; the ridges and valleys are those meeting points.
+    Flooding inward one cell at a time from the boundary is exactly that,
+    discretised to the tile lattice -- the ring index IS the offset distance.
+    Two consequences worth knowing rather than rediscovering:
+
+    * A **reflex corner** is where the continuous algorithm needs a split
+      event, and on a grid it falls on a vertex *between* cells so no single
+      cell can carry it. `roof_wings` already sidesteps that by cutting the
+      plan into maximal rectangles and roofing each as its own hip.
+    * An edge that is **not an eave** -- shared with a taller neighbour --
+      simply does not propagate in the skeleton, which is what `against` does
+      here.
+
+    So the answer to "is this already solved" is yes, in the literature, and
+    the code was already most of the way there; what was missing was the
+    non-propagating edge.
     """
     rings: dict[tuple[int, int], int] = {}
     frontier = [c for c in cells

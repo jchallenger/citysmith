@@ -230,3 +230,96 @@ def test_the_valley_is_not_a_church_special_case():
     walled = _roof_rings(cottage, neighbour)
     assert _roof_rings(cottage)[(1, 0)] == 0
     assert walled[(1, 0)] > 0, "the cottage still eaves into its neighbour"
+
+
+def test_placement_cells_does_not_count_the_cell_a_box_merely_touches():
+    """A box ending at x=6.0 does not occupy cell 6; it ends on its near edge.
+
+    This function exists because doing it by hand invented a defect. Measuring
+    "roof pieces overhanging a taller neighbour" with `range(int(x0),
+    int(x1) + 1)` counted every cell a box touches, reported 28 overhangs
+    across four buildings, and had a task filed against it. With the half-open
+    range the answer is zero: all 28 were the off-by-one.
+    """
+    from citysmith import slab as slab_mod
+    from citysmith.build import placement_cells
+
+    from conftest import FLOOR, GATE
+
+    one = slab_mod.Placement(asset_id=FLOOR.id, x=5.0, y=0.0, z=5.0)
+    assert placement_cells(FLOOR, one) == {(5, 5)}
+
+    # A 4x0.5 gate laid flat spans four cells in x and one in z -- not five
+    # and two.
+    wide = slab_mod.Placement(asset_id=GATE.id, x=5.0, y=0.0, z=5.0)
+    cells = placement_cells(GATE, wide)
+    assert len({c[0] for c in cells}) == 4
+    assert len({c[1] for c in cells}) == 1
+
+
+def test_no_roof_piece_occupies_a_taller_neighbours_cell():
+    """A roof piece standing inside the wall next door.
+
+    Currently zero on all four plans, and this is the guard that keeps it so
+    -- the property is easy to break and was, for a while, believed broken.
+    """
+    _assert_roofs_are_sound(overhang=True)
+
+
+def test_every_building_cell_is_roofed():
+    """The failure that is worse than an overlap: a hole shows as sky.
+
+    Any fix for an overhang that works by *dropping* a piece trades a seam for
+    a hole, so the two have to be asserted together or the cure ships as the
+    disease.
+    """
+    _assert_roofs_are_sound(overhang=False)
+
+
+def _assert_roofs_are_sound(*, overhang: bool) -> None:
+    import contextlib
+    import io
+    import pathlib
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    try:
+        import church_plans as CP
+    except Exception:                       # pragma: no cover -- no catalog
+        pytest.skip("church_plans needs the local catalog")
+
+    from citysmith.build import placement_cells, footprints, pick_towers, storeys_of
+
+    for plan in sorted(CP.PLANS):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            tm, b, _blurb, _parts, _piers, _sp = CP.build(plan, seed=33, storeys=3)
+        byid = {a.id: a for a in b.palette.catalog.assets}
+        plan_cells = footprints(tm)
+        heads = {bid: 0.5 + storeys_of(tm, bid, 3) * 2.0 for bid in plan_cells}
+        owner = {c: bid for bid, cs in plan_cells.items() for c in cs}
+
+        roofed: set[tuple[int, int]] = set()
+        intruding = []
+        for p in b.placements:
+            asset = byid.get(p.asset_id)
+            if asset is None:
+                continue
+            label = f"{asset.group_tag or ''} {asset.name}".lower()
+            if "roof" not in label and "chimney" not in label:
+                continue
+            cells = placement_cells(asset, p)
+            roofed |= cells
+            home = owner.get((int(p.x), int(p.z)))
+            for c in cells:
+                nb = owner.get(c)
+                if nb and nb != home and p.y + 0.01 < heads[nb] - 0.01:
+                    intruding.append((plan, asset.name, c))
+                    break
+
+        if overhang:
+            assert not intruding, f"{plan}: roof inside a taller wall: {intruding[:3]}"
+        else:
+            bare = ({c for cs in plan_cells.values() for c in cs}
+                    - roofed - set(pick_towers(tm, 3)))
+            assert not bare, f"{plan}: {len(bare)} unroofed cell(s): {sorted(bare)[:5]}"
