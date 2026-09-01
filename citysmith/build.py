@@ -378,7 +378,18 @@ def storeys_of(tm, bid: str | None, ceiling: int) -> int:
     # Read the note on `ONE_VOLUME_COURSES`: this is a course count, and the
     # thing that keeps it from being three storeys is that nothing decks it.
     if is_one_volume(bid):
-        return min(ONE_VOLUME_COURSES, ceiling)
+        # **The house ceiling does NOT clamp a church, and that is deliberate.**
+        # `ceiling` exists to stop a village of cottages reading as a field of
+        # towers -- it is a cap on how tall an ordinary building may be dealt.
+        # A church is the one building whose job is to be taller than the town
+        # it stands in, and clamping it to the same number is what made a
+        # 102-cell town church the same height as a 30-cell chapel and both of
+        # them the height of a house. At the default `--storeys 3` a great
+        # church would otherwise lose two of its five courses.
+        #
+        # The band is bounded by `CHURCH_BANDS` instead, which is a measured
+        # table rather than a caller's argument, so nothing here can run away.
+        return church_courses(tm, bid)
     base = max(1, tm.floors.get(bid, 1))
     # **Frontage is applied HERE, beside the utility cap and for the same
     # reason.** Three passes read this -- the shell, the upper floors and the
@@ -2841,6 +2852,16 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         # (`building_ranges`), and a tower standing on the lower one would
         # start above its own walls.
         base_floors = max(storeys_at(tm, bid, x, z, ceiling) for x, z in cells)
+        # **How many stages, from the building's own size.** A flat three put
+        # the same tower on a 30-cell chapel and a 102-cell town church. On a
+        # church it comes off `CHURCH_BANDS`, which grows the tower faster
+        # than the nave so it keeps standing clear of a ridge that is itself
+        # growing. Everything else civic keeps the old constant -- a manor's
+        # tower is not a steeple and nothing has measured what it should be.
+        stages = TOWER_EXTRA_STOREYS
+        if is_one_volume(bid):
+            stages = church_band(
+                sum(1 for row in tm.building for b in row if b == bid))[1]
         # **From base_floors, not base_floors + 1.** The building's top wall
         # course is level `base_floors - 1`, whose head is at
         # `top + base_floors * storey_h` -- so starting a course later leaves
@@ -2851,7 +2872,7 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         # The old comment blamed the building's own ceiling for filling that
         # gap. It does not: upper decks run levels 1..floors-1, so the level
         # this now occupies carries no deck of its own.
-        for level in range(base_floors, base_floors + TOWER_EXTRA_STOREYS):
+        for level in range(base_floors, base_floors + stages):
             y = top + level * storey_h
             for (x, z) in sorted(cells):
                 # Below the course, in the gap the storey pitch leaves for it,
@@ -2865,7 +2886,7 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         # own base put every merlon inside the wall it was supposed to sit on
         # -- the same buried-geometry mistake as the rampart facing, one
         # storey up.
-        top_course = top + (base_floors + TOWER_EXTRA_STOREYS - 1) * storey_h
+        top_course = top + (base_floors + stages - 1) * storey_h
         crown = top_course + face.size_y
         rings = _roof_rings(cells)
         # **The building's own roof set, not the default one.** These four
@@ -6875,7 +6896,70 @@ ONE_VOLUME_KINDS = frozenset({"temple"})
 #: it, with no second notion of height to keep in step. What stops it becoming
 #: three actual storeys is the deck guard and the glazing guard, both keyed on
 #: `is_one_volume`.
+#: The church ladder: footprint in cells -> (nave courses, tower stages).
+#:
+#: **Every temple used to get exactly three courses and a three-stage tower,
+#: whatever its size.** Measured across the five towns on disk, temples run
+#: 30 to 102 cells -- a factor of 3.4 -- and all seven were built to one
+#: height. A 30-cell chapel and a 102-cell town church are not the same
+#: building, and the flat constant made the big ones read as small ones.
+#:
+#: | town | id | cells | plan |
+#: |---|---|---|---|
+#: | Forest Church | temple-0002 | 102 | 6x19 |
+#: | East Tradebourne | temple-0027 | 88 | 8x12 |
+#: | East Tradebourne | temple-0004 | 81 | 10x9 |
+#: | Graybank | temple-0123 | 65 | 15x5 |
+#: | East Tradebourne | temple-0003 | 65 | 15x5 |
+#: | Sedgewater | temple-0006 | 52 | 8x7 |
+#: | East Tradebourne | temple-0991 | 30 | 4x9 |
+#:
+#: The bands come off `docs/great-buildings.md` §1.3's period figures: "a
+#: modest parish church is a nave of 7-10 x 3-4 cells" (21-40 cells) and "a
+#: large town church is 12-18 x 5-7 cells" (60-126). So the measured range
+#: spans chapel to large town church, and wants at least three rungs.
+#:
+#: Heights are the period ones too. A parish nave is 20-25 ft to the eaves, a
+#: large town church 40-50, and a west tower stands anywhere from twice the
+#: nave height to four times it. At a 2.0-tile course that is 2 to 5 courses,
+#: which is the column below.
+#:
+#: **The tower scales faster than the nave, on purpose.** Its whole job is to
+#: be the thing you see from across the board, and a tower that grows in step
+#: with the nave never gains on it. Stages are set so the tower's head is
+#: always at least twice the nave's, which is what "standing clearly above the
+#: nave ridge" needs once the ridge itself is 4-8 tiles of roof.
+CHURCH_BANDS: tuple[tuple[int, int, int], ...] = (
+    # min cells, nave courses, tower stages above the nave head
+    (100, 5, 6),   # great town church  -- 50 ft eaves, 110 ft tower
+    (70, 4, 5),    # town church        -- 40 ft eaves,  90 ft tower
+    (40, 3, 4),    # parish church      -- 30 ft eaves,  70 ft tower
+    (0, 2, 3),     # chapel             -- 20 ft eaves,  50 ft tower
+)
+
+#: What a one-volume building stands when nothing knows its footprint.
+#: `storeys_of` takes a TileMap and always does; this is for callers that
+#: legitimately have only an id, and it is the parish rung.
 ONE_VOLUME_COURSES = 3
+
+
+def church_band(cells: int) -> tuple[int, int]:
+    """``(nave courses, tower stages)`` for a church of ``cells`` cells."""
+    for floor, courses, stages in CHURCH_BANDS:
+        if cells >= floor:
+            return courses, stages
+    return ONE_VOLUME_COURSES, TOWER_EXTRA_STOREYS
+
+
+def church_courses(tm, bid: str) -> int:
+    """How many courses this church's nave stands.
+
+    Reads the footprint off the TileMap rather than taking a cell count,
+    because `footprints` exists precisely so that three passes cannot
+    disagree about where a building is -- and this is now a fourth reader.
+    """
+    cells = sum(1 for row in tm.building for b in row if b == bid)
+    return church_band(cells)[0]
 
 
 def is_one_volume(bid: str | None) -> bool:

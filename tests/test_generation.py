@@ -2285,13 +2285,20 @@ def test_a_church_stands_its_courses_rather_than_its_floors():
     nave, the same eaves as the 12-cell shed, under a tower that reached 40 ft.
     The tower was doing all the work and the church itself was a hut.
     """
-    from citysmith.build import ONE_VOLUME_COURSES, storeys_of
+    from citysmith.build import church_band, storeys_of
 
-    tm = _one_building("temple-0001")
+    tm = _one_building("temple-0001")          # 7x6 = 42 cells, parish band
     assert tm.floors["temple-0001"] == 3
-    assert storeys_of(tm, "temple-0001", 9) == ONE_VOLUME_COURSES
-    # And the ceiling still binds, the same way it does for every other kind.
-    assert storeys_of(tm, "temple-0001", 2) == 2
+    courses = church_band(42)[0]
+    assert storeys_of(tm, "temple-0001", 9) == courses
+
+    # **And the house ceiling does not clamp it.** `ceiling` stops a village
+    # of cottages reading as a field of towers; a church is the one building
+    # whose job is to out-top the town, and at the default `--storeys 3` a
+    # great church would otherwise lose two of its five courses. This is the
+    # assertion that would fail if someone "tidied" the exemption away.
+    assert storeys_of(tm, "temple-0001", 1) == courses
+    assert storeys_of(_one_building("house-0001"), "house-0001", 1) == 1
 
 
 def test_a_great_civic_building_has_no_upper_deck():
