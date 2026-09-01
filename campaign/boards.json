@@ -779,6 +779,45 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-matrix-*"
   },
+  "PROBE spire tiers": {
+   "board": "PROBE spire tiers",
+   "holds": "probe",
+   "source": "out\\spire\\tiers.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T14:45:22",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-tiers-*"
+  },
+  "PROBE spire tiers2": {
+   "board": "PROBE spire tiers2",
+   "holds": "probe",
+   "source": "out\\spire\\tiers2.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T14:47:08",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-tiers2-*"
+  },
+  "PROBE spire tiers3": {
+   "board": "PROBE spire tiers3",
+   "holds": "probe",
+   "source": "out\\spire\\tiers3.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T14:48:35",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-tiers3-*"
+  },
   "PROBE spire turns": {
    "board": "PROBE spire turns",
    "holds": "probe",
