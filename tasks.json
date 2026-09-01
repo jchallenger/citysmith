@@ -1226,6 +1226,46 @@
       ]
     },
     {
+      "id": "church-parts-have-no-way-between-them",
+      "what": "A church of several volumes is several SEALED ROOMS",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.raster.open_between",
+      "note": "**The worst thing about the multi-volume church, found on re-review and verified here: you cannot walk from the nave into the crossing.**\n\n`_find_perimeters` gives every building id its own CLOSED ring and `_place_doors` puts openings only where a part meets open ground. Measured on the cruciform plan: 8 nave cells abut the crossing and NOT ONE of them carries a door. The five volumes get 9 doors between them and every one is external. So the plan is five sealed rooms you enter separately from outdoors -- and the cruciform has no west door at all, both nave doors being mid-flank.\n\nThis is `church-volumes-break-four-passes` arriving as a playability failure rather than a tidiness one. It is not enough to stop doubling the wall; something has to express **an opening BETWEEN two ids**, which nothing in the codebase does today. A chancel arch, a crossing arch and a transept arch are all that shape.\n\nBlocks everything: no plan can be pasted for real use until it is walkable, and no interior or scene built on one means anything. Do this before any further plan work.",
+      "tags": [
+        "buildings",
+        "church",
+        "raster",
+        "blocker"
+      ]
+    },
+    {
+      "id": "church-arcade-faces-the-wrong-way",
+      "what": "The piers break the cross-nave line; the long view was the problem",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.ROOD_SCREEN_ROLE",
+      "note": "The arcade was built to answer 'a 6-wide nave is a bowling alley with total sightlines'. Re-review says it does not, and reading `_arcade` back, it is right: the piers run in two COLUMNS ALONG the long axis, so they break the cross-nave line -- which was never the complaint -- and leave the axial line untouched.\n\nMeasured: aisled and minster naves span x4-12 with piers at x5 and x11, so the central span is **5 cells / 25 ft clear for the full 90 ft**. The hall church is worse at 6 cells / 30 ft clear over 80 ft, which is exactly the width round one condemned, and shortbow normal range to the foot. Round one's bowling alley lost one cell of width and gained two side lanes.\n\nThe lanes are worth having -- five piers in line genuinely break line of effect along an aisle -- but they are **1 cell wide, so no Large creature fits**, and the piers are full height so nothing shoots over them.\n\nThe fix is CROSS-AXIS, and the review names it: a **rood screen** across the chancel arch with one opening. It cuts the 90 ft lane the arcade missed, makes the chancel a defensible second room, and -- the reason to do this one first -- it is a partial wall WITH AN OPENING, so building it forces exactly the shared-boundary machinery `church-parts-have-no-way-between-them` needs anyway.\n\nAlso: `_arcade` only builds on `role == 'nave'`, so the cruciform's 8x8 crossing has ZERO piers and is the largest unobstructed room on the board, with the tower standing on nothing. Four piers inset one cell would make it the ambush node it is supposed to be.",
+      "tags": [
+        "buildings",
+        "church",
+        "play"
+      ]
+    },
+    {
+      "id": "church-plans-are-too-big-to-fight-across",
+      "what": "The corrections added 50% area and pushed the board past a fight",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "test:test_a_church_plan_fits_a_three_round_fight",
+      "note": "Widening the naves cost more than it looks. The aisled nave went 108 -> 162 cells, about +50%, for one cell of usable lane each side. The cruciform is now **26x39 tiles = 130x195 ft, about 47 cells corner to corner** -- 8 moves at 30 ft, 4 dashing -- so half the board is outside any three-round fight.\n\nAnd a 9-10 cell nave means a five-character party **cannot form a line**: it takes 9 bodies to hold the width, and the new aisles route past whatever they do hold.\n\nSo width is not free and the sweet spot is under 9. This pulls against `church-section-is-too-tall-for-its-width`, which wants width to justify the height already shipped -- the two want deciding together rather than one at a time.\n\nNote the ranking did not move between rounds (cruciform > minster > narthex > aisled) and the reviewer calls that the finding: the corrections were applied uniformly, so they moved all four by the same amount and settled nothing about which plan to keep.",
+      "tags": [
+        "buildings",
+        "church",
+        "play"
+      ]
+    },
+    {
       "id": "church-subdivide-the-polygon",
       "what": "Split the imported church polygon into nave and chancel",
       "state": "open",
