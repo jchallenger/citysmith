@@ -198,6 +198,7 @@ DEFAULT_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [ok  ] chimneys: none; nothing here is roofed
 [ok  ] field walls: none in the source
 [ok  ] yards: 4 of 4 buildings stand apart enough for a yard (332 cells; wrapped 4)
+[ok  ] churches: none in the source
 [ok  ] marsh: none in the source
 [ok  ] quarters: none; trades cluster at 0.00x, under the threshold -- this settlement has no quarters to find
 
@@ -258,6 +259,7 @@ TILED_REPORT = """Pinfold: 30x30 tiles (150x150 ft)
 [ok  ] chimneys: none; nothing here is roofed
 [ok  ] field walls: none in the source
 [ok  ] yards: 4 of 4 buildings stand apart enough for a yard (332 cells; wrapped 4)
+[ok  ] churches: none in the source
 [ok  ] marsh: none in the source
 [ok  ] quarters: none; trades cluster at 0.00x, under the threshold -- this settlement has no quarters to find
 

@@ -151,8 +151,17 @@ def verify(tm: TileMap, *, asset_count: int | None = None, slab_count: int | Non
         report.add("warn", "gates", "no gates found; routing from the map edge instead")
 
     # -- building access ------------------------------------------------------
-    total_buildings = len({b for row in tm.building for b in row if b})
-    with_doors = len(tm.doors)
+    # **A church complex is ONE building to this check.** A chancel has no
+    # street door on purpose -- you enter a church through its nave, and
+    # `_find_perimeters` drops the wall between them so the chancel is inside
+    # the nave's shell. Counting it separately reported a building that could
+    # not be entered, which is exactly the "verify counts four enterable
+    # buildings where there is one church" failure the multi-volume design was
+    # warned about. Its nave carries the access for both.
+    subordinate = {b for b, (_n, r) in tm.church_parts.items() if r != "nave"}
+    total_buildings = len({b for row in tm.building for b in row
+                           if b and b not in subordinate})
+    with_doors = len({b for b in tm.doors if b not in subordinate})
     landlocked = []
     for bid, cells in tm.doors.items():
         x, z, side = cells[0]
@@ -1504,6 +1513,9 @@ def feature_report(builder, tm, layout=None, seed: int = 0
 
     Returns ``(level, name, detail)`` triples.
     """
+    from . import raster as R
+    from .build import pick_towers
+
     out: list[tuple[str, str, str]] = []
     by_id = builder.palette.catalog.by_id
     used: set[str] = {p.asset_id for p in builder.placements}
@@ -1648,6 +1660,63 @@ def feature_report(builder, tm, layout=None, seed: int = 0
     else:
         out.append(("pass", "yards",
                     f"none; no building of {total} stands clear of its neighbours"))
+
+    # -- churches ------------------------------------------------------------
+    #
+    # **A COUNT IS NOT A SHAPE, and this branch exists because of that.** The
+    # chimney line once read "1,084 stacks" and every one of them was a single
+    # course; it now reads "1,084 of 1 course" and that reads as the bug it is.
+    # The same trap was walked into twice more on churches in one session:
+    # `SUBORDINATE_STEP` and `lay_spire` were both written, tested and written
+    # up as landed while being reachable only from a probe tool, so they
+    # touched **zero** real buildings. Nothing said a word, because this
+    # function did not know churches existed.
+    #
+    # So the line reports the SPLIT and the SPIRE, not "there are churches".
+    # And a temple offered and not split is a FAIL rather than an "ok, none
+    # here": a town does not decline to have churches in it the way a map
+    # declines to have field boundaries.
+    temples = {b for b, (_n, r) in tm.church_parts.items() if r == "nave"}
+    unsplit = {b for row in tm.building for b in row
+               if b and b.split("-")[0] == "temple"
+               and b not in tm.church_parts}
+    plan = {}
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.building[z][x]:
+                plan.setdefault(tm.building[z][x], 0)
+                plan[tm.building[z][x]] += 1
+    small = {b for b in unsplit if plan.get(b, 0) < R.CHURCH_MIN_SPLIT_CELLS}
+    big = unsplit - small
+    spires = sum(1 for p in builder.placements
+                 if (by_id(p.asset_id) is not None
+                     and by_id(p.asset_id).name.startswith("Tall 2x2x4")))
+    towers = len({b for b in pick_towers(tm, 3).values()
+                  if b in tm.church_parts or b in unsplit})
+
+    if temples or unsplit:
+        bits = [f"{len(temples) + len(unsplit)} church(es)"]
+        if temples:
+            bits.append(f"{len(temples)} split into nave and chancel")
+        if small:
+            bits.append(f"{len(small)} under the "
+                        f"{R.CHURCH_MIN_SPLIT_CELLS}-cell split threshold")
+        if big:
+            bits.append(f"{len(big)} BIG ENOUGH TO SPLIT AND NOT SPLIT")
+        bits.append(f"{towers} with a tower, {spires // 4} spire(s)")
+        level = "pass"
+        detail = "; ".join(bits)
+        if big:
+            level = "fail"
+            detail += " -- a church over the threshold that came out one box "
+            detail += "means the split did not run"
+        elif towers and spires < 4:
+            level = "fail"
+            detail += " -- a church tower with no spire on it means `lay_spire`"
+            detail += " is not reachable from the build"
+        out.append((level, "churches", detail))
+    else:
+        out.append(("pass", "churches", "none in the source"))
 
     # -- marsh ---------------------------------------------------------------
     wet = sum(1 for row in tm.surface for v in row if v == MARSH)

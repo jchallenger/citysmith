@@ -171,7 +171,7 @@ class TileMap:
     #: into a height RELATIVE to the nave. Here rather than in the builder for
     #: the reason `floors` is here: the shell, the upper floors and the roof
     #: all read it, and a roof that disagrees with the walls floats.
-    church_parts: dict[str, str] = field(default_factory=dict)
+    church_parts: dict[str, tuple[str, str]] = field(default_factory=dict)
     #: Bridges added to reconnect districts split by water: (x0, z0, x1, z1).
     bridges: list[tuple[int, int, int, int]] = field(default_factory=list)
     #: The vertices of each wall ring, as cells. A rasterised wall is a band of
@@ -264,10 +264,25 @@ class TileMap:
         # test comes out single-storey -- which silently defeats the point of
         # --crop, since the paste then exercises no wall stacking, no upper
         # floor and no raised roof course.
+        kept = {v for row in out.building for v in row if v}
         out.floors = {
-            bid: self.floors[bid]
-            for bid in {v for row in out.building for v in row if v}
-            if bid in self.floors
+            bid: self.floors[bid] for bid in kept if bid in self.floors
+        }
+        # **Church roles ride along, or the crop rebuilds the church wrong.**
+        # A crop makes a fresh TileMap and copies field by field, so anything
+        # not listed here is silently lost -- and losing `church_parts` means
+        # `_find_perimeters` below closes a ring round each part again (five
+        # sealed rooms), `_place_doors` gives the chancel its own street door,
+        # and `storeys_of` bands it on its own area. Caught by the churches
+        # line in `feature_report`, which read "big enough to split and not
+        # split" on a crop of a church that had been split perfectly well.
+        #
+        # A part whose nave fell outside the crop keeps its role but points at
+        # a missing nave; `church_courses` falls back to banding it on its own
+        # area there, which is the right answer for half a church.
+        out.church_parts = {
+            bid: self.church_parts[bid] for bid in kept
+            if bid in self.church_parts
         }
         _find_perimeters(out, None)
         _place_doors(out, None)
@@ -733,6 +748,9 @@ def rasterize(layout: Layout, *, pad: int = 0, bridges: bool = True) -> TileMap:
         tm.bridges = _bridge_water_gaps(tm, layout)
     _carve_plaza(tm)
     _trace_lanes(tm)
+    # Before the perimeters: the split changes which cells belong to which
+    # id, and the shell is computed off that.
+    split_churches(tm)
     _find_perimeters(tm, layout)
     _place_doors(tm, layout)
     # After the doors, because a court is laid to reach them.
@@ -1734,8 +1752,142 @@ def _add_second_gate(tm: TileMap, road_width: float) -> None:
                 tm.street_class[z][x] = LANE_ROAD
 
 
+#: A temple below this many cells is not split. Measured on the seven real
+#: temples across five towns: a 75/25 cut gives 102 -> 77/25, 88 -> 66/22,
+#: 81 -> 61/20, 65 -> 49/16 and 52 -> 39/13, all of which are two usable
+#: rooms; 30 -> 23/8 is not, because an 8-cell chancel is a cupboard. 50 is
+#: the floor that keeps every real split honest, and it leaves 2 of 7
+#: unsplit -- which is a fact about those churches and is REPORTED rather
+#: than fixed by lowering the bar.
+CHURCH_MIN_SPLIT_CELLS = 50
+
+#: How much of the long axis the chancel takes. A real chancel runs a third to
+#: a half of the nave's length; a quarter of the WHOLE gives about a third of
+#: what is left, which is the low end of that and keeps the nave dominant.
+CHANCEL_SHARE = 0.25
+
+#: The chancel is narrower than the nave by this many cells on each side,
+#: where there is room. The inset is what makes the join read as a step from
+#: outside rather than as one long box with a change of roof height.
+CHANCEL_INSET = 1
+
+
+def split_churches(tm: TileMap) -> int:
+    """Cut a chancel off every temple big enough for one. Returns the count.
+
+    **Derived from the imported polygon, not from a template.** The footprints
+    come from MFCG and FTG as real outlines at real angles, and the largest
+    temple in five towns is 102 cells; every hand-authored plan tried here was
+    176-312, so templating would mean scaling a rectangle onto someone else's
+    outline and throwing away the one thing the export actually gave us.
+    Subdividing keeps it.
+
+    The chancel goes at the end of the long axis FURTHEST FROM THE STREET,
+    which is the liturgical east end in practice: a church is entered from the
+    public side and the altar is at the far one. Measured against the door
+    would be circular -- doors are placed after this runs.
+
+    Both parts keep the imported id as a stem (`temple-0002`,
+    `temple-0002+chancel`) rather than minting a new number. Both importers
+    number every footprint from one global counter and `boards.json` MOVED
+    detection keys on it, so a new id would renumber the town.
+    """
+    from collections import defaultdict
+
+    cells: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            bid = tm.building[z][x]
+            if bid and bid.split("-")[0] == "temple":
+                cells[bid].append((x, z))
+
+    split = 0
+    for bid, own in sorted(cells.items()):
+        if len(own) < CHURCH_MIN_SPLIT_CELLS:
+            continue
+        xs = [c[0] for c in own]
+        zs = [c[1] for c in own]
+        w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
+        along_z = d >= w
+        span = d if along_z else w
+        cut = max(2, int(round(span * CHANCEL_SHARE)))
+        if span - cut < 3:
+            continue
+
+        # Which end is furthest from a street: that is the altar end.
+        def street_gap(lo_end: bool) -> int:
+            best = 10**6
+            for x, z in own:
+                v = z if along_z else x
+                lim = (min(zs if along_z else xs) + cut) if lo_end \
+                    else (max(zs if along_z else xs) - cut)
+                if (v < lim) if lo_end else (v > lim):
+                    for dz in range(-6, 7):
+                        for dx in range(-6, 7):
+                            nx, nz = x + dx, z + dz
+                            if tm.inside(nx, nz) and tm.surface[nz][nx] == STREET:
+                                best = min(best, abs(dx) + abs(dz))
+            return best
+
+        far_low = street_gap(True) > street_gap(False)
+        lo = min(zs if along_z else xs)
+        hi = max(zs if along_z else xs)
+        keep = (lambda v: v < lo + cut) if far_low else (lambda v: v > hi - cut)
+
+        # Inset the chancel off both flanks where there is room to.
+        cross_lo = min(xs if along_z else zs)
+        cross_hi = max(xs if along_z else zs)
+        inset = CHANCEL_INSET if (cross_hi - cross_lo + 1) >= 5 else 0
+
+        chancel = f"{bid}+chancel"
+        moved = 0
+        for x, z in own:
+            v = z if along_z else x
+            c = x if along_z else z
+            if not keep(v):
+                continue
+            if c < cross_lo + inset or c > cross_hi - inset:
+                tm.building[z][x] = ""      # trimmed by the inset
+                tm.surface[z][x] = GROUND
+                continue
+            tm.building[z][x] = chancel
+            moved += 1
+        if moved < 6:
+            # Not enough left to be a room; put it back rather than ship a
+            # cupboard with its own roof.
+            for x, z in own:
+                tm.building[z][x] = bid
+                tm.surface[z][x] = FLOOR
+            continue
+        tm.floors[chancel] = tm.floors.get(bid, 1)
+        tm.church_parts[bid] = (bid, "nave")
+        tm.church_parts[chancel] = (bid, "chancel")
+        split += 1
+    return split
+
+
 def _find_perimeters(tm: TileMap, layout: Layout | None) -> None:
-    """Record which cell edges form each building's outer shell."""
+    """Record which cell edges form each building's outer shell.
+
+    **A church complex is ONE shell, not one per volume.** Two abutting parts
+    each closing their own ring is what made a five-volume church five sealed
+    rooms: the nave's south wall and the crossing's north wall were both
+    built, back to back, and `_place_doors` opens only onto outdoors -- so
+    nothing led from one to the next. Measured before this: 8 nave cells
+    abutting the crossing, and not one door among them.
+
+    Treating siblings as the same building drops the shared wall entirely,
+    which is the chancel arch by omission. The parts keep their own ids for
+    everything else -- roofs hip per part, `SUBORDINATE_STEP` steps per part
+    -- because those are the two things that SHOULD differ across the join.
+    """
+    complexes = {bid: nave for bid, (nave, _r) in tm.church_parts.items()}
+
+    def same(a: str, b: str) -> bool:
+        if a == b:
+            return True
+        return bool(a) and bool(b) and complexes.get(a) == complexes.get(b) \
+            and a in complexes
     for z in range(tm.depth):
         for x in range(tm.width):
             bid = tm.building[z][x]
@@ -1743,7 +1895,7 @@ def _find_perimeters(tm: TileMap, layout: Layout | None) -> None:
                 continue
             for side, dx, dz in SIDES:
                 nx, nz = x + dx, z + dz
-                if not tm.inside(nx, nz) or tm.building[nz][nx] != bid:
+                if not tm.inside(nx, nz) or not same(bid, tm.building[nz][nx]):
                     tm.perimeter.setdefault(bid, []).append((x, z, side))
 
 
@@ -1798,6 +1950,11 @@ _OPPOSITE = {"n": "s", "s": "n", "w": "e", "e": "w"}
 def _place_doors(tm: TileMap, layout: Layout | None) -> None:
     """Give every building a doorway onto the most public space it touches.
 
+    **A subordinate church part gets none.** You enter a church through its
+    nave; a chancel with its own street door is a shed that happens to touch a
+    church. Before this every volume got its own external doorway -- five
+    volumes, nine doors, and not one of them between two parts.
+
     Preferring the nearest open cell is not enough: a medieval block encloses
     courtyards, and a door opening into a sealed courtyard leaves the building
     unenterable even though it technically has one. Reachability from the gates
@@ -1824,6 +1981,12 @@ def _place_doors(tm: TileMap, layout: Layout | None) -> None:
                 area[bid] = area.get(bid, 0) + 1
 
     for bid, cells in tm.perimeter.items():
+        # A subordinate church part is entered through its nave, not off the
+        # street. Skipping it here is the other half of dropping the shared
+        # wall in `_find_perimeters`: one shell, one way in.
+        role = tm.church_parts.get(bid, ("", ""))[1]
+        if role and role != "nave":
+            continue
         # (reachable, publicness, distance from the middle of the run) -> cell.
         # Offsets are doubled so an even-length run's two middle cells stay
         # integers and compare equal.

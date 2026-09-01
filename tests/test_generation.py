@@ -1663,7 +1663,10 @@ def test_notching_produces_l_shapes_but_keeps_every_door(forest_church_bridged):
         if len(cells) != (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1):
             non_rect += 1
     assert non_rect > 0, "every footprint is still a perfect rectangle"
-    assert all(tm.doors.get(bid) for bid in fp), "a notch took a building's only door"
+    # A subordinate church part is entered through its nave and has no street
+    # door by design, so it is not a building missing one.
+    subordinate = {b for b, (_n, r) in tm.church_parts.items() if r != "nave"}
+    assert all(tm.doors.get(bid) for bid in fp if bid not in subordinate),         "a notch took a building's only door"
 
 
 def test_the_town_has_a_market_square(forest_church_bridged):

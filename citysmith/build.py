@@ -2789,6 +2789,29 @@ def _lay_terrain(b: Builder, tm, surface_role, grade: float,
 #: the point -- a landmark stops being one if every building has a tower.
 TOWER_MIN_TILES = 60
 TOWER_MIN_ASPECT = 2.5
+
+#: Above this footprint the aspect gate is WAIVED, and that correction has now
+#: been arrived at from three directions.
+#:
+#: `TOWER_MIN_ASPECT` reads compactness as "not a nave". Its own docstring
+#: argues the opposite -- "a nave with a tower at one end is the one
+#: silhouette nobody mistakes for a barn" -- and on real data it inverts:
+#: East Tradebourne's two LARGEST temples (88 cells at 8x12, aspect 1.50; 81
+#: at 10x9, 1.11) are towerless while a 65-cell one is the landmark. A compact
+#: plan at 88 cells is a nave WITH AISLES, which is precisely the church that
+#: has a tower.
+#:
+#: Then it bit twice more in one session. Widening the naves to fix "the tower
+#: is the full width of the nave" took a 6x18 nave from aspect 3.00 to 2.00
+#: and deleted the tower from three plans outright -- and handed the minster's
+#: to a 5x15 cloister range at 3.0, ninety feet of tower over the dormitory.
+#: Then splitting a chancel off Forest Church's temple took its nave from 3.17
+#: to 2.33 and deleted that one too. **Every improvement to a church plan
+#: shortens its nave, and the gate punishes exactly that.**
+#:
+#: 75 cells is chosen against the measured range: it clears East Tradebourne's
+#: 81 and 88 and Forest Church's split nave at 82, and still refuses a house.
+TOWER_ASPECT_EXEMPT_TILES = 75
 TOWER_EXTRA_STOREYS = 3
 
 
@@ -2808,7 +2831,8 @@ def pick_towers(tm, ceiling: int) -> dict[tuple[int, int], str]:
         w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
         long_axis_z = d >= w
         span, across = (d, w) if long_axis_z else (w, d)
-        if span < across * TOWER_MIN_ASPECT:
+        if (len(cells) < TOWER_ASPECT_EXEMPT_TILES
+                and span < across * TOWER_MIN_ASPECT):
             continue
 
         side = min(across, span // 3)
@@ -2901,6 +2925,16 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         # on the same cell put a merlon and a roof piece at one height, 20
         # pairs of them intersecting -- and a hip roof laid over a parapet is
         # not what a bell tower looks like anyway.
+        # **The spire goes on the tower, inside its parapet.** A fixed 4x4
+        # cap is not a simplification -- a broach spire IS narrower than the
+        # tower it stands on -- and the margin it leaves is exactly the ring
+        # the crenellations occupy, so the two do not fight for a cell.
+        # Nothing called this before: it was written, tested against a
+        # hand-build, and reachable only from a probe tool, so no board ever
+        # got one. That is the `1,084 stacks` failure at 0%.
+        if is_one_volume(bid):
+            lay_spire(b, cells, crown, tier_of(bid), bid)
+
         parapet = {c for c in cells
                    if any((c[0] + dx, c[1] + dz) not in cells
                           for _, dx, dz in SIDE_OFFSETS)}
@@ -6353,9 +6387,15 @@ def spire_piece(palette, tier: str, bid: str | None):
     return None, kit
 
 
-def lay_spire(b: "Builder", cells: set[tuple[int, int]], y: float,
+def lay_spire(b: "Builder", cells: set[tuple[int, int]], base_y: float,
               tier: str, bid: str | None) -> int:
-    """Cap ``cells`` with a spire, centred. Returns the pieces laid.
+    """Cap ``cells`` with a spire standing ON ``base_y``. Returns pieces laid.
+
+    ``base_y`` is the height the spire's feet sit at -- the top of the wall it
+    crowns -- and the name says so because the first caller passed
+    ``max(p.y for p in placements)``, the ORIGIN of the tallest placement
+    anywhere on the map. That shipped a spire hanging in the air over the
+    roofs, which is exactly what a bare ``y`` invites.
 
     The cap is a fixed 4x4 whatever the tower is, which is not a
     simplification -- a broach spire IS narrower than the tower it stands on,
@@ -6378,12 +6418,21 @@ def lay_spire(b: "Builder", cells: set[tuple[int, int]], y: float,
     ox = xs[(len(xs) - SPIRE_SIDE) // 2]
     oz = zs[(len(zs) - SPIRE_SIDE) // 2]
     half = SPIRE_SIDE // 2
+    # **And the cap has to stand on something.** `xs` and `zs` are DISTINCT
+    # coordinates, not a contiguous range, so a ring-shaped or split tower
+    # footprint centres this in the hole between its parts -- and
+    # `_lay_towers` merges all of a building's tower cells into one set, so a
+    # west-front pair of towers is exactly that case. Checked rather than
+    # assumed, because the failure is a spire hovering over the nave.
+    if any((ox + dx, oz + dz) not in cells
+           for dx in range(SPIRE_SIDE) for dz in range(SPIRE_SIDE)):
+        return 0
     _edge_off, corner_off = roof_offsets(piece)
     laid = 0
     for dx, dz, quad in ((0, 0, "nw"), (half, 0, "ne"),
                          (0, half, "sw"), (half, half, "se")):
         rot = (ROOF_CORNER_ROT[quad] + corner_off) % 24
-        b.add(place_tile(piece, ox + dx, oz + dz, y, rot))
+        b.add(place_tile(piece, ox + dx, oz + dz, base_y, rot))
         laid += 1
     return laid
 
@@ -7078,18 +7127,22 @@ def church_courses(tm, bid: str) -> int:
     because `footprints` exists precisely so that three passes cannot
     disagree about where a building is -- and this is now a fourth reader.
     """
-    # A part of a complex is banded against its NAVE, not against its own
-    # area. The nave is whichever part the raster labelled "nave"; with no
-    # complex recorded, the building is its own nave and this is a no-op.
+    # A part of a complex is banded against ITS OWN nave. The map is keyed by
+    # complex for that reason: looking up "the first part whose role is nave"
+    # bands every part of the second church against the first one's nave, and
+    # East Tradebourne has four temples. The roof reads this same function, so
+    # the result would not float -- it would just be silently wrong, which is
+    # worse.
+    #
+    # Through `footprints`, not a raw scan. This is called from `storeys_of`,
+    # which the shell, the upper floors and the roof all call per cell; a full
+    # width-by-depth walk here is 441k cells per lookup on East Tradebourne.
     parts = getattr(tm, "church_parts", None) or {}
-    role = parts.get(bid, "")
-    if role and role != "nave":
-        nave = next((b for b, r in parts.items() if r == "nave"), None)
-        if nave is not None:
-            cells = sum(1 for row in tm.building for b in row if b == nave)
-            return subordinate_courses(role, church_band(cells)[0])
-    cells = sum(1 for row in tm.building for b in row if b == bid)
-    return church_band(cells)[0]
+    nave, role = parts.get(bid, (bid, ""))
+    plan = footprints(tm)
+    if role and role != "nave" and nave in plan:
+        return subordinate_courses(role, church_band(len(plan[nave]))[0])
+    return church_band(len(plan.get(bid, ())))[0]
 
 
 def is_one_volume(bid: str | None) -> bool:

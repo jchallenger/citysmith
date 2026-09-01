@@ -139,7 +139,9 @@ def _tilemap(parts):
             tm.surface[z][x] = GROUND
     for n, (role, px, pz, pw, pd) in enumerate(parts, start=1):
         bid = f"temple-{n:04d}"
-        tm.church_parts[bid] = "nave" if role == "nave" else role.split("_")[-1]
+        nave_bid = "temple-0001"   # the first part is the nave, by contract
+        tm.church_parts[bid] = (
+            nave_bid, "nave" if role == "nave" else role.split("_")[-1])
         for x in range(px + MARGIN, px + MARGIN + pw):
             for z in range(pz + MARGIN, pz + MARGIN + pd):
                 tm.building[z][x] = bid
@@ -183,12 +185,15 @@ def build(name, *, seed, storeys, spire=True):
     spired = 0
     if spire:
         # On the tallest part, above everything already standing on it.
-        tall = max(p.y for p in b.placements) if b.placements else 0.0
-        first = next(bid for bid, r in tm.church_parts.items() if r == "nave")
-        cells = {(x, z) for z in range(tm.depth) for x in range(tm.width)
-                 if tm.building[z][x] == first}
-        with b.layer("structure"):
-            spired = lay_spire(b, cells, tall, "civic", first)
+        # Counted, not laid: `_lay_towers` caps the tower now. A probe that
+        # lays its own copy of the thing it is probing can only tell you about
+        # the probe -- and this one put a spire on the NAVE, seven cells from
+        # the crossing it was meant to cap, floating over the roofs.
+        from citysmith.build import placed_bounds
+        byid = {a.id: a for a in palette.catalog.assets}
+        spired = sum(1 for p in b.placements
+                     if byid.get(p.asset_id) is not None
+                     and byid[p.asset_id].name.startswith("Tall 2x2x4"))
     return tm, b, blurb, parts, piers, spired
 
 

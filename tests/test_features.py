@@ -551,3 +551,62 @@ def test_a_wall_taller_than_its_course_is_sunk_not_floated():
     assert shells_rest_on_their_floors(_B(ODD, 0.53), _TM()) != []
     # And a whole course out is still the thing this check is for.
     assert shells_rest_on_their_floors(_B(ODD, 0.0), _TM()) != []
+
+
+def test_the_feature_report_counts_church_parts_and_spires():
+    """The churches line exists because two church features reached ZERO real
+    buildings while being written up as landed.
+
+    `SUBORDINATE_STEP` and `lay_spire` were both written, tested against a
+    hand-build, and reachable only from a probe tool -- so `church_parts` was
+    empty on every import and no board got a spire. Nothing said a word,
+    because `feature_report` did not know churches existed.
+
+    It reports the SPLIT and the SPIRE rather than "there are churches", for
+    the same reason the chimney line reports "1,084 of 1 course" rather than
+    "1,084 stacks": a count is not a shape. And a temple over the split
+    threshold that came out one box is a FAIL, not an "ok, none here" -- a
+    town does not decline to have churches in it the way a map declines to
+    have field boundaries.
+    """
+    from citysmith import raster as R
+
+    def temple(w, d):
+        tm = R.TileMap.blank(w + 8, d + 10)
+        for z in range(tm.depth):
+            for x in range(tm.width):
+                tm.surface[z][x] = R.GROUND
+        for x in range(tm.width):
+            tm.surface[2][x] = R.STREET
+        for x in range(4, 4 + w):
+            for z in range(4, 4 + d):
+                tm.building[z][x] = "temple-0001"
+                tm.surface[z][x] = R.FLOOR
+        tm.floors["temple-0001"] = 1
+        return tm
+
+    def report(tm):
+        R._find_perimeters(tm, None)
+        R._place_doors(tm, None)
+        builder = build_from_tilemap(tm, _palette(), storeys=3)
+        return {name: (level, detail)
+                for level, name, detail in feature_report(builder, tm)}
+
+    # -- offered and split: the line names both halves.
+    tm = temple(7, 15)
+    R.split_churches(tm)
+    level, detail = report(tm)["churches"]
+    assert "split into nave and chancel" in detail
+
+    # -- offered, big enough, and NOT split: a failure, not silence.
+    level, detail = report(temple(7, 15))["churches"]
+    assert level == "fail", "a church that should have split and did not"
+    assert "NOT SPLIT" in detail
+
+    # -- not offered: an honest "none", because a map may have no church.
+    bare = R.TileMap.blank(12, 12)
+    for z in range(bare.depth):
+        for x in range(bare.width):
+            bare.surface[z][x] = R.GROUND
+    level, detail = report(bare)["churches"]
+    assert level == "pass" and "none in the source" in detail
