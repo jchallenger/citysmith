@@ -497,3 +497,57 @@ def test_a_second_ground_tile_in_one_cell_is_caught():
                             z=first.z, rot=first.rot))
     caught = [p for p in _ground_sheet(builder, tm) if "more than one" in p]
     assert caught, "a duplicated ground tile must be reported"
+
+
+def test_a_wall_taller_than_its_course_is_sunk_not_floated():
+    """`shells_rest_on_their_floors` allows the panel's own excess, one way.
+
+    `Tavern Wall 01` is 2.03 tall where every other panel in the medieval set
+    is 2.00, so seating its head on the course line puts its base 0.03 low --
+    27 buildings on Forest Church and 614 on East Tradebourne, every one that
+    piece. The head is the end that must be right, because the roof seats at
+    `floors * storey_h`; the excess is absorbed at the base where the floor
+    hides it rather than left proud of the eaves, which is the end that shows.
+
+    So the allowance is the panel's excess over a whole course and nothing
+    more, and it is ONE-SIDED. This check exists to catch two pastes
+    disagreeing about height -- a whole course -- and it was firing on 1.8
+    inches.
+    """
+    from citysmith.verify import shells_rest_on_their_floors
+
+    class _A:
+        kind = "tile"
+        off_x = off_z = 0.0
+        def __init__(self, i, y):
+            self.id, self.size_y = i, y
+            self.size_x = self.size_z = 1.0
+
+    FLOOR, ODD, PLAIN = _A("f", 0.5), _A("w", 2.03), _A("p", 2.0)
+
+    BYID = {a.id: a for a in (FLOOR, ODD, PLAIN)}
+
+    class _Pl:
+        def __init__(self, aid, y):
+            self.asset_id, self.x, self.y, self.z, self.rot = aid, 0.0, y, 0.0, 0
+
+    class _B:
+        byid = BYID
+        prop_ids = frozenset()
+        def __init__(self, wall, y):
+            self.placements = [_Pl("f", 0.0), _Pl(wall.id, y)]
+            self.layer_of = ["landscape", "structure"]
+            self.group_of = [None, "house-0001"]
+
+    class _TM:
+        width = depth = 1
+
+    # Sunk by exactly its own excess: allowed.
+    assert shells_rest_on_their_floors(_B(ODD, 0.47), _TM()) == []
+    # A plain 2.0 panel has no excess, so it must sit exactly on the floor.
+    assert shells_rest_on_their_floors(_B(PLAIN, 0.5), _TM()) == []
+    assert shells_rest_on_their_floors(_B(PLAIN, 0.47), _TM()) != []
+    # Floating is never allowed, however odd the panel.
+    assert shells_rest_on_their_floors(_B(ODD, 0.53), _TM()) != []
+    # And a whole course out is still the thing this check is for.
+    assert shells_rest_on_their_floors(_B(ODD, 0.0), _TM()) != []

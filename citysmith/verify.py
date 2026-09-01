@@ -1256,12 +1256,31 @@ def shells_rest_on_their_floors(builder, tm) -> list[str]:
         x0, z0, x1, z1 = placed_bounds(asset, p)
         cell = (int(math.floor((x0 + x1) / 2)), int(math.floor((z0 + z1) / 2)))
         if group not in lowest or p.y < lowest[group][0]:
-            lowest[group] = (p.y, cell)
+            lowest[group] = (p.y, cell, asset)
 
     off = []
-    for group, (y, cell) in sorted(lowest.items()):
+    for group, (y, cell, asset) in sorted(lowest.items()):
         want = floor_top.get(cell)
-        if want is None or abs(y - want) > 1e-6:
+        if want is None:
+            off.append((group, y, want))
+            continue
+        # **A wall taller than its course is SUNK, and that is correct.**
+        # `Tavern Wall 01` is 2.03 tall where every other panel in the
+        # medieval set is 2.00, so seating its head on the course line puts
+        # its base 0.03 low -- 27 buildings on Forest Church, 614 on East
+        # Tradebourne, every one of them that piece. The head is the end that
+        # has to be right, because the roof seats at `floors * storey_h`; the
+        # excess is absorbed at the base where the floor hides it rather than
+        # left standing proud of the eaves, which is the end that shows.
+        #
+        # So the allowance is the panel's own excess over a whole course and
+        # nothing more, and it is one-sided: a shell may be buried by it and
+        # may NEVER float. This check exists to catch two pastes disagreeing
+        # about height, which is a whole course, and it was firing on 1.8
+        # inches.
+        excess = asset.size_y - round(asset.size_y) if asset is not None else 0.0
+        sunk = want - y
+        if sunk < -1e-6 or sunk > max(0.0, excess) + 1e-6:
             off.append((group, y, want))
     if not off:
         return []

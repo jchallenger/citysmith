@@ -51,7 +51,7 @@ import sys
 sys.path.insert(0, ".")
 
 from citysmith import raster as R
-from citysmith.build import (_close_diagonals, place_centered, place_tile,
+from citysmith.build import (place_centered, place_tile,
                              place_wall, run_along_polyline)
 from citysmith.catalog import load_or_build
 from citysmith.palette import MEDIEVAL, Palette
@@ -69,6 +69,38 @@ LINE = [(2.5, 3.5), (6.5, 3.5), (13.5, 10.5), (17.5, 10.5)]
 
 cat = load_or_build()
 pal = Palette(cat, MEDIEVAL, 33)
+
+
+
+def _close_diagonals(cells: set) -> set:
+    """Add the cells that stop a stair-stepped run being see-through.
+
+    **Carried into the probe because the builder no longer has one.** It was
+    `build._close_diagonals` until the barricade rework (`0e7c6f0`, a walled
+    property is one property) took it out, and this file went on importing it
+    -- so `fence_probe.py` has not run since. A probe nobody has run since the
+    refactor that broke it is not a probe, which is the second time that has
+    been true this week.
+
+    Kept verbatim rather than reimplemented, because it is what the probe's
+    published measurements were taken against: on Sedgewater's barricade
+    before it existed, 116 cells in 34 four-connected pieces, 14 with no
+    orthogonal neighbour at all. Where a run steps corner-to-corner the two
+    pieces touch at a POINT and what is between them is a slit straight
+    through the wall.
+
+    One connector per diagonal, chosen deterministically so a rebuild is
+    byte-identical.
+    """
+    out = set(cells)
+    for x, z in sorted(cells):
+        for dx, dz in ((1, 1), (1, -1), (-1, 1), (-1, -1)):
+            if (x + dx, z + dz) not in cells:
+                continue
+            if (x + dx, z) in out or (x, z + dz) in out:
+                continue
+            out.add((x + dx, z))
+    return out
 
 
 def asset(name: str):
