@@ -1372,14 +1372,42 @@
     {
       "id": "church-spire-belongs-on-the-tower",
       "what": "The spire is a fleche mid-nave, not a cap on a tower",
-      "state": "open",
+      "state": "done",
       "doc": "docs/great-buildings.md 3",
-      "evidence": "test:test_a_spire_caps_a_tower_not_a_nave",
-      "note": "All four spires are four pieces on a 4x4 centred on the NAVE. On the cruciform it lands at z10-13 while the crossing is z19-26: a fleche squatting on a nave ridge, seven cells from the tower it was meant to cap. church_plans.py picks the nave because it is the first part, and lay_spire has no opinion about what it is capping.\n\nDownstream of widening-the-nave-deleted-the-tower: there is no tower to put it on. Fix that first, then call lay_spire from _lay_towers on the tower block rather than from the plan tool on whatever is biggest.\n\nProportion, separately: the fixed 4x4 cap is 40-44% of the nave's width and 20 ft tall on a 20 ft base -- a 45-degree cap. Ketton's broach is nearer 3:1. Once it stands on a tower rather than a nave the base is right, but the rise probably wants stacking rather than one course.",
+      "evidence": "test:test_a_church_tower_top_is_one_kit",
+      "note": "All four spires are four pieces on a 4x4 centred on the NAVE. On the cruciform it lands at z10-13 while the crossing is z19-26: a fleche squatting on a nave ridge, seven cells from the tower it was meant to cap. church_plans.py picks the nave because it is the first part, and lay_spire has no opinion about what it is capping.\n\nDownstream of widening-the-nave-deleted-the-tower: there is no tower to put it on. Fix that first, then call lay_spire from _lay_towers on the tower block rather than from the plan tool on whatever is biggest.\n\nProportion, separately: the fixed 4x4 cap is 40-44% of the nave's width and 20 ft tall on a 20 ft base -- a 45-degree cap. Ketton's broach is nearer 3:1. Once it stands on a tower rather than a nave the base is right, but the rise probably wants stacking rather than one course.\n\nDONE 2026-09-01, in two steps. `lay_spire` is called from `_lay_towers` on the tower block (church-work-reaches-zero-real-buildings), and the design pass squared that block so the cap fills it: overhead on `ET tower 09-01` the spire is the whole tower top, finial centred, inside the parapet. The proportion complaint moved to `church-spire-proportion`.",
       "tags": [
         "buildings",
         "church",
         "roof"
+      ]
+    },
+    {
+      "id": "church-tower-design-pass",
+      "what": "Square set-back tower, one-kit top, belfry stage",
+      "state": "done",
+      "doc": "docs/great-buildings.md 1.3",
+      "evidence": "test:test_a_church_tower_top_is_one_kit",
+      "note": "From the user's close-up of a 09-01e board: red terracotta scraps wedged between the spire and the parapet, and a tower elevation reading as an office block. Measured before designing: the tower was an **8x4 full-width end strip** -- the carve took every cell within `side` of the end while its own comment claimed a set-back (`TOWER_INSET` all over again, geometry behind the prose). The 4x4 spire covered half of it and `_lay_towers` hipped the rest in the building's dealt ROOF_MIX kit: 8 Village slopes and 4 corners of red house-roof on a stone church tower.\n\nThree changes, each pinned by a test that reads the built slab:\n1. **Square, centred carve** (`test_a_church_tower_is_square`): side x side, so nave wall and roof show past the tower on both flanks -- the set-back finally exists. All five towers across the towns now 4x4.\n2. **One-kit top** (`test_a_church_tower_top_is_one_kit`): on a one-volume building the margin cells pave as wall-walk stone and the roof-mix hip never runs; census on temple-0027's crop went from '20 crenellation + 8 Village slope + 4 Village corner + 4 spire' to '12 crenellation + 4 spire'.\n3. **Belfry** (`test_the_belfry_is_the_only_glazed_tower_stage`): the top stage gets one centred civic-window opening per face -- 8 pieces at one course on the crop -- and the middle stages stay blind, which breaks the band-on-band stack.\n\nPROVEN THROUGH THE PREVIEWER, which was the point of the exercise: the before/after slabs live in `out/spiredesign/` where the Slabs screen lists them, the proof page (artifact `3940603b`) is drawn by `slab_axon`/`slab_svg` themselves, and the top census is the same data the screen's legend serves. The collider caveat held too -- the previewer proved kit and massing, and the mesh questions went to a board (`ET tower 09-01`).\n\nTwo test drafts were wrong before the geometry was: one flagged the stage FLOORS as roof-mix offenders, one predicted stage heights instead of reading them off the built walls. Both now read the data.",
+      "tags": [
+        "buildings",
+        "church",
+        "tower",
+        "design"
+      ]
+    },
+    {
+      "id": "church-spire-proportion",
+      "what": "A 45-degree cap is not a broach spire; probe a taller tier",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3",
+      "evidence": "test:test_a_two_tier_spire_closes",
+      "note": "The architectural review's remaining point, still true after the design pass: the 4x4 cap is 20 ft tall on a 20 ft base -- 45 degrees -- where a real broach spire (Ketton) is nearer 3:1. The fix is not a rotation or a bigger cap; it is HEIGHT, and the kit may already carry it: `Tall 1x1x4` is 1x4x2 (a half-width steep plane) and `Tall 1x1x2` exists. A second, narrower tier stacked on the 4x4 -- or the 4x4's own pieces raised on a 2-course drum of wall -- would take the silhouette from 45 to ~60 degrees.\n\nNOT PROBED, and the spire's own history says what that means: the first spire attempt swept rotations on the wrong pieces, concluded scale, and was settled by a hand-build that used pieces nobody had tried. Probe the candidates side by side on one board (the previewer settles massing first, the board settles the meshes), and keep the current cap as the control bay.\n\nAlso noted on the side shot, minor: the tower shaft is two-tone -- the shell courses wear the building's dark dealt fabric and the added stages wear tan `castle wall 1x1`. It reads almost like intentional quoining; decide whether to keep it when the spire tier is probed, since both change the same elevation.",
+      "tags": [
+        "buildings",
+        "church",
+        "roof",
+        "probe"
       ]
     },
     {

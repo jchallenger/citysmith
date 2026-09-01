@@ -142,6 +142,19 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\et-church-*"
   },
+  "ET tower 09-01": {
+   "board": "ET tower 09-01",
+   "holds": "probe",
+   "source": "out\\spiredesign\\tower-after.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T14:01:21",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\et-tower-*"
+  },
   "East Tradebourne": {
    "board": "East Tradebourne",
    "holds": "town",

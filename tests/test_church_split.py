@@ -323,3 +323,109 @@ def _assert_roofs_are_sound(*, overhang: bool) -> None:
             bare = ({c for cs in plan_cells.values() for c in cs}
                     - roofed - set(pick_towers(tm, 3)))
             assert not bare, f"{plan}: {len(bare)} unroofed cell(s): {sorted(bare)[:5]}"
+
+
+# ---------------------------------------------------------- the tower design
+
+
+def test_a_church_tower_is_square():
+    """A tower is square; a full-width end strip is a westwork.
+
+    The carve used to take every cell within `side` of the end -- 8x4 on East
+    Tradebourne's two largest churches -- while its own comment claimed a
+    set-back. The photograph that started the design pass shows what an 8x4
+    top costs: a 4x4 spire covering half of it and the rest hipped in
+    terracotta.
+    """
+    tm = _temple(8, 15)
+    towers = pick_towers(tm, 3)
+    cells = {c for c, b in towers.items() if b == "temple-0001"}
+    assert cells, "an 8x15 temple should carry a tower"
+    xs = {c[0] for c in cells}
+    zs = {c[1] for c in cells}
+    assert len(xs) == len(zs), f"tower is {len(xs)}x{len(zs)}, not square"
+    # And set back: nave wall shows past the tower on both flanks.
+    nave_x = {x for x in range(tm.width) for z in range(tm.depth)
+              if tm.building[z][x] == "temple-0001"}
+    assert min(xs) > min(nave_x) and max(xs) < max(nave_x), \
+        "the tower is flush with the nave's flanks -- a westwork again"
+
+
+def test_a_church_tower_top_is_one_kit():
+    """No roof-mix piece above the parapet: spire, crenellation, pavement.
+
+    The margin between spire and parapet used to be hipped in whatever roof
+    the building was dealt -- red terracotta scraps wedged against a dark
+    stone spire, on the most visible surface the church has.
+    """
+    from citysmith.build import build_from_tilemap
+
+    import pathlib
+    import sys as _sys
+    _sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    byid = {a.id: a for a in palette.catalog.assets}
+
+    tm = _temple(8, 15)
+    R.split_churches(tm)
+    R._find_perimeters(tm, None)
+    R._place_doors(tm, None)
+    b = build_from_tilemap(tm, palette, storeys=3)
+
+    towers = pick_towers(tm, 3)
+    cells = {c for c, bid in towers.items() if bid == "temple-0001"}
+    assert cells
+    crown_min = 0.5 + (storeys_of(tm, "temple-0001", 3) + 1) * 2.0
+    offenders = [byid[p.asset_id].name for p in b.placements
+                 if (int(p.x), int(p.z)) in cells and p.y >= crown_min
+                 and byid.get(p.asset_id) is not None
+                 and "roof" in (byid[p.asset_id].group_tag
+                                or byid[p.asset_id].name).lower()
+                 and byid[p.asset_id].folder in ("Tavern", "Rural",
+                                                 "Abandoned Village")]
+    assert not offenders, f"roof-mix pieces on the tower top: {offenders[:4]}"
+
+
+def test_the_belfry_is_the_only_glazed_tower_stage():
+    """Blind through the middle, open at the top, where the bells are.
+
+    Every added stage used to be plain wall, which stacked with the shell's
+    glazed base into an even band-on-band elevation -- the close-up reads as
+    an office block. One change of texture at the head is what breaks it.
+    """
+    from citysmith.build import TOWER_EXTRA_STOREYS, build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    byid = {a.id: a for a in palette.catalog.assets}
+
+    tm = _temple(8, 15)
+    R.split_churches(tm)
+    R._find_perimeters(tm, None)
+    R._place_doors(tm, None)
+    b = build_from_tilemap(tm, palette, storeys=3)
+
+    cells = {c for c, bid in pick_towers(tm, 3).items() if bid == "temple-0001"}
+    # Stage heights read off the built walls rather than predicted:
+    # `_lay_towers` starts at `max(storeys_at(...))`, which `building_ranges`
+    # can move, and the first draft predicted heights and read nothing.
+    shell_head = 0.5 + storeys_of(tm, "temple-0001", 3) * 2.0
+    wall_y = sorted({round(p.y, 1) for p in b.placements
+                     if (int(p.x), int(p.z)) in cells
+                     and p.y >= shell_head - 0.01
+                     and byid.get(p.asset_id) is not None
+                     and "wall" in (byid[p.asset_id].group_tag
+                                    or byid[p.asset_id].name).lower()})
+    assert len(wall_y) >= TOWER_EXTRA_STOREYS - 1, f"no tower stages: {wall_y}"
+    top_y = wall_y[-1]
+    glazed = {round(p.y, 1) for p in b.placements
+              if (int(p.x), int(p.z)) in cells
+              and round(p.y, 1) in wall_y
+              and byid.get(p.asset_id) is not None
+              and "window" in byid[p.asset_id].name.lower()}
+    assert glazed == {round(top_y, 1)}, \
+        f"tower stages glazed at {sorted(glazed)}, wanted only {top_y}"

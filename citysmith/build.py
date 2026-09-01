@@ -2878,13 +2878,32 @@ def pick_towers(tm, ceiling: int) -> dict[tuple[int, int], str]:
         side = min(max(across - 1, 2), max(SPIRE_SIDE, span // 3))
         if side < 2:
             continue
-        # Whichever end has more of its footprint intact takes the tower.
+        # **The block is SQUARE, and carved out of the end rather than being
+        # the end.** The previous carve took every cell within `side` of the
+        # end -- a full-width strip, 8x4 on East Tradebourne's two largest --
+        # while its own comment claimed a set-back. A strip is a westwork; a
+        # tower is square. The square is centred across the nave, so the
+        # set-back the comment promised actually exists: a course of nave
+        # wall and roof shows past the tower on both flanks. Measured on the
+        # board, the 8x4 strip also could not be topped honestly: the 4x4
+        # spire covered half of it and the rest was hipped in the building's
+        # dealt TERRACOTTA -- red house-roof scraps wedged between a dark
+        # shingle spire and the parapet, which is the photograph that started
+        # this pass.
         if long_axis_z:
-            near = {c for c in cells if c[1] < min(zs) + side}
-            far = {c for c in cells if c[1] > max(zs) - side}
+            lo = sorted({c[0] for c in cells})
+            off = lo[max(0, (len(lo) - side) // 2)]
+            near = {c for c in cells if c[1] < min(zs) + side
+                    and off <= c[0] < off + side}
+            far = {c for c in cells if c[1] > max(zs) - side
+                   and off <= c[0] < off + side}
         else:
-            near = {c for c in cells if c[0] < min(xs) + side}
-            far = {c for c in cells if c[0] > max(xs) - side}
+            lo = sorted({c[1] for c in cells})
+            off = lo[max(0, (len(lo) - side) // 2)]
+            near = {c for c in cells if c[0] < min(xs) + side
+                    and off <= c[1] < off + side}
+            far = {c for c in cells if c[0] > max(xs) - side
+                   and off <= c[1] < off + side}
         # **On a church, not the end the chancel is on.** A west tower stands
         # at the opposite end from the altar; putting it over the chancel arch
         # is the one placement that is definitely wrong, and "whichever end
@@ -2948,15 +2967,39 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         # The old comment blamed the building's own ceiling for filling that
         # gap. It does not: upper decks run levels 1..floors-1, so the level
         # this now occupies carries no deck of its own.
+        # **The top stage is the BELFRY, and it is the only stage with
+        # openings.** The added stages were all plain wall, which stacked
+        # with the shell's glazed base courses into an even band-on-band
+        # elevation -- the photograph reads as an office block. A church
+        # tower is blind through its middle stages and opens at the top,
+        # where the bells are; one change of texture at the head is what
+        # breaks the stack. The opening is the civic window, one per face,
+        # centred -- on a 4-wide face that is the two middle cells.
+        belfry_glass = (b.palette.resolve("wall_window_civic")
+                        if is_one_volume(bid) else None)
         for level in range(base_floors, base_floors + stages):
             y = top + level * storey_h
+            top_stage = level == base_floors + stages - 1
             for (x, z) in sorted(cells):
                 # Below the course, in the gap the storey pitch leaves for it,
                 # exactly as the building's own floors sit.
                 b.add(place_tile(floor_tile, x, z, y - floor_tile.size_y))
                 for side, dx, dz in SIDE_OFFSETS:
                     if (x + dx, z + dz) not in cells:
-                        b.add(place_wall(face, x, z, side, y))
+                        piece = face
+                        if top_stage and belfry_glass is not None:
+                            run = [c for c in cells
+                                   if (c[0] + dx, c[1] + dz) not in cells
+                                   and (c[1] == z if side in ("n", "s")
+                                        else c[0] == x)]
+                            vals = sorted(c[0] if side in ("n", "s") else c[1]
+                                          for c in run)
+                            mid = {vals[(len(vals) - 1) // 2],
+                                   vals[len(vals) // 2]}
+                            v = x if side in ("n", "s") else z
+                            if v in mid:
+                                piece = belfry_glass
+                        b.add(place_wall(piece, x, z, side, y))
 
         # Above the top course, not level with it. Crowning at the course's
         # own base put every merlon inside the wall it was supposed to sit on
@@ -2990,10 +3033,39 @@ def _lay_towers(b: Builder, tm, towers: dict[tuple[int, int], str], face,
         parapet = {c for c in cells
                    if any((c[0] + dx, c[1] + dz) not in cells
                           for _, dx, dz in SIDE_OFFSETS)}
+        walk = b.palette.resolve("city_wall_walk")
+        spired = set()
+        if is_one_volume(bid):
+            # Which cells the spire covers, so the margin between it and the
+            # parapet can be paved instead of roofed. Recomputed the same way
+            # `lay_spire` centres its cap, because the two must agree about
+            # the footprint or the pavement runs under the spire.
+            sxs = sorted({c[0] for c in cells})
+            szs = sorted({c[1] for c in cells})
+            if len(sxs) >= SPIRE_SIDE and len(szs) >= SPIRE_SIDE:
+                sox = sxs[(len(sxs) - SPIRE_SIDE) // 2]
+                soz = szs[(len(szs) - SPIRE_SIDE) // 2]
+                spired = {(sox + dx, soz + dz)
+                          for dx in range(SPIRE_SIDE)
+                          for dz in range(SPIRE_SIDE)}
         for (x, z) in sorted(cells):
             if (x, z) in parapet:
                 if cap is not None:
                     b.add(place_tile(cap, x, z, crown))
+                continue
+            # **A church tower top is ONE KIT: spire and pavement.** The
+            # margin between the spire and the parapet used to be hipped in
+            # whatever roof the building was dealt -- terracotta scraps
+            # wedged against a dark stone spire, on the most visible surface
+            # the church has. It is a wall-walk now, the same stone the
+            # rampart's is, and only a tower that is NOT a church still hips
+            # its top.
+            if is_one_volume(bid):
+                if (x, z) not in spired and walk is not None:
+                    # Laid like `Builder.surface`: by its top, flush with the
+                    # crown the parapet stands on, so the walk reads as the
+                    # tower's own floor rather than a slab dropped on it.
+                    b.add(place_tile(walk, x, z, crown - walk.size_y))
                 continue
             r = rings[(x, z)]
             fall = tuple(sd for sd, dx, dz in SIDE_OFFSETS
