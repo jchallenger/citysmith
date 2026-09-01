@@ -1213,6 +1213,111 @@
       ]
     },
     {
+      "id": "church-subdivide-the-polygon",
+      "what": "Split the imported church polygon into nave and chancel",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build.church_volumes",
+      "note": "REVIEWED 2026-09-01 by three independent critiques of `tools/church_plans.py` (artifact `1f6f4992`), and the plans did not survive.\n\n**The headline, verified against the code: the four hand-authored plans are 176/178/220/267 cells against a real imported range of 30-102.** Plan A's NAVE ALONE (120) is larger than the largest church any export has produced (Forest Church, 102). They are 1.7x to 2.6x oversize -- not templates needing a trim, a different building class.\n\nThe recommendation, argued against the alternatives: **subdivide the imported polygon.** Templating requires scaling, and a template scaled to a 30-cell polygon gives an 8-cell vestry -- a shed; it also re-imposes a rectangle and throws away the one thing the export gave us, a real outline at a real angle. Growing into the yard fights machinery that already exists and already has checks (yards, `_absorb_open_country`, fence runs, the boundary-in-street test, the gate apron that already cost three wall towers to over-paving).\n\nMEASURED here, a 75/25 nave/chancel cut on the seven real temples: 102 -> 77/25, 88 -> 66/22, 81 -> 61/20, 65 -> 49/16, 52 -> 39/13, and 30 -> 23/8 which is too small to be two rooms. So the split works on 5 of 7, and wants a measured minimum-area gate plus a REPORT LINE for the ones below it -- 'churches: 7; 5 split, 2 below the threshold'. That is the sentence the 2% chimney taught us to write.\n\nSmallest honest ship: nave + chancel only. Two volumes, one join, derived from the polygon, chancel at parent-1 courses, no door of its own, tower picked on the nave. Paste one town and look before any four-volume plan is written.",
+      "tags": [
+        "buildings",
+        "great",
+        "church",
+        "import"
+      ]
+    },
+    {
+      "id": "church-is-an-empty-box-for-play",
+      "what": "Piers, a rood screen and a crypt -- the church has no play in it",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.NAVE_PIER_SPACING",
+      "note": "From the tabletop critique of the four plans (artifact `1f6f4992`), and it outranks every difference between them: **all four naves are empty boxes.** A 6x20 nave is 30x100 ft with total sightlines end to end. A shortbow's normal range is 16 tiles, so every ranged attacker covers the whole nave from turn one while the melee walks three turns to reach anything; a 20 ft fireball is 4 tiles and spans a 6-wide nave wall to wall, so there is no spreading out and no decision.\n\nIn value order, and none of it is decoration:\n1. **Arcade piers** -- 1-cell piers one tile in from each long wall, every third tile. Splits a 6-wide nave into 1/4/1, gives cover every 15 ft, breaks the sightline. Cheapest fix, largest effect, and it is what makes a nave AISLED (see `church-aisles`).\n2. **A rood screen** across the chancel arch with one opening: turns a 20-tile run into two rooms and a chokepoint.\n3. **A crypt** under the chancel. No plan has one, and it is the standard reason a party is in a church at night.\n4. **Tower interiors** -- a floor at course 2 and 4, a bell chamber, a ladder. The towers are solid massing today, which is also why `church-one-volume` had to keep `_lay_towers`' stage floors.\n5. **A gallery** over the aisles at 10 ft with a stair: archers shooting down is what TaleSpire does better than paper.\n6. **A second door** -- a priest's door into the chancel. Every plan is one-way, so there is no flank and no escape.\n\nRanked for play, the four plans came out **cruciform > minster > narthex > aisled**, and the reason is the crossing: four corridors meeting at one cell, with each 5x5 transept invisible from the nave until you reach it. That is the only genuinely broken sightline on the page, and the tower stands over it, putting the verticality where the fight already is.",
+      "tags": [
+        "buildings",
+        "church",
+        "play"
+      ]
+    },
+    {
+      "id": "church-plan-a-has-no-aisles",
+      "what": "Fix or drop the plan named 'aisled' that has no aisles",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "test:test_every_church_plan_builds_what_its_name_says",
+      "note": "MINE, and caught by review rather than by me. `PLANS['aisled']` in `tools/church_plans.py` is captioned 'Aisled parish church' and its parts are nave, chancel, chapel, vestry -- **there are no aisles in it**. Checked: `any('aisle' in part)` is False.\n\nThat is worse than a bad plan. A probe whose label promises something its geometry does not contain is the same failure as a count that is not a shape: a reviewer reads the caption, sees a long church, and confirms a thing that was never built. It is the `1,084 stacks` line again in a different costume.\n\nTwo honest resolutions: build the aisles (which is `church-aisles` and `church-is-an-empty-box-for-play` item 1, piers rather than separate volumes), or rename the plan to what it is -- a nave with a chancel, a chapel and a vestry. The tabletop review recommends cutting the plan outright, on the grounds that the cruciform does everything it does with a better node. A test that every plan's parts match its name would stop the next one.",
+      "tags": [
+        "buildings",
+        "church",
+        "probe"
+      ]
+    },
+    {
+      "id": "church-section-is-too-tall-for-its-width",
+      "what": "A nave 30 ft wide should not stand 50 ft to the eaves",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.nave_courses_by_span",
+      "note": "**This is a criticism of `church-size-ladder`, which shipped the same day.** Reviewed against real churches: a parish nave is roughly as tall to the wall-plate as it is wide. Forest Church's temple is 6 cells wide = 30 ft, and the `great` band now stands it 5 courses = 50 ft to the eaves, with the ridge measured at 66 ft. That is Westminster Abbey proportion on a parish footprint.\n\nSo the ladder keyed on AREA does the right thing for the wrong reason: a 6x20 nave has a great-church *area* and a parish-church *width*, and height should follow the width. A long thin church got tall because it was long.\n\n**The important consequence: 'make it bigger' is not 'make it taller'.** The user asked for a larger church and the ladder answered with height; the review says the section is already over-tall and what is missing is WIDTH and FORM -- aisles, transepts, a chancel, a set-back tower. Worth settling before the ladder is tuned again, because the two pull opposite ways.\n\nCandidate key: courses from the nave's WIDTH (span), with area only deciding whether it earns a tower and aisles.",
+      "tags": [
+        "buildings",
+        "church"
+      ]
+    },
+    {
+      "id": "church-tower-must-set-back",
+      "what": "A tower the full width of the nave is a westwork, not a tower",
+      "state": "open",
+      "doc": "docs/great-buildings.md 1.3",
+      "evidence": "citysmith.build.TOWER_SETBACK",
+      "note": "**Called the biggest silhouette defect in the architectural review, and it is on three of the four plans and on the real towns too.** `pick_towers` takes a square block off the end of the footprint, so the tower comes out the FULL WIDTH of the nave: 6-in-6 on the aisled and cruciform plans, 7-in-7 on the minster, and 6-in-7 on Forest Church's own temple.\n\nThe tower's own proportion is fine -- 30 ft square and 122 ft tall is Lavenham. What is wrong is that it is flush on both flanks with no set-back, so it reads as a westwork or a keep rather than a tower rising out of a roofline. This is also why the first two shots of the `church-one-volume` review looked like a stone cliff: end-on, a full-width tower IS the building.\n\nFix is small: inset the tower block one cell on each flank where the footprint allows, so a course of nave wall and roof shows past it on both sides. On a 6-wide nave that is a 4x4 tower, which at 20 ft square is still a real parish tower.",
+      "tags": [
+        "buildings",
+        "church",
+        "tower"
+      ]
+    },
+    {
+      "id": "church-plans-misplace-their-own-parts",
+      "what": "Fix where each plan's ancillary volumes attach",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "test:test_every_church_plan_builds_what_its_name_says",
+      "note": "Every one of the four plans in `tools/church_plans.py` puts at least one volume in the wrong place, read off the built geometry rather than the captions:\n\n- **aisled**: chapel and vestry both attach to the MIDDLE of the nave, beside the tower. A vestry belongs north of the CHANCEL and a chapel flanking the chancel (Long Melford, Lavenham); mid-nave is where a porch goes and nothing else. Also has no aisles -- see `church-plan-a-has-no-aisles`.\n- **cruciform**: the transepts sit mid-nave at z11-15 while the chancel begins at z22, so **the crossing is 35 ft from where the transepts are**, and the tower is on the west end rather than over it. Both claims in my caption are false in the geometry.\n- **narthex**: **there is no chancel.** A hall church still terminates in a presbytery or apse (Soest, Landshut). It is a box with a lobby, and the silhouette review ranked it last -- reads as a guildhall or a tithe barn.\n- **minster**: no chancel, no crossing, chapter house at the WEST end beside the tower when it belongs off the east range next to the transept (Fountains, Rievaulx), and no cloister WALKS -- the arcade round the garth is what makes a cloister legible. The garth is 25x35 ft against Salisbury's 145 ft square: a light well, not a cloister.\n\nCheapest fix each: aisled, change two z-offsets so chapel and vestry flank the chancel. Cruciform, slide both transepts down to abut the chancel and put the tower on the crossing. Narthex, add one chancel volume opposite the lobby. Minster, inset the ranges one cell and roof that strip low as a walk.\n\nSilhouette ranking from the same review: **cruciform > aisled > minster > narthex**, which disagrees with the tabletop ranking only about the aisled plan.",
+      "tags": [
+        "buildings",
+        "church",
+        "probe"
+      ]
+    },
+    {
+      "id": "church-volumes-break-four-passes",
+      "what": "A multi-volume church needs a parent map before it can ship",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.raster.TileMap.parent",
+      "note": "'A church complex is several abutting building ids' is sound for MASSING and a hack for everything else. Both verified on the built plan rather than argued:\n\n- **`_place_doors` is the worst.** It gives every bid a doorway to the most public space it touches. Measured on plan A: **7 doors across 4 volumes for one church** -- the vestry gets its own street door and the chancel gets two exterior doors where an arch belongs. Nothing in the codebase expresses 'opening between two ids'.\n- **Walls double at every join.** Each bid closes its own perimeter: 104 perimeter cells across the four volumes, so the nave's interior shows the chancel's OUTSIDE, and `tile_interpenetration` jumps off its 557 baseline.\n- **Roofs**: per-bid hips are right, but a lower roof meeting a taller wall has no valley and buries into it.\n- **Chunking**: 'a building's shell is never split across chunks' becomes per-volume rather than per-church, and `--per-building` writes four slabs for one church.\n- **Scenes**: one board per bid, so a church becomes four boards, and `hall_layout` BSPs a 24-cell chancel as if it were a building.\n- **verify** counts four enterable buildings where there is one church.\n\nA parent map (`tm.parent[bid]`) is the shape of the fix: doors, verify counts and scene codes see one entity while the geometry stays per-volume. **Ids must be suffixes** (`temple-0002.chancel`), never new numbers -- both importers number from one global counter and `boards.json` MOVED detection keys on it, so minting ids would renumber the town.",
+      "tags": [
+        "buildings",
+        "great",
+        "church",
+        "raster"
+      ]
+    },
+    {
+      "id": "church-band-subordinates-relatively",
+      "what": "Band a subordinate volume against its nave, not by its own area",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build.subordinate_courses",
+      "note": "`church_band` bands by AREA, and on a multi-volume church that breaks two ways.\n\n1. A 24-cell chancel lands in `chapel` -- 2 courses, 20 ft -- against a 5-course 50 ft nave. That is a 40% step. A real chancel is 70-85% of the nave.\n2. **The discreteness leaks into relationships.** In the minster plan the south range (40 cells) gets 3 courses and the chapter house (36) gets 2: four cells of difference draws a 10 ft step between two ranges of one cloister, an accident of where a band boundary fell, visible from across the board.\n\nFix: `church_band` decides the PRINCIPAL volume only; subordinates are `parent - 1` (chancel, transept, range) or `parent - 2` (porch, vestry), clamped at 2. The step becomes a function of ROLE, which is what says church, rather than of a cell count crossing a rung.\n\nNote for whoever does it: `pick_towers` reads per-bid width/depth against `TOWER_MIN_ASPECT`, so after subdivision a shortened nave can LOSE the tower it qualified for as one box, and a 5x5 transept can qualify for its own. The tower has to be picked for the complex, once.\n\n**Two independent reviews converged on this, and the architectural one gives the numbers.** A chancel is SMALL IN PLAN AND TALL IN SECTION, because it is the most important space in the building -- so keying height on footprint area gets it exactly backwards. 30 ft is about double the right step: nave 5 courses -> chancel **4** (a 10 ft step), with chapel, vestry, porch and aisle at 2.\n\n**Transepts must be 5, not 2.** Three equal gables meeting is what makes a cruciform church read as cruciform; at 20 ft the arms are lean-tos that disappear from every view but overhead. So `parent - 1` is not a blanket rule either -- a transept is `parent`, a chancel `parent - 1`, and the minor rooms a floor of 2.",
+      "tags": [
+        "buildings",
+        "great",
+        "church"
+      ]
+    },
+    {
       "id": "church-footprint-is-imported",
       "what": "Decide whether a church may grow beyond the polygon it was given",
       "state": "open",
