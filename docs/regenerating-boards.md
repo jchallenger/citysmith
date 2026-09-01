@@ -295,6 +295,57 @@ for and the one thing still unphotographed. They are dealt by quarter, so on
 a 739x598 board at a camera that frames about 40 tiles, finding one is a
 flight and not a pan. The probe boards show the geometry; a town does not yet.
 
+### Phase 2+3 RUN: all four, on the church work, 2026-09-01
+
+Rebuilt into `out/regen2/<town>/` and pasted with `tools/paste_all.ps1`, one
+town per board, boards `<Town> 09-01e`.
+
+| town | assets | chunks | largest slab | of cap | churches |
+|---|---|---|---|---|---|
+| Forest Church | 28,444 | 9 | 22,179 | 72% | 1 split, tower + spire |
+| Pelvesthollow | 21,707 | 9 | 13,818 | 45% | none in source |
+| Graybank | 91,114 | 22 | 22,752 | 74% | 1 split, tower + spire |
+| East Tradebourne | 391,643 | 114 | 23,739 | 77% | 4, 3 split, 2 towers + 2 spires |
+
+**The rebuild is what caught the regression, and the churches line is what
+reported it.** Splitting a chancel takes about a quarter of the footprint, and
+every church that had earned a tower as one box then failed a gate as a
+shortened nave -- Graybank 65 cells to a 53-cell nave, under
+`TOWER_MIN_TILES`; East Tradebourne's two largest, 88 and 81, to 70 and 69,
+under `TOWER_ASPECT_EXEMPT_TILES` so the 1.12 aspect bit. **Three of the four
+towns came out with no tower and no spire on any church.** `pick_towers` gates
+on the complex and sites on the nave now, at the end furthest from the rest of
+the complex, which is a west tower. Then the towers had no spires, because
+`span // 3` gave them 3 cells of width and the cap needs a whole 4x4; the
+floor is `SPIRE_SIDE`, and `across - 1` buys the set-back at the same time.
+
+**Pelvesthollow is the control and it is worth keeping.** It has no church in
+its source, and its seam count is unchanged at 2,355 while the other three
+rose in proportion to church count (+169, +101, +635). That accounts for the
+whole change with nothing left over.
+
+Remaining FAILs are the documented prop and fence-corner overlaps, 0% on
+every town, unchanged from the 08-31 run.
+
+Two process notes:
+
+- **A mid-paste screenshot shows the board named `Unknown Realm NN`**, because
+  `review.ps1 tiled` renames at the END. Read that as a failed rename once;
+  the campaign list showed all four correctly named. Judge a rename from the
+  list, not from a progress shot.
+- **`paste_all.ps1` silently pointed at the previous build.** The first fix to
+  its output path missed because `"out\regen\..."` written in a non-raw
+  Python string carries a CARRIAGE RETURN, so the replacement never matched
+  and the driver resolved to `out/regen/` -- it would have re-pasted the
+  08-31 slabs while reporting success. Caught on `-WhatIf`, which is the
+  argument for running it.
+
+`ET church 09-01` holds a 21x24 crop of East Tradebourne's `temple-0027` for
+close review: from overhead the spire is a dark pyramid with its finial rising
+inside the ring of crenellations, which is the arrangement `lay_spire` was
+designed around -- the parapet takes the margin the fixed 4x4 cap leaves.
+
+
 ## Phase 4 — README
 
 New screenshots into `docs/images`, and the feature list catches up: grown
