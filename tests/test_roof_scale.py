@@ -1015,3 +1015,99 @@ def test_a_gable_takes_the_fabric_its_own_walls_wear(cat):
                  if a.group_tag == "wall" and a.size_y > 2.0), None)
     if tall is not None:
         assert gable_infill(palette, "common", None, None, tall) is not tall
+
+
+def test_a_thatched_gable_closes_its_verge_with_its_own_wall_piece(cat):
+    """The end column's slopes are REPLACED, one piece per fall, laid once.
+
+    **Every clause here is read off a hand-build the user made and sent**,
+    kept as `tests/fixtures/handbuilt_verge.slab`: 14 placements over a 3x5
+    thatched gable, in which the end column carries **not one slope piece** --
+    only two `Thatched Roof Wall`, one per fall side, both at the lowest
+    course height, each at the rotation of the slope it replaced. The piece is
+    2.0 tall against a 1.0 rise, so one covers two courses and reaches the
+    ridge; the cap still runs across the end column on top of it.
+
+    Three earlier cuts of this were wrong and all three were the placement,
+    not the kit: standing a piece on the slope gave a column of panels, and
+    stacking one per course gave thatch bolsters proud of the ridge. So the
+    assertions below are about WHERE it goes, and the rotation is compared
+    against a flush build of the same wing rather than hardcoded -- "the same
+    rotation as the slope it replaces" is the rule, and a literal 6 would pass
+    for the wrong reason on a kit with another offset.
+    """
+    from citysmith.build import (_lay_gabled_wing, roof_courses,
+                                 roof_course_cells, roof_offsets)
+
+    byname = {a.name: a for a in cat.assets}
+    side, cap = byname["Thatched Roof 01"], byname["Thatched roof flat 01"]
+    verge = byname["Thatched Roof Wall"]
+    rise, edge_off = side.size_y, roof_offsets(side)[0]
+    wing, roof_y = _rect(9, 5), 4.0
+    ends = (0, 8)
+
+    # Ridge along x, so each end column falls two cells to the north and two
+    # to the south -- the hand-build's rake, which is the case measured.
+    courses = roof_courses(wing, "x", roof_course_cells(side))
+
+    flush = _Collector()
+    _lay_gabled_wing(flush, wing, "flush", roof_y, rise, side, cap, edge_off,
+                     None, None, None, None)
+    was = {(p.x, p.z): p.rot for p in flush.placements if p.asset_id == side.id}
+
+    got = _Collector()
+    _lay_gabled_wing(got, wing, "flush", roof_y, rise, side, cap, edge_off,
+                     None, None, None, None, verge=verge)
+
+    # 1. The end columns carry no slope at all.
+    stray = [(p.x, p.z) for p in got.placements
+             if p.asset_id == side.id and int(p.x) in ends]
+    assert not stray, f"the verge did not replace the end slopes: {stray[:4]}"
+
+    # 2. One piece per fall per end -- laid once, never stacked per course.
+    laid = [p for p in got.placements if p.asset_id == verge.id]
+    assert len(laid) == 4, (
+        f"expected one verge per fall on two ends, got {len(laid)}")
+
+    for p in laid:
+        assert int(p.x) in ends, f"verge off the end column at x={p.x}"
+        # 3. At the LOWEST course, and covering the two cells of its fall.
+        assert abs(p.y - roof_y) < 1e-6, (
+            f"verge at y={p.y:g}, not the eaves course {roof_y:g}")
+        assert p.z in (0.0, 3.0), f"verge min corner at z={p.z:g}"
+        # 4. The rotation of the slope it replaced.
+        eaves = (p.x, p.z) if p.z == 0.0 else (p.x, 4.0)
+        assert p.rot == was[eaves], (
+            f"verge at {(p.x, p.z)} took rot {p.rot}, "
+            f"but the slope it replaces is rot {was[eaves]}")
+
+    # 5. It reaches the ridge exactly -- two courses at this rise, which is
+    #    the arithmetic that makes one piece enough.
+    ridge = roof_y + max(c for c, _ in courses.values()) * rise
+    for p in laid:
+        assert abs((p.y + verge.size_y) - ridge) < 1e-6, (
+            f"verge tops out at {p.y + verge.size_y:g}, ridge is {ridge:g}")
+
+
+def test_a_verge_piece_that_cannot_follow_the_rake_is_refused(cat):
+    """A kit whose piece does not span its own courses keeps the flush end.
+
+    Same rule as `gable_end_piece`: a gable it cannot close is worse than a
+    hip. The piece closes `size_y / rise` courses and is that many cells
+    across; where those disagree it is not a rake piece at this scale, and
+    guessing is what put boarding on the verge in the first place.
+    """
+    from citysmith.build import _lay_gabled_wing, roof_offsets
+
+    byname = {a.name: a for a in cat.assets}
+    side, cap = byname["Thatched Roof 01"], byname["Thatched roof flat 01"]
+    verge = byname["Thatched Roof Wall"]          # 2 wide, 2 tall
+    edge_off = roof_offsets(side)[0]
+
+    got = _Collector()
+    # Half the rise, so the 2.0-tall piece would span four courses while
+    # covering two cells -- refused rather than laid proud of the ridge.
+    _lay_gabled_wing(got, _rect(9, 5), "flush", 4.0, side.size_y / 2.0,
+                     side, cap, edge_off, None, None, None, None, verge=verge)
+    assert not [p for p in got.placements if p.asset_id == verge.id], (
+        "a piece that does not follow the rake was laid anyway")

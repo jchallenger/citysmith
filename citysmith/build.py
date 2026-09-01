@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 
 from .catalog import Asset
 from .city import Building, City, Rect
-from .palette import Palette, segment_shape
+from .palette import Palette, gable_verge, segment_shape
 from . import walls as W
 from .slab import MAX_COMPRESSED_BYTES, Placement, Slab, SlabError, encode
 
@@ -5152,7 +5152,7 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                      edge_off: int, tread, chimney=None, infill=None,
                      end=None, flue=None,
                      form: str = DEFAULT_CHIMNEY_FORM,
-                     twin_allowed: bool = True) -> None:
+                     twin_allowed: bool = True, verge=None) -> None:
     """One gabled wing: ridge along the long axis, ends per ``treatment``.
 
     ``crow`` carries the end wall one course proud of the roof and **owns the
@@ -5195,8 +5195,12 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
     if treatment == "endmix":
         across_i = 1 if axis == "x" else 0
         for e in ends:
-            verge = [c for c in courses if (c[0] if axis == "x" else c[1]) == e]
-            for low, base, fall in _end_pairs(verge, courses, across_i):
+            # `verge_col`, not `verge`: the parameter of that name is the
+            # thatch rake PIECE, and shadowing it here silently disabled the
+            # whole verge path for endmix wings.
+            verge_col = [c for c in courses
+                         if (c[0] if axis == "x" else c[1]) == e]
+            for low, base, fall in _end_pairs(verge_col, courses, across_i):
                 a = e
                 rot = (ROOF_EDGE_ROT[fall] + edge_off) % 24
                 # **The footprint is read off the rotation, never inferred
@@ -5226,8 +5230,70 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
                 for k in range(END_PIECE_CELLS):
                     covered.add((a, low + k) if axis == "x" else (low + k, a))
 
+    # **The verge: the end column's slopes REPLACED, not stood in front of.**
+    #
+    # Measured off a hand-build the user made and sent, kept as
+    # `tests/fixtures/handbuilt_verge.slab` -- 14 placements over a 3x5
+    # thatched gable. At the end column x=0 there is **not one slope piece**:
+    # only two `Thatched Roof Wall`, one per fall side, both at the LOWEST
+    # course height, each taking the same rotation as the slope it replaces
+    # (rot 6 south, rot 18 north). The ridge cap still runs across the end
+    # column on top of them, and the tympanum panel stands under it -- so this
+    # and `gable_infill` close two DIFFERENT holes and both are present.
+    #
+    # Three earlier cuts were wrong, all in the probe rather than the kit:
+    # standing a piece on the slope with `place_wall` gave a column of panels,
+    # and stacking one per course gave thatch bolsters proud of the ridge.
+    # The piece is not stacked per course -- it is 2.0 tall against a 1.0
+    # rise, so ONE covers two courses and reaches the ridge.
+    #
+    # **How far it generalises is read off the collider, not assumed.** The
+    # piece closes `size_y / rise` courses and is that many cells across, so
+    # it follows the rake only while those two agree; where they do not it is
+    # refused and the verge stays flush, the same "a gable it cannot close is
+    # worse than a hip" rule the endmix path follows. Rakes deeper than the
+    # hand-build's two courses tile by stepping two at a time, which abuts
+    # exactly by the same arithmetic -- but only the two-course case has been
+    # on a board, and an odd course at the ridge keeps its slope.
+    verge_covered: set[tuple[int, int]] = set()
+    if crow:
+        verge = None                    # crow owns the end column already
+    if verge is not None:
+        span = int(round(max(verge.size_x, verge.size_z)))
+        if span < 2 or abs(span * rise - verge.size_y) > 1e-6:
+            verge = None                # not a rake piece at this rise
+    if verge is not None:
+        across_i = 1 if axis == "x" else 0
+        for e in ends:
+            col = [c for c in courses
+                   if (c[0] if axis == "x" else c[1]) == e and c not in covered]
+            for fall in sorted({courses[c][1] for c in col} - {None}):
+                run = sorted((c for c in col if courses[c][1] == fall),
+                             key=lambda c: courses[c][0])       # eaves inward
+                if len(run) < span:
+                    continue
+                rot = (ROOF_EDGE_ROT[fall] + edge_off) % 24
+                # The footprint is read off the ROTATION, never inferred from
+                # the fall -- the same trap `test_an_end_piece_never_overhangs_
+                # its_wing` was written for, one piece over.
+                fw, fd = rotated_footprint(verge, rot)
+                want = (1.0, float(span)) if axis == "x" else (float(span), 1.0)
+                if (round(fw, 2), round(fd, 2)) != want:
+                    continue
+                for i in range(0, len(run) - span + 1, span):
+                    grp = run[i:i + span]
+                    lo = min(c[across_i] for c in grp)
+                    base = courses[grp[0]][0]
+                    cx = (e + 0.5) if axis == "x" else (lo + span / 2.0)
+                    cz = (lo + span / 2.0) if axis == "x" else (e + 0.5)
+                    # `place_centered`, not `place_tile`: the piece is not
+                    # square and these are odd quarter turns.
+                    b.add(place_centered(verge, cx, cz,
+                                         roof_y + base * rise, rot))
+                    verge_covered.update(grp)
+
     for cell, (course, fall) in sorted(anchors.items()):
-        if cell in covered:
+        if cell in covered or cell in verge_covered:
             continue
         if crow and on_end(cell):
             continue
@@ -5245,7 +5311,8 @@ def _lay_gabled_wing(b: Builder, wing: set[tuple[int, int]], treatment: str,
         def _course(n):
             """Cells at course ``n`` that actually get a roof piece."""
             return [c for c in sorted(courses) if courses[c][0] == n
-                    and not (crow and on_end(c)) and c not in covered]
+                    and not (crow and on_end(c)) and c not in covered
+                    and c not in verge_covered]
 
         top = max(c for c, _ in courses.values())
         for chimney_at in chimney_cells(_course(top), _course(top - 1), form,
@@ -5538,7 +5605,7 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                                  chimney if _carries(wing) else None,
                                  infill, end, flue,
                                  _wing_chimney_form(wing, quarter_at, seed),
-                                 _twin_ok)
+                                 _twin_ok, gable_verge(b.palette, side))
                 continue
 
             # **The whole wing at the double scale, or none of it.** Mixing
