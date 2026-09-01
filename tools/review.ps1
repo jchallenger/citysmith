@@ -213,6 +213,16 @@ switch ($Recipe) {
     TS newboard
     Start-Sleep -Seconds 3
     $plane = & $ts planestate
+    # **UNKNOWN means the toolbar is not drawn, which is a mode, not a fault.**
+    # `newboard` can land outside build mode, and then `planestate` has no icon
+    # to read and says so -- which used to kill a hundred-chunk run before its
+    # first paste, on a board that was perfectly fine. Press B and read again;
+    # only a second unreadable answer is a real stop.
+    if ($plane -match 'UNKNOWN') {
+      TS key -Keys b -Hold 0.12
+      Start-Sleep -Milliseconds 800
+      $plane = & $ts planestate
+    }
     # Require an explicit "off". Matching 'ON' would sail straight past
     # "build plane UNKNOWN", which is what `planestate` now says when the
     # toolbar is not drawn and it has nothing to read.
@@ -251,6 +261,16 @@ switch ($Recipe) {
     TS newboard
     Start-Sleep -Seconds 3
     $plane = & $ts planestate
+    # **UNKNOWN means the toolbar is not drawn, which is a mode, not a fault.**
+    # `newboard` can land outside build mode, and then `planestate` has no icon
+    # to read and says so -- which used to kill a hundred-chunk run before its
+    # first paste, on a board that was perfectly fine. Press B and read again;
+    # only a second unreadable answer is a real stop.
+    if ($plane -match 'UNKNOWN') {
+      TS key -Keys b -Hold 0.12
+      Start-Sleep -Milliseconds 800
+      $plane = & $ts planestate
+    }
     # Require an explicit "off". Matching 'ON' would sail straight past
     # "build plane UNKNOWN", which is what `planestate` now says when the
     # toolbar is not drawn and it has nothing to read.
