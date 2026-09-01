@@ -6307,6 +6307,87 @@ def roof_wings(cells: set[tuple[int, int]]) -> list[set[tuple[int, int]]]:
     return wings
 
 
+#: A spire is FOUR CORNER PIECES on a 4x4, and no slopes at all.
+#:
+#: **Measured off a slab the user built by hand** (`tests/fixtures/
+#: handbuilt_spire.slab`), after a four-way rotation sweep of my own failed to
+#: close on any turn. The sweep was built out of `Tall 2x2x4` slopes stepped
+#: on `_roof_rings`' one-cell rings, and it came out as four separate peaks
+#: with open undersides every time. I read that as a scale problem -- 2-cell
+#: pieces on 1-cell centres -- and it is not. It is a PIECE problem: a spire
+#: has no slope in it. Four `Tall 2x2x4 Corner out`, one per quadrant of a
+#: 4x4, meet at a point and that is the whole thing.
+#:
+#:     (0, 0) NW rot 12    (2, 0) NE rot 6
+#:     (0, 2) SW rot 18    (2, 2) SE rot 0
+#:
+#: **Those are exactly `ROOF_CORNER_ROT` plus the kit's own corner offset**,
+#: which for Castle Fortified is 0 -- all four, no exceptions. So the spire
+#: needs no rotation table of its own, and the table we already had described
+#: it correctly the whole time. What was wrong was building it out of the
+#: wrong pieces and then sweeping a rotation to fix it, which is measuring the
+#: wrong thing carefully.
+SPIRE_SIDE = 4
+
+
+def spire_piece(palette, tier: str, bid: str | None):
+    """The corner piece a spire is built from, or None if the kit has none.
+
+    Read off the building's own WALL kit, not its roof kit. Those are
+    deliberately different here -- `ROOF_MIX` deals roofs independently so a
+    quarter does not come out monochrome, and the civic roof resolves to
+    Tavern terracotta while the civic wall is Castle Fortified. A spire is
+    masonry continuing upward, so it follows the stone it stands on; keying it
+    on the roof found nothing at all, which is how this was caught.
+    """
+    wall = palette.resolve("wall_civic") or palette.resolve("wall")
+    kit = _kit_of(wall) if wall is not None else ""
+    want = {
+        "castle fortified": "Tall 2x2x4 Corner out",
+    }.get(kit)
+    if want is None:
+        return None, kit
+    for asset in palette.catalog.assets:
+        if asset.name == want:
+            return asset, kit
+    return None, kit
+
+
+def lay_spire(b: "Builder", cells: set[tuple[int, int]], y: float,
+              tier: str, bid: str | None) -> int:
+    """Cap ``cells`` with a spire, centred. Returns the pieces laid.
+
+    The cap is a fixed 4x4 whatever the tower is, which is not a
+    simplification -- a broach spire IS narrower than the tower it stands on,
+    and on a 6x6 tower the one-cell margin left round it is exactly where
+    `_lay_towers` has already put the parapet. Crenellations round the edge
+    with a spire rising out of them is a real church tower rather than two
+    features fighting for the same ring.
+
+    A block with no room for the cap gets nothing, and says so by returning 0.
+    """
+    piece, _kit = spire_piece(b.palette, tier, bid)
+    if piece is None or not cells:
+        return 0
+    xs = sorted({c[0] for c in cells})
+    zs = sorted({c[1] for c in cells})
+    if len(xs) < SPIRE_SIDE or len(zs) < SPIRE_SIDE:
+        return 0
+    # Centre it, biased low so an odd margin falls on the far side rather than
+    # splitting the cap off the tile lattice.
+    ox = xs[(len(xs) - SPIRE_SIDE) // 2]
+    oz = zs[(len(zs) - SPIRE_SIDE) // 2]
+    half = SPIRE_SIDE // 2
+    _edge_off, corner_off = roof_offsets(piece)
+    laid = 0
+    for dx, dz, quad in ((0, 0, "nw"), (half, 0, "ne"),
+                         (0, half, "sw"), (half, half, "se")):
+        rot = (ROOF_CORNER_ROT[quad] + corner_off) % 24
+        b.add(place_tile(piece, ox + dx, oz + dz, y, rot))
+        laid += 1
+    return laid
+
+
 def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
     """How many courses in from the eaves each cell sits, by breadth-first
     search inward from the block's real boundary.
@@ -6951,6 +7032,45 @@ def church_band(cells: int) -> tuple[int, int]:
     return ONE_VOLUME_COURSES, TOWER_EXTRA_STOREYS
 
 
+#: How tall a subordinate volume stands, as a step from the NAVE's courses.
+#:
+#: **Not from its own area**, which is the correction two independent reviews
+#: of the plan proposals arrived at separately. A chancel is small in plan and
+#: tall in section -- it is the most important space in the building -- so
+#: area banding puts it three courses down when one is right. And the
+#: discreteness leaks: a 40-cell range and a 36-cell chapter house fell either
+#: side of a band boundary and drew a 10 ft step between two ranges of one
+#: cloister, an accident visible from across the board.
+#:
+#: A **transept is the nave's own height**, and that is the entry that matters
+#: most: three equal gables meeting is what makes a cruciform church read as
+#: cruciform, and at two courses the arms are lean-tos that vanish from every
+#: view but overhead.
+SUBORDINATE_STEP: dict[str, int] = {
+    "nave": 0,
+    "transept": 0,       # equal, or the crossing does not read
+    "crossing": 0,
+    "chancel": -1,       # a 10 ft step: measured against real parish churches
+    "aisle": -2,
+    "chapel": -2,
+    "chapter": -2,
+    "range": -2,
+    "narthex": -2,
+    "porch": -2,
+    "vestry": -2,
+}
+
+#: No subordinate goes below this, whatever the step says. Two courses is 20
+#: ft, which is a room a party stands in rather than a crawlspace.
+SUBORDINATE_MIN_COURSES = 2
+
+
+def subordinate_courses(role: str, nave_courses: int) -> int:
+    """Courses for a church part in ``role``, given its nave's count."""
+    step = SUBORDINATE_STEP.get(role, -2)
+    return max(SUBORDINATE_MIN_COURSES, nave_courses + step)
+
+
 def church_courses(tm, bid: str) -> int:
     """How many courses this church's nave stands.
 
@@ -6958,6 +7078,16 @@ def church_courses(tm, bid: str) -> int:
     because `footprints` exists precisely so that three passes cannot
     disagree about where a building is -- and this is now a fourth reader.
     """
+    # A part of a complex is banded against its NAVE, not against its own
+    # area. The nave is whichever part the raster labelled "nave"; with no
+    # complex recorded, the building is its own nave and this is a no-op.
+    parts = getattr(tm, "church_parts", None) or {}
+    role = parts.get(bid, "")
+    if role and role != "nave":
+        nave = next((b for b, r in parts.items() if r == "nave"), None)
+        if nave is not None:
+            cells = sum(1 for row in tm.building for b in row if b == nave)
+            return subordinate_courses(role, church_band(cells)[0])
     cells = sum(1 for row in tm.building for b in row if b == bid)
     return church_band(cells)[0]
 

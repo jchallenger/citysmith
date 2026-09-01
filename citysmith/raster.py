@@ -156,6 +156,22 @@ class TileMap:
     #: the builder can raise walls per building instead of stamping every
     #: structure to one height, which turns cottages into towers.
     floors: dict[str, int] = field(default_factory=dict)
+    #: building id -> the ROLE it plays in a church complex ("nave",
+    #: "chancel", "transept", "aisle", "chapel", "vestry", "porch", "range").
+    #: Empty for every ordinary building.
+    #:
+    #: A church is several abutting volumes, and the step between them is what
+    #: says church from outside. That step cannot come from footprint AREA:
+    #: a chancel is SMALL IN PLAN AND TALL IN SECTION because it is the most
+    #: important space in the building, so area banding gets it exactly
+    #: backwards -- 24 cells lands in the `chapel` band and draws a 30 ft step
+    #: where 10 is right. Two independent reviews reached that separately.
+    #:
+    #: So the raster carries the role and `build.subordinate_courses` turns it
+    #: into a height RELATIVE to the nave. Here rather than in the builder for
+    #: the reason `floors` is here: the shell, the upper floors and the roof
+    #: all read it, and a roof that disagrees with the walls floats.
+    church_parts: dict[str, str] = field(default_factory=dict)
     #: Bridges added to reconnect districts split by water: (x0, z0, x1, z1).
     bridges: list[tuple[int, int, int, int]] = field(default_factory=list)
     #: The vertices of each wall ring, as cells. A rasterised wall is a band of

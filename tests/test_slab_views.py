@@ -166,3 +166,42 @@ def test_an_azimuth_that_is_not_a_quarter_turn_is_refused(cottage, catalog):
 
 def test_the_3d_layer_survives_a_slab_with_nothing_in_it(catalog):
     assert "empty slab" in render.slab_axon(slab_mod.Slab(placements=[]), catalog)
+
+
+# ---------------------------------------------------- the spire, hand-built
+
+
+def test_the_spire_matches_the_slab_the_user_built():
+    """Four corner pieces on a 4x4, and no slopes at all.
+
+    A rotation sweep built out of `Tall 2x2x4` SLOPES on one-cell rings failed
+    to close on any of the four quarter turns -- four separate peaks with open
+    undersides every time. That reads as a scale problem and it is not: a
+    spire has no slope in it. The hand-build settled it in one paste, which is
+    the third time on this project that asking for the slab a person laid beat
+    another sweep.
+
+    The rotations turn out to be `ROOF_CORNER_ROT` plus the kit's own corner
+    offset, all four, exactly -- so the table we already had described the
+    spire correctly the whole time.
+    """
+    import pathlib
+
+    import pytest
+
+    from citysmith import slab as slab_mod
+    from citysmith.build import ROOF_CORNER_ROT, SPIRE_SIDE
+
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "handbuilt_spire.slab"
+    if not fixture.exists():
+        pytest.skip("no hand-built spire fixture in this checkout")
+    hand = slab_mod.decode(fixture.read_text(encoding="utf-8").strip())
+
+    assert len(hand.placements) == 4, "a spire cap is four pieces"
+    assert len({p.asset_id for p in hand.placements}) == 1, "all one piece"
+
+    half = SPIRE_SIDE // 2
+    want = {(0, 0): ROOF_CORNER_ROT["nw"], (half, 0): ROOF_CORNER_ROT["ne"],
+            (0, half): ROOF_CORNER_ROT["sw"], (half, half): ROOF_CORNER_ROT["se"]}
+    got = {(int(p.x), int(p.z)): p.rot for p in hand.placements}
+    assert got == want, f"hand-build {got} != table {want}"
