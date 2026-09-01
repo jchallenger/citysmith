@@ -15,26 +15,28 @@ $root = Join-Path $PSScriptRoot ".."
 # A letter after the date, because the plain date is already on four boards
 # from earlier runs today and two boards with one name is worse than a long
 # one. The campaign list clips around sixteen capitals, so keep it short.
-$stamp = (Get-Date -Format "MM-dd") + "d"
+$stamp = (Get-Date -Format "MM-dd") + "e"
 
+# `dir` is the output folder and `stem` is the slab prefix inside it; they
+# are not the same string and assuming they were is how a run pasted nothing.
 $towns = @(
-  @{ stem="pelvesthollow"; board="Pelvesthollow";     src="Pelvesthollow.geojson";     every=9  },
-  @{ stem="graybank";      board="Graybank";          src="Graybank.geojson";          every=11 },
-  @{ stem="forest";        board="Forest Church";     src="forest_church.json";        every=18 },
-  @{ stem="tradebourne";   board="East Tradebourne";  src="East Tradebourne.geojson";  every=19 }
+  @{ dir="pelvesthollow"; stem="pelves"; board="Pelvesthollow";    src="Pelvesthollow.geojson";    every=9  },
+  @{ dir="graybank";      stem="gb";     board="Graybank";         src="Graybank.geojson";         every=11 },
+  @{ dir="forest";        stem="forest"; board="Forest Church";    src="forest_church.json";       every=18 },
+  @{ dir="tradebourne";   stem="et";     board="East Tradebourne"; src="East Tradebourne.geojson"; every=19 }
 )
 
 foreach ($t in $towns) {
-  $out = Join-Path $root "out\regen\$($t.stem)"
+  $out = Join-Path $root "out\regen2\$($t.dir)"
   if (-not (Test-Path (Join-Path $out "$($t.stem)-paste-order.txt"))) {
-    "SKIP $($t.stem): no paste order -- rebuild with --by-region"
+    "SKIP $($t.dir): no paste order -- rebuild with --by-region"
     continue
   }
   # No plane check here on purpose. `review.ps1 tiled` makes the new board and
   # then checks, which is the only order that means anything: `newboard` can
   # drop build mode, so a reading taken before it describes the wrong moment.
   $name = "$($t.board -replace '[^A-Za-z]','')$stamp"
-  "=== $($t.stem) -> board '$($t.board) $stamp' ==="
+  "=== $($t.dir) -> board '$($t.board) $stamp' ==="
   if ($WhatIf) { continue }
   & $rev -Recipe tiled -Name $name -Stem $t.stem -OutDir $out `
          -Board "$($t.board) $stamp" -Source $t.src -ShotEvery $t.every |

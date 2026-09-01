@@ -2821,21 +2821,61 @@ def pick_towers(tm, ceiling: int) -> dict[tuple[int, int], str]:
     The tower is a square block at the *narrow* end of the plan, sized to the
     building's width, so it sits over the end of the nave rather than beside
     it. Roofs skip these cells: the tower carries its own.
+
+    **A church is gated as a COMPLEX and sited on its NAVE.** Splitting a
+    chancel off takes about a quarter of the footprint, and every church that
+    had earned a tower as one box then failed one gate or the other as a
+    shortened nave -- measured across the four towns: Graybank 65 cells -> 53
+    (under `TOWER_MIN_TILES`), East Tradebourne's two largest 88 and 81 -> 70
+    and 69 (under `TOWER_ASPECT_EXEMPT_TILES`, so the aspect rule bit at
+    1.12). Three of four towns came out with **no tower and no spire on any
+    church**. The tower belongs to the church, not to the nave, so the size
+    and shape tests read the whole complex; only the siting is per part.
     """
+    plan = footprints(tm)
+    parts = getattr(tm, "church_parts", None) or {}
+    whole: dict[str, set[tuple[int, int]]] = {}
+    for bid, (nave, _role) in parts.items():
+        whole.setdefault(nave, set()).update(plan.get(bid, ()))
+
     towers: dict[tuple[int, int], str] = {}
-    for bid, cells in footprints(tm).items():
-        if bid.split("-")[0] not in CIVIC_KINDS or len(cells) < TOWER_MIN_TILES:
+    for bid, cells in plan.items():
+        if bid.split("-")[0] not in CIVIC_KINDS:
+            continue
+        nave, role = parts.get(bid, (bid, ""))
+        # A subordinate volume never carries the tower; its nave does.
+        if role and role != "nave":
+            continue
+        gate = whole.get(bid, cells)
+        if len(gate) < TOWER_MIN_TILES:
+            continue
+        gxs = [c[0] for c in gate]
+        gzs = [c[1] for c in gate]
+        gw = max(gxs) - min(gxs) + 1
+        gd = max(gzs) - min(gzs) + 1
+        gspan, gacross = (gd, gw) if gd >= gw else (gw, gd)
+        if (len(gate) < TOWER_ASPECT_EXEMPT_TILES
+                and gspan < gacross * TOWER_MIN_ASPECT):
             continue
         xs = [c[0] for c in cells]
         zs = [c[1] for c in cells]
         w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
         long_axis_z = d >= w
-        span, across = (d, w) if long_axis_z else (w, d)
-        if (len(cells) < TOWER_ASPECT_EXEMPT_TILES
-                and span < across * TOWER_MIN_ASPECT):
-            continue
 
-        side = min(across, span // 3)
+        span, across = (d, w) if long_axis_z else (w, d)
+        # **A tower is sized to carry its cap, and set back off the flanks.**
+        # `span // 3` alone gave a 3-cell-wide tower on Graybank's 11x5 nave
+        # and on East Tradebourne's two largest, and `lay_spire` needs a whole
+        # 4x4 to stand on -- so three of the four towns came out with towers
+        # and no spires, which the churches line reported as a FAIL. The floor
+        # is `SPIRE_SIDE` where the nave is wide enough for it.
+        #
+        # It also buys the set-back the architectural review asked for: a
+        # tower the full width of the nave reads as a westwork or a keep
+        # rather than a tower rising out of a roofline, and `min(across - 1,
+        # ...)` leaves a course of nave wall showing past it on both flanks
+        # wherever there is room.
+        side = min(max(across - 1, 2), max(SPIRE_SIDE, span // 3))
         if side < 2:
             continue
         # Whichever end has more of its footprint intact takes the tower.
@@ -2845,7 +2885,19 @@ def pick_towers(tm, ceiling: int) -> dict[tuple[int, int], str]:
         else:
             near = {c for c in cells if c[0] < min(xs) + side}
             far = {c for c in cells if c[0] > max(xs) - side}
-        block = near if len(near) >= len(far) else far
+        # **On a church, not the end the chancel is on.** A west tower stands
+        # at the opposite end from the altar; putting it over the chancel arch
+        # is the one placement that is definitely wrong, and "whichever end
+        # has more footprint" has no opinion about it.
+        rest = gate - set(cells)
+        if rest:
+            near_gap = min((abs(c[0] - r[0]) + abs(c[1] - r[1])
+                            for c in near for r in rest), default=10 ** 6)
+            far_gap = min((abs(c[0] - r[0]) + abs(c[1] - r[1])
+                           for c in far for r in rest), default=10 ** 6)
+            block = near if near_gap > far_gap else far
+        else:
+            block = near if len(near) >= len(far) else far
         for cell in block:
             towers[cell] = bid
     return towers
