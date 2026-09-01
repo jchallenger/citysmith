@@ -1213,6 +1213,19 @@
       ]
     },
     {
+      "id": "church-roof-valleys",
+      "what": "A lower roof meeting a taller wall needs a valley, not an overlap",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "citysmith.build.lay_valley",
+      "note": "PREDICTED by the generator-design review of the plans, then SEEN on the board. Pasted `out/plans2/cruciform.slab.txt` on `PLAN cruciform`: from overhead, every junction where a lower volume meets a taller one carries loose roof pieces standing proud of the wall they run into -- clearest where the transepts meet the crossing and where the chancel meets it.\n\nEach volume is its own building id, so `_lay_roofs` hips each one against its OWN footprint and knows nothing about the wall on the far side of the join. Its eaves course therefore runs straight into the taller masonry instead of dying into a valley, and the pieces that should have been omitted are left sticking out.\n\nThis is the price of 'a church complex is several abutting building ids' and it was called in advance: per-bid hips are right, but a lower roof meeting a taller wall has no valley and buries into it. It is the same class of problem as the doubled walls in `church-volumes-break-four-passes`, and probably wants the same fix -- a parent map, so a roof pass can see the sibling volumes it abuts.\n\nConfirmed working on the same paste, so the review had good news too: the **spire closes**. Four corner pieces meet at a point with the finial on top, exactly as the hand-build laid it.",
+      "tags": [
+        "buildings",
+        "church",
+        "roof"
+      ]
+    },
+    {
       "id": "church-subdivide-the-polygon",
       "what": "Split the imported church polygon into nave and chancel",
       "state": "open",
