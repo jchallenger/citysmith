@@ -453,6 +453,61 @@ in `door_fronts`; the yard and boundary passes do not use it.
    else -- clutter, boundary, hedge -- keeps off, and the reservation is made
    before anything scatters rather than tested afterwards.
 
+## 12.2 Thin plots are rotated buildings, not terraces (2026-09-01)
+
+Reported off a board as "the footprint of this house is strangely thin and
+small". East Tradebourne had **80 of 989 buildings with a short side of 3
+cells or less** -- 15 ft, which is one cell of interior once both walls are
+taken. Pelvesthollow had none.
+
+The obvious reading was terracing, and the obvious fix was to merge a thin
+plot into its neighbour so a terrace becomes one range with a party wall.
+**Both halves of that are measurably false**, and the measurements are worth
+keeping because the wrong one is so plausible:
+
+- **Not one thin plot touches a neighbour.** All 160 long faces are open
+  ground; the nearest building across the thin axis is 2 to 8 cells away.
+  There is no terrace in the raster to merge.
+- **All 80 came from a polygon that was not thin.** `house-0562` rasterises
+  to an 11x10 blob of 38 cells, and the largest axis-aligned rectangle inside
+  it is 3x4 -- twelve cells, 68% of the building discarded. FTG exports
+  buildings at arbitrary angles, the raster is axis-aligned, and a diagonal
+  band contains no fat axis-aligned rectangle.
+
+So a thin plot is `_regularise_buildings` slicing a **rotated** building, and
+the fix belongs at the source. `raster._grow_rect` widens the sliver back out
+a whole row or column at a time, short side first so it squares up rather than
+lengthening, and it may claim only the polygon's own ground or free ground
+**inside that polygon's own bounding box** -- never a road, never the town
+wall, never a neighbour, never anything beyond the footprint the export drew.
+
+| town | thin before | after | floor tiles | median footprint |
+|---|---|---|---|---|
+| Pelvesthollow | 0 | 0 | 1,358 (no change) | 38 -> 38 |
+| Graybank | 2 | 0 | 4,890 -> 4,902 | 32 -> 32 |
+| Forest Church | 10 | 6 | 1,627 -> 1,682 | 28 -> 30 |
+| East Tradebourne | 79 | **6** | 33,702 -> 34,178 (+1.4%) | 30 -> 30 |
+
+The six that survive on East Tradebourne are boxed in by roads and neighbours
+with nothing free to grow into. That is the honest answer; forcing them would
+mean taking someone else's ground.
+
+**The gate is as load-bearing as the growth.** Widening *every* inscribed
+rectangle out to its polygon's box -- the first cut -- took East Tradebourne
+from 33,702 floor tiles to 60,845 and the median footprint from 30 to 54.
+That is a town-wide re-massing wearing a bug fix's clothes. Only a plot that
+is already too thin is widened, and only until it is not.
+
+**And one measurement from the merge pass that was built and then deleted.**
+Read from a finished TileMap, the gaps between thin plots are 85-90% LANE;
+read at the point the merge would run, the same gaps are 95% GROUND. The
+difference is `_trace_lanes`, which runs later and lays a lane in whatever
+open ground it finds between buildings. Taking the finished reading at face
+value says "merging would pave the town's own circulation", which is the
+exact opposite of the truth -- the lane is a consequence of the gap, not
+evidence of a road. This is the same trap as reading a metric off the plan
+instead of the artifact, one stage further on.
+
 ## 13. Three iterations on large buildings and their lots
 
 `tools/lot_probe.py` composes several large buildings, each on its own lot,

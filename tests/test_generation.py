@@ -3494,3 +3494,85 @@ def test_an_unswept_kit_has_no_wide_turn_rather_than_a_default():
         if piece is not None:
             assert roof_offsets_wide(piece) is None, name
 
+
+
+def test_a_plot_too_narrow_to_stand_in_is_not_massed_as_a_house():
+    """A sliver is widened back out, inside its own polygon's box.
+
+    **The thin plots were never terraces, which is what the measurement said
+    and the design note did not.** East Tradebourne had 80 of 989 buildings
+    with a short side of 3 cells or less; not one of them touched a neighbour
+    (all 160 long faces were open ground), and **all 80 came from a polygon
+    that was not thin**. FTG exports buildings at arbitrary angles, the raster
+    is axis-aligned, and the largest axis-aligned rectangle inside a diagonal
+    band is a sliver -- `house-0562` was an 11x10 blob of 38 cells reduced to
+    3x4.
+
+    So the fix is at the source. What this pins is the part that keeps it
+    honest: the widening may take the polygon's own ground and free ground
+    inside the polygon's bounding box, and nothing else -- no road, no
+    neighbour, nothing beyond the footprint the export drew.
+    """
+    from citysmith.raster import (FLOOR, GROUND, STREET, THIN_PLOT_TILES,
+                                  TileMap, _regularise_buildings)
+
+    def run(blob, extra=()):
+        tm = TileMap.blank(20, 20)
+        for x, z in blob:
+            tm.building[z][x] = "house-0001"
+            tm.surface[z][x] = FLOOR
+        for x, z, surf, bid in extra:
+            tm.surface[z][x] = surf
+            tm.building[z][x] = bid
+        tm.floors["house-0001"] = 1
+        _regularise_buildings(tm)
+        got = [(x, z) for z in range(20) for x in range(20)
+               if tm.building[z][x] == "house-0001"]
+        return tm, got
+
+    # A diagonal band, which is what a rotated building rasterises to. Its
+    # largest inscribed rectangle is a sliver; the whole band is its box.
+    band = {(x, z) for x in range(2, 12) for z in range(2, 12)
+            if 0 <= (x - z) <= 3}
+    tm, got = run(band)
+    xs = [c[0] for c in got]
+    zs = [c[1] for c in got]
+    w, d = max(xs) - min(xs) + 1, max(zs) - min(zs) + 1
+    assert len(got) == w * d, "the widened plot is not a rectangle"
+    assert min(w, d) > THIN_PLOT_TILES, f"still a sliver at {w}x{d}"
+    # Never outside the polygon's own bounding box.
+    assert min(xs) >= 2 and max(xs) <= 11 and min(zs) >= 2 and max(zs) <= 11
+
+    # A road beside it is not ground to grow into.
+    road = [(x, z, STREET, "") for z in range(2, 12) for x in (2, 3, 4)]
+    tm, got = run(band, road)
+    assert not any(tm.building[z][x] for z in range(2, 12) for x in (2, 3, 4)), (
+        "the widening paved a street")
+
+    # Nor is a neighbour's floor.
+    nb = [(x, z, FLOOR, "house-0002") for z in range(2, 12) for x in (2, 3, 4)]
+    tm, got = run(band, nb)
+    assert all(tm.building[z][x] == "house-0002"
+               for z in range(2, 12) for x in (2, 3, 4)), (
+        "the widening took a neighbour's cells")
+
+
+def test_widening_leaves_a_plot_that_was_never_thin_alone():
+    """Growing every inscribed rectangle is a town-wide re-massing, not a fix.
+
+    Measured on East Tradebourne with the gate removed: floor area went from
+    33,702 tiles to 60,845 and the median footprint from 30 to 54. With it,
+    the same town moves 476 tiles (+1.4%) and the median does not move at all.
+    """
+    from citysmith.raster import FLOOR, TileMap, _regularise_buildings
+
+    tm = TileMap.blank(20, 20)
+    fat = {(x, z) for x in range(3, 12) for z in range(3, 11)}
+    for x, z in fat:
+        tm.building[z][x] = "house-0001"
+        tm.surface[z][x] = FLOOR
+    tm.floors["house-0001"] = 1
+    _regularise_buildings(tm)
+    got = {(x, z) for z in range(20) for x in range(20)
+           if tm.building[z][x] == "house-0001"}
+    assert got == fat, "a solid rectangle was touched"

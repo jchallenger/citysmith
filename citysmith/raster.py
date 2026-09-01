@@ -1361,6 +1361,14 @@ def _trace_lanes(tm: "TileMap") -> None:
         tm.surface[z][x] = LANE
 
 
+#: A plot this many cells across or fewer cannot hold a room. 3 cells is 15 ft,
+#: and once both walls are taken the interior is ONE cell wide -- a corridor,
+#: not somewhere a party stands. `docs/building-massing.md` anchors the whole
+#: scale on a 35 ft median frontage for exactly this reason, and until now
+#: nothing checked the other end.
+THIN_PLOT_TILES = 3
+
+
 def _regularise_buildings(tm: "TileMap") -> None:
     """Reduce each building footprint to its largest inscribed rectangle.
 
@@ -1421,12 +1429,98 @@ def _regularise_buildings(tm: "TileMap") -> None:
             for dx in range(bw) for dz in range(bd)
         } if best[0] >= 6 and min(bw, bd) >= 2 else set()
 
+        # Only a plot too thin to stand in is widened, and only until it is
+        # not. Growing every inscribed rectangle out to its polygon's box is
+        # a town-wide re-massing, not a fix: measured on East Tradebourne it
+        # took the floor area from 33,702 tiles to 60,845 and the median
+        # footprint from 30 to 54. The defect is the sliver, so the sliver is
+        # what gets treated.
+        if keep and min(bw, bd) <= THIN_PLOT_TILES:
+            keep = _grow_rect(tm, keep, cells, (x0, z0, x1, z1), bid)
+
         for x, z in cells:
             if (x, z) not in keep:
                 tm.building[z][x] = ""
                 tm.surface[z][x] = GROUND
+        for x, z in keep:
+            tm.building[z][x] = bid
+            tm.surface[z][x] = FLOOR
         if not keep:
             tm.floors.pop(bid, None)
+
+
+def _grow_rect(tm: "TileMap", keep: set, blob: list, box: tuple, bid: str) -> set:
+    """Widen the inscribed rectangle back out, inside the polygon's own box.
+
+    **The largest inscribed rectangle of a ROTATED building is a sliver, and
+    that -- not terracing -- is where thin plots come from.** Measured on East
+    Tradebourne before this existed: 80 of 989 buildings had a short side of
+    3 cells or less, and **all 80 came from a polygon that was not thin**.
+    `house-0562` rasterises to an 11x10 blob of 38 cells and the best
+    axis-aligned rectangle inside it is 3x4 -- twelve cells, 68% of the
+    building thrown away. FTG exports buildings at arbitrary angles; the raster
+    is axis-aligned; a diagonal band has no fat rectangle in it.
+
+    So the plot is widened again, and the rule is what keeps it honest: a cell
+    may be claimed only if it is **inside the polygon's own bounding box** and
+    is either part of that polygon's blob or open ground nobody else holds. No
+    road, no wall, no neighbour, and nothing outside the footprint the export
+    actually drew. A whole row or column at a time, so the result stays the
+    rectangle `_regularise_buildings` exists to produce; widest side last, so
+    a sliver squares up rather than growing longer.
+
+    Order matters and is deterministic: buildings are processed sorted by id,
+    and a building already reduced has released its offcuts to ground, so a
+    later neighbour may claim them. That is the same first-claim rule the rest
+    of the raster runs on.
+    """
+    bx0, bz0, bx1, bz1 = box
+    inside = set(blob)
+    xs = [c[0] for c in keep]
+    zs = [c[1] for c in keep]
+    kx0, kx1, kz0, kz1 = min(xs), max(xs), min(zs), max(zs)
+
+    def free(x, z):
+        if not (bx0 <= x <= bx1 and bz0 <= z <= bz1):
+            return False
+        if (x, z) in inside:
+            return True                  # the polygon's own ground
+        if not (0 <= x < tm.width and 0 <= z < tm.depth):
+            return False
+        held = tm.building[z][x]
+        return ((not held or held == bid) and tm.surface[z][x] == GROUND
+                and not tm.wall[z][x])
+
+    grew = True
+    while grew and min(kx1 - kx0, kz1 - kz0) + 1 <= THIN_PLOT_TILES:
+        grew = False
+        # Take the short axis first: a sliver wants to square up, not lengthen.
+        sides = ("w", "e", "n", "s")
+        if (kx1 - kx0) > (kz1 - kz0):
+            sides = ("n", "s", "w", "e")
+        for side in sides:
+            if side == "w":
+                line, span = kx0 - 1, [(kx0 - 1, z) for z in range(kz0, kz1 + 1)]
+            elif side == "e":
+                line, span = kx1 + 1, [(kx1 + 1, z) for z in range(kz0, kz1 + 1)]
+            elif side == "n":
+                line, span = kz0 - 1, [(x, kz0 - 1) for x in range(kx0, kx1 + 1)]
+            else:
+                line, span = kz1 + 1, [(x, kz1 + 1) for x in range(kx0, kx1 + 1)]
+            if not all(free(x, z) for x, z in span):
+                continue
+            keep |= set(span)
+            if side == "w":
+                kx0 -= 1
+            elif side == "e":
+                kx1 += 1
+            elif side == "n":
+                kz0 -= 1
+            else:
+                kz1 += 1
+            grew = True
+            break
+    return keep
 
 
 def _absorb_fragments(tm: "TileMap") -> None:
