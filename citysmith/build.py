@@ -374,6 +374,11 @@ def storeys_of(tm, bid: str | None, ceiling: int) -> int:
     # `footprints` records the same lesson about *where* a building is.
     if tier_of(bid) == "utility":
         return min(UTILITY_STOREYS, ceiling)
+    # A church is not a stack of floors, so its height does not come from one.
+    # Read the note on `ONE_VOLUME_COURSES`: this is a course count, and the
+    # thing that keeps it from being three storeys is that nothing decks it.
+    if is_one_volume(bid):
+        return min(ONE_VOLUME_COURSES, ceiling)
     base = max(1, tm.floors.get(bid, 1))
     # **Frontage is applied HERE, beside the utility cap and for the same
     # reason.** Three passes read this -- the shell, the upper floors and the
@@ -6828,6 +6833,61 @@ CORNER_BY_SIDES = {
 #: Building kinds built in civic fabric rather than common house fabric.
 CIVIC_KINDS = frozenset({"temple", "guildhall", "manor", "barracks"})
 
+#: Kinds built as ONE OPEN VOLUME: a floor at the bottom, a roof at the top,
+#: and nothing between.
+#:
+#: A temple was three or four courses of dressed stone with upper decks on the
+#: interior cells and house windows dealt on every course -- a tenement in
+#: dressed stone. Measured on Forest Church before this landed: 108
+#: `Rural Floor 02` tiles at y=5, 7 and 9 inside a building whose massing is
+#: otherwise a convincing church. None of it is visible from outside, which is
+#: why it survived every review; it is visible the moment a party walks in.
+#:
+#: **The height is not what changes.** `docs/great-buildings.md` §2 asks for
+#: "a single storey pitched at 3-4 courses rather than three storeys of two",
+#: and the courses are already there -- Forest Church's temple is four, which
+#: is 40 ft to the eaves and in the band a large town church wants. What
+#: changes is that the courses stop being *storeys*: no decks, and the glazing
+#: dealt once at the head course instead of a band per floor.
+#:
+#: **Why only the temple, when the same section says the halls are one open
+#: storey too.** A guildhall in this vocabulary is a tolbooth -- §1.4 asks for
+#: "an open arcade at ground level for trade with an enclosed civic chamber
+#: over it", which is a building that genuinely has an upper floor. A manor is
+#: a dwelling and a barracks is a dormitory. The hall volume is a real and
+#: separate piece of work (`great-volume-not-floors`), and it is about course
+#: counts rather than about deleting floors; putting them in here would make
+#: this change say something it has not measured.
+ONE_VOLUME_KINDS = frozenset({"temple"})
+
+#: How many wall courses a one-volume building stands, in place of a storey
+#: count. `docs/great-buildings.md` §2 asks for "a single storey pitched at
+#: 3-4 courses rather than three storeys of two"; three courses of the 2.0
+#: wall is 6 tiles, 30 ft to the eaves, which is a modest parish church and
+#: leaves the tower room to stand clearly over it.
+#:
+#: **This is a COURSE count wearing a storey count's clothes**, and that is
+#: the whole trick. `storeys_of` is the one number the shell, the upper floors
+#: and the roof all read -- its own docstring says the cap lives there because
+#: a roof that disagrees with the walls floats or buries itself. Returning the
+#: course count here makes the wall three courses, seats the roof on its head
+#: by the same arithmetic as every other building, and starts the tower above
+#: it, with no second notion of height to keep in step. What stops it becoming
+#: three actual storeys is the deck guard and the glazing guard, both keyed on
+#: `is_one_volume`.
+ONE_VOLUME_COURSES = 3
+
+
+def is_one_volume(bid: str | None) -> bool:
+    """True for a building that is a single open volume inside.
+
+    Keyed on the kind rather than on size: a parish church of seven cells by
+    ten is as much one volume as a town church of eighteen. Size decides
+    whether a great building gets a tower or aisles, not whether it has
+    floors in it.
+    """
+    return (bid or "").split("-")[0] in ONE_VOLUME_KINDS
+
 #: Kinds that trade with the public: a better door and a glazed street front,
 #: in the same timber as a house. They are *not* given their own wall kit,
 #: and the reason is the library rather than taste -- exactly two 1-cell
@@ -7213,6 +7273,7 @@ def build_from_tilemap(
             b.group = bid
             floors = storeys_of(tm, bid, storeys)
             tier = tier_of(bid)
+            one_volume = is_one_volume(bid)
             # Every slot falls back to the common-house piece: a style with no
             # civic kit (cyberpunk has none) otherwise gets entry=None, and the
             # door branch below silently lays a solid wall across the doorway
@@ -7420,6 +7481,22 @@ def build_from_tilemap(
                         key = zlib.crc32(
                             f"{bid}:{cx}:{cz}:{level}:{side}".encode())
                         lit = glazes and rate and key % rate == 0
+                        # **A nave is glazed ONCE, high up.** Dealing the
+                        # ordinary rate on every course gives three or four
+                        # bands of house windows up a church wall, which is
+                        # what made a temple read as a tenement in dressed
+                        # stone. One band at the head course leaves tall blank
+                        # masonry under it -- the openings then sit where a
+                        # clerestory sits, which is where a church puts them.
+                        #
+                        # The *rate* within that band is untouched, so the
+                        # frontage rules still apply: dense at the front,
+                        # sparse on the flank, never on the back. A
+                        # single-course temple keeps its glazing, because
+                        # level 0 is then the head course.
+                        if lit and one_volume:
+                            head = storeys_at(tm, bid, cx, cz, storeys) - 1
+                            lit = level >= head
                         piece = None
                         if lit:
                             piece = _deal("window", span, course, key)
@@ -7483,6 +7560,13 @@ def build_from_tilemap(
                 # exposed side it never reaches the facade at all. The cost is
                 # an upper floor that stops one cell short of the wall, and
                 # that shows only through a window.
+                #
+                # **A church gets none of this at all.** Its courses are the
+                # height of one volume rather than a stack of storeys, so a
+                # deck at level 1 floors the nave halfway up. See
+                # `ONE_VOLUME_KINDS`.
+                if is_one_volume(bid):
+                    continue
                 edge = {(x, z) for x, z, _ in tm.perimeter.get(bid, ())}
                 inner = sorted(c for c in cells_xy if c not in edge)
                 for x, z in inner:

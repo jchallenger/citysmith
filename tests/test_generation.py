@@ -2272,6 +2272,94 @@ def _one_building(bid, w=7, d=6):
     return tm
 
 
+def test_a_church_stands_its_courses_rather_than_its_floors():
+    """A nave's height is a course count, and it comes from the same function.
+
+    `storeys_of` is the one number the shell, the upper floors and the roof
+    all read -- its own docstring says the cap lives there because a roof that
+    disagrees with the walls floats or buries itself. So the course count goes
+    there too, rather than becoming a second notion of height for three passes
+    to keep in step with.
+
+    Before this, `storeys_of` gave Forest Church's temple ONE storey: a 10 ft
+    nave, the same eaves as the 12-cell shed, under a tower that reached 40 ft.
+    The tower was doing all the work and the church itself was a hut.
+    """
+    from citysmith.build import ONE_VOLUME_COURSES, storeys_of
+
+    tm = _one_building("temple-0001")
+    assert tm.floors["temple-0001"] == 3
+    assert storeys_of(tm, "temple-0001", 9) == ONE_VOLUME_COURSES
+    # And the ceiling still binds, the same way it does for every other kind.
+    assert storeys_of(tm, "temple-0001", 2) == 2
+
+
+def test_a_great_civic_building_has_no_upper_deck():
+    """A nave is one volume: a floor at the bottom, a roof at the top.
+
+    Measured on Forest Church before this landed: 108 upper-floor tiles inside
+    the temple's envelope. A church with floors in it is a tenement in dressed
+    stone, and none of it shows from outside -- which is why it survived every
+    review the project has done. It shows the moment a party walks in.
+
+    The control is the second half: a house of the same footprint and the same
+    dealt storey count still gets its decks, so this asserts the *church* rule
+    rather than that the deck pass is broken. The building is 7x6 = 42 cells,
+    under `TOWER_MIN_TILES`, so no tower stands on it -- a tower's stages have
+    floors on purpose and would make the count ambiguous.
+    """
+    from citysmith.build import build_from_tilemap
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    upper = palette.resolve("floor_upper")
+    assert upper is not None
+
+    def decks_in(bid):
+        tm = _one_building(bid)
+        b = build_from_tilemap(tm, palette, storeys=3)
+        cells = {(x, z) for z in range(tm.depth) for x in range(tm.width)
+                 if tm.building[z][x] == bid}
+        return [p for p in b.placements
+                if p.asset_id == upper.id and p.y > 0.6
+                and (int(round(p.x)), int(round(p.z))) in cells]
+
+    church = decks_in("temple-0001")
+    assert church == [], f"a nave has no upper floor, found {len(church)}"
+    assert decks_in("house-0001"), "a house of the same size should be decked"
+
+
+def test_a_church_is_glazed_once_at_the_head_course():
+    """One band of windows high up, not a band per floor.
+
+    Dealing the ordinary rate on every course puts three bands of house
+    windows up a church wall, which is most of what made a temple read as a
+    tenement. The rate *within* the band is untouched, so the frontage rules
+    still hold: this is about which course, not about how many.
+
+    Asked about the FACE rather than about an asset, for the reason the
+    back-wall test records -- a tier resolves a fabric per building and the
+    fabric brings its own window, so looking for one named piece reports "no
+    glass anywhere" on a building carrying three.
+    """
+    from citysmith.build import build_from_tilemap, storeys_of
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    byid = {a.id: a for a in palette.catalog.assets}
+
+    tm = _one_building("temple-0001")
+    b = build_from_tilemap(tm, palette, storeys=3)
+    assert storeys_of(tm, "temple-0001", 3) == 3, "the nave should stand 3 courses"
+
+    lit = sorted({round(p.y, 2) for p in b.placements
+                  if "window" in byid[p.asset_id].name.lower()})
+    assert lit, "a church should still be glazed"
+    assert len(lit) == 1, f"expected one band of glazing, got {lit}"
+
+
 def test_an_outbuilding_is_a_single_storey():
     """A three-storey stable reads as a tenement. The cap lives in storeys_of
     because the shell, the upper floors and the roof all read that one
