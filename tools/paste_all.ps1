@@ -15,7 +15,7 @@ $root = Join-Path $PSScriptRoot ".."
 # A letter after the date, because the plain date is already on four boards
 # from earlier runs today and two boards with one name is worse than a long
 # one. The campaign list clips around sixteen capitals, so keep it short.
-$stamp = (Get-Date -Format "MM-dd") + "c"
+$stamp = (Get-Date -Format "MM-dd") + "d"
 
 $towns = @(
   @{ stem="pelvesthollow"; board="Pelvesthollow";     src="Pelvesthollow.geojson";     every=9  },

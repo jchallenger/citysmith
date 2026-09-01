@@ -272,6 +272,29 @@ belongs -- read, and if the toolbar is not there to read, toggle once and read
 again; still unreadable is a stop, an unreadable probe not being a pass. The
 wrapper's own pre-check was deleted rather than left to disagree.
 
+### Re-pasted on the gable work, 2026-08-31 (`08-31d`)
+
+All four again, after the gable became the wall carried up and then learned to
+follow the building's own fabric.
+
+| town | assets | was | largest slab |
+|---|---|---|---|
+| Forest Church | 26,860 | 26,860 | 4,593 |
+| Pelvesthollow | 21,707 | 21,707 | 13,818 |
+| Graybank | 91,159 | 91,159 | 22,626 |
+| East Tradebourne | **393,185** | 402,693 | 23,553 |
+
+**East Tradebourne lost 9,508 assets and gained byte headroom**, which is the
+gable change paying for itself: a 2.0-tall wall panel covers two courses where
+the stacked flat cap needed four pieces to cover the same. The smaller towns
+do not move because their gables are rare -- gables are dealt by QUARTER and
+only East Tradebourne has any.
+
+**NOT SEEN: a gable end in a real town.** That is the one thing this pass was
+for and the one thing still unphotographed. They are dealt by quarter, so on
+a 739x598 board at a camera that frames about 40 tiles, finding one is a
+flight and not a pan. The probe boards show the geometry; a town does not yet.
+
 ## Phase 4 — README
 
 New screenshots into `docs/images`, and the feature list catches up: grown
