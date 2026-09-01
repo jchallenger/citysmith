@@ -896,6 +896,32 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-sweep-*"
   },
+  "PROBE through-roof": {
+   "board": "PROBE through-roof",
+   "holds": "probe",
+   "source": "out\\trw\\house.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T19:19:07",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\trw-house-*"
+  },
+  "PROBE through-roof 2": {
+   "board": "PROBE through-roof 2",
+   "holds": "probe",
+   "source": "out\\trw\\house2.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T19:21:28",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\trw2-*"
+  },
   "PROBE wall bond stagger": {
    "board": "PROBE wall bond stagger",
    "holds": "probe",

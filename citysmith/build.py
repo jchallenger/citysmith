@@ -5905,8 +5905,19 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                 x, z = g_ox + scale * gx, g_oz + scale * gz
                 # Which way the slope falls: the sides where the roof steps
                 # back down towards this wing's own eaves.
+                #
+                # **A side into a taller neighbour is UPHILL, not a fall.**
+                # `rings.get(..., -1)` reads every off-wing side as downhill,
+                # which is right at a real eave and wrong against masonry:
+                # on the junction row the top course turned its slope over
+                # TOWARD the through-roof wall -- a spike leaning on the
+                # taller roof, with a notch behind it, photographed twice.
+                # `w_against` is the same set the ring flood already treats
+                # as non-eave; the fall has to agree with it or the two
+                # halves of the valley fix argue.
                 fall = tuple(s for s, dx, dz in SIDE_OFFSETS
-                             if rings.get((gx + dx, gz + dz), -1) < r)
+                             if (gx + dx, gz + dz) not in w_against
+                             and rings.get((gx + dx, gz + dz), -1) < r)
                 # Cap the top ring only where a slope there would have nothing
                 # to lean on. See `roof_top_is_supported` -- capping the whole
                 # ring is what put a 4 x 2 flat deck on every 6 x 4 wing.
@@ -7759,6 +7770,18 @@ def build_from_tilemap(
         fronts = {bid: doors[0][2] for bid, doors in tm.doors.items() if doors}
         on_main = _main_street_frontage(tm)
 
+        # For the through-roof walls below: a building's FULL footprint,
+        # and which ids are siblings of one church complex -- the two cases
+        # where an internal boundary has no perimeter edge.
+        fp_all = footprints(tm)
+        cx_parts = getattr(tm, "church_parts", None) or {}
+
+        def _same_mass(a: str, nb: str) -> bool:
+            if a == nb:
+                return True
+            return (a in cx_parts and nb in cx_parts
+                    and cx_parts[a][0] == cx_parts[nb][0])
+
         for bid, cells in tm.perimeter.items():
             b.group = bid
             floors = storeys_of(tm, bid, storeys)
@@ -8026,6 +8049,41 @@ def build_from_tilemap(
                         b.add(place_wall_span(
                             piece, cx, cz, side,
                             span, y - max(0.0, piece.size_y - storey_h)))
+
+            # **The THROUGH-ROOF wall: an internal height boundary has no
+            # perimeter edge, so nobody was building this.** `_find_perimeters`
+            # records an edge only where the neighbouring cell belongs to a
+            # different building, so inside one id -- a `building_ranges`
+            # two-range house -- and inside one church complex -- nave against
+            # chancel, where the shared edge is deliberately dropped -- the
+            # taller mass's wall simply stopped at nothing. Measured on a
+            # minimal 6x10 two-range house before this: six junction faces,
+            # and the span between the lower head (2.5) and the taller head
+            # (4.5) contained NOTHING -- an open hole from the lower roof
+            # straight into the building, which is the photographed defect.
+            #
+            # The fix is the one every tile-building game converges on
+            # ("build walls the full width of the gap, one brick higher than
+            # the roof" -- the modular-tileset packs ship dedicated
+            # "through-roof wall" pieces for it): the taller side's wall
+            # carries DOWN past the lower roof line. Laid here rather than in
+            # a separate pass because this loop owns the building's dealt
+            # facade piece, so the segment matches the fabric above and below
+            # it. Blind on purpose -- most of it is behind the lower roof's
+            # slope, and a window into a roof void is a defect of its own.
+            for (fx, fz) in sorted(fp_all.get(bid, ())):
+                hs = storeys_at(tm, bid, fx, fz, storeys)
+                for side, dx, dz in SIDE_OFFSETS:
+                    nx, nz = fx + dx, fz + dz
+                    if not tm.inside(nx, nz):
+                        continue
+                    nb = tm.building[nz][nx]
+                    if not nb or not _same_mass(bid, nb):
+                        continue
+                    ns = storeys_at(tm, nb, nx, nz, storeys)
+                    for level in range(ns, hs):
+                        b.add(place_wall(face, fx, fz, side,
+                                         top + level * storey_h))
 
         # Upper-storey floors. Without these a multi-storey building is a hollow
         # box, and now that facades carry windows you can see straight through one

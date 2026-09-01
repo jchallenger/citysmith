@@ -429,3 +429,110 @@ def test_the_belfry_is_the_only_glazed_tower_stage():
               and "window" in byid[p.asset_id].name.lower()}
     assert glazed == {round(top_y, 1)}, \
         f"tower stages glazed at {sorted(glazed)}, wanted only {top_y}"
+
+
+# ------------------------------------------------------- through-roof walls
+
+
+def test_the_through_roof_wall_closes_the_range_step():
+    """An internal height boundary gets the taller mass's wall, full band.
+
+    `_find_perimeters` records an edge only where the neighbouring cell
+    belongs to a DIFFERENT building, so inside one id -- a `building_ranges`
+    two-range house -- nobody was building the wall above the lower range's
+    head. Measured before the fix on this exact tilemap: six junction faces,
+    and the span between the lower head and the taller head contained
+    NOTHING -- an open hole from the lower roof straight into the building,
+    photographed by the user on a 09-01f board.
+
+    The fix is the pattern every tile-building game converges on: the taller
+    side's wall carries down past the lower roof line, in the building's own
+    dealt fabric.
+    """
+    from citysmith.build import build_from_tilemap, building_ranges
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    tm = R.TileMap.blank(14, 18)
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            tm.surface[z][x] = R.GROUND
+    for x in range(4, 10):
+        for z in range(4, 14):
+            tm.building[z][x] = "house-0001"
+            tm.surface[z][x] = R.FLOOR
+    tm.floors["house-0001"] = 2
+    R._find_perimeters(tm, None)
+    R._place_doors(tm, None)
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    b = build_from_tilemap(tm, palette, storeys=3)
+    byid = {a.id: a for a in palette.catalog.assets}
+
+    rg = building_ranges(tm, "house-0001", 3)
+    assert set(rg.values()) == {1, 2}, "the fixture must split into two ranges"
+    juncs = [(x, z) for (x, z), n in rg.items() if n == 2
+             if any(rg.get((x + dx, z + dz)) == 1
+                    for dx, dz in ((0, 1), (0, -1), (1, 0), (-1, 0)))]
+    assert juncs, "no junction faces in the fixture"
+
+    lo_head, hi_head = 0.5 + 1 * 2.0, 0.5 + 2 * 2.0
+    open_faces = []
+    for x, z in juncs:
+        walled = any(
+            byid.get(p.asset_id) is not None
+            and int(p.x) == x and int(p.z) == z
+            and lo_head - 0.6 <= p.y < hi_head
+            and "wall" in (byid[p.asset_id].group_tag
+                           or byid[p.asset_id].name).lower()
+            for p in b.placements)
+        if not walled:
+            open_faces.append((x, z))
+    assert not open_faces, f"open holes at the range step: {open_faces}"
+
+
+def test_a_flush_junction_gets_no_through_roof_wall():
+    """No step, no wall: the band is empty where both sides stand equal.
+
+    The nave/chancel junction is the live case -- `building_ranges` drops the
+    nave's far end to the chancel's own height, so the two meet flush and a
+    wall there would stand inside the roof for nothing. The first check of
+    the church case read 0 walls as a failure; it was the fixture's
+    arithmetic, and this pins the correct reading.
+    """
+    from citysmith.build import build_from_tilemap, storeys_at
+
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+
+    tm = _temple(7, 15)
+    R.split_churches(tm)
+    R._find_perimeters(tm, None)
+    R._place_doors(tm, None)
+    palette = Palette(load_or_build(), MEDIEVAL)
+    b = build_from_tilemap(tm, palette, storeys=3)
+    byid = {a.id: a for a in palette.catalog.assets}
+
+    cells = {}
+    for z in range(tm.depth):
+        for x in range(tm.width):
+            if tm.building[z][x]:
+                cells[(x, z)] = tm.building[z][x]
+    for (x, z), bid in cells.items():
+        if bid != "temple-0001":
+            continue
+        for dx, dz in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+            nb = cells.get((x + dx, z + dz))
+            if nb != "temple-0001+chancel":
+                continue
+            hs = storeys_at(tm, bid, x, z, 3)
+            ns = storeys_at(tm, nb, x + dx, z + dz, 3)
+            if hs == ns:
+                band = [p for p in b.placements
+                        if byid.get(p.asset_id) is not None
+                        and int(p.x) == x and int(p.z) == z
+                        and p.y >= 0.5 + hs * 2.0 - 0.01
+                        and "wall" in (byid[p.asset_id].group_tag
+                                       or byid[p.asset_id].name).lower()]
+                assert not band, \
+                    f"a wall stands above a flush junction at {(x, z)}"

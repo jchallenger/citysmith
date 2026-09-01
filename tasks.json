@@ -531,6 +531,19 @@
       ]
     },
     {
+      "id": "through-roof-wall",
+      "what": "An internal height boundary gets the taller mass's wall",
+      "state": "done",
+      "doc": "docs/roofscape.md",
+      "evidence": "test:test_the_through_roof_wall_closes_the_range_step",
+      "note": "From the user's close-up on a 09-01f board: an open hole between a lower wing's hip roof and the taller range beside it, interior decking visible through the gap.\n\n**Diagnosed independently twice (subagent and in-line) to the same mechanism**: `_find_perimeters` records an edge only where the neighbouring cell belongs to a DIFFERENT building, so inside one id -- a `building_ranges` two-range house -- and between siblings of one church complex, the boundary has no perimeter edge and the shell pass builds nothing there. The taller storey was a three-sided box open on the junction plane. Measured on a minimal 6x10 two-range house: six junction faces, the span between the lower head (2.5) and taller head (4.5) held NOTHING. `building_ranges`' own docstring carried the false premise -- 'the roof pass needs no changes at all'.\n\n**The fix is the pattern every tile-building game converges on** (the research trail is in the 2026-09-01 session: Sims/Rising World guides say 'build walls the full width of the gap, one brick higher than the roof'; modular tilesets ship dedicated through-roof wall pieces; the academic form is the weighted straight skeleton, where edges start at different heights). Implemented inside the facade loop, which owns the building's dealt fabric: for every cell whose same-mass neighbour stands fewer storeys, lay the face wall on that side for the missing levels. Blind on purpose -- most of it is behind the lower roof's slope.\n\n**Plus the residual the diagnosis named**: `fall` read every off-wing side as downhill (`rings.get(..., -1)`), so the junction course turned its slope over TOWARD the new wall -- the photographed spike. A side into `w_against` is uphill now; the two junction corners became straight slopes (Corner 02 -> Side 03, measured on the slab diff), and the zoomed board shot shows the lower roof dying into the wall as one plane.\n\nCosts, measured: Forest Church +11 assets, tile seams 5,056 -> 5,082 (the roof lapping the new wall, the deliberate-overlap class). The nave/chancel junction gets NO wall, correctly: `building_ranges` drops the nave's far end to the chancel's own height so they meet flush -- pinned by `test_a_flush_junction_gets_no_through_roof_wall`, after the first check misread 0 as a failure.\n\nTHE PASTED 09-01f BOARDS PREDATE THIS FIX and show the hole; the next rebuild carries it.",
+      "tags": [
+        "buildings",
+        "roof",
+        "walls"
+      ]
+    },
+    {
       "id": "board-switcher-hud-state",
       "what": "Make ts.ps1 boards read HUD state instead of pressing Space blind",
       "state": "done",
