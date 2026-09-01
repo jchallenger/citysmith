@@ -1266,6 +1266,59 @@
       ]
     },
     {
+      "id": "church-work-reaches-zero-real-buildings",
+      "what": "Wire church_parts and lay_spire into the town build, and report it",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "test:test_the_feature_report_counts_church_parts_and_spires",
+      "note": "**VERIFIED 2026-09-01, and it is the worst finding of the day.** The only writer of tm.church_parts is tools/church_plans.py, and the only caller of lay_spire is the same file. On a real import tm.church_parts is empty.\n\nSo SUBORDINATE_STEP reaches **zero** buildings, church_courses falls through to its single-building branch on every temple in every town, and **no board gets a spire**. Both were written up in the same session as corrections that had landed.\n\nThis is the 1,084 stacks failure again -- at 0% instead of 2% -- in a repo whose CLAUDE.md carries that lesson under its own heading. The check that exists for exactly this, verify.feature_report, built after fences shipped absent from every board reviewed, **does not know about church parts or spires**, so nothing said a word.\n\nTwo halves, and the report half is what stops the next recurrence:\n1. Split a temple polygon into roles in the raster, and call lay_spire from _lay_towers.\n2. Add both to feature_report on the FAILING branch: a temple offered and not split, or a tower built with no spire, is a FAIL and not an 'ok, none here'. A town does not decline to have churches in it.\n\nRecommended first version, sized to real data rather than to the plans: **one nave plus one chancel**, 9x7 + 4x4 = 79 cells, inside the imported range, exercising SUBORDINATE_STEP for its single step. Explicitly do NOT author a fifth plan or tune the step table -- tuning a table nothing reads is the loop this round is already in.",
+      "tags": [
+        "buildings",
+        "church",
+        "verify",
+        "blocker"
+      ]
+    },
+    {
+      "id": "church-parts-needs-a-complex-key",
+      "what": "church_parts finds the FIRST nave on the map, not this church's",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "test:test_two_churches_band_against_their_own_naves",
+      "note": "church_courses takes the first nave in the WHOLE MAP. With two churches in one town, every part of the second bands against the first's nave: a 30-cell chapel's chancel beside a 102-cell church gets four courses on a two-course nave -- a chancel twice the height of the church it belongs to. The roof reads the same function so it will not float; it will just be wrong, silently, which is worse.\n\nEast Tradebourne has FOUR temples, so this is not hypothetical.\n\nFix: map each part to (nave_bid, role), with a nave mapping to itself. O(1), unambiguous, and it survives a second church.\n\nTwo more on the same function. **Its docstring contradicts its code**: it says it reads the footprint off the TileMap because footprints() exists precisely so three passes cannot disagree -- then does a raw full WxD scan, twice per call, from storeys_of, which the shell, the floors and the roof all call per cell. On East Tradebourne that is 441k cells per lookup. Use footprints(tm).\n\nAnd re-import renumbering is not a hazard today because the TileMap is rebuilt per build -- but it becomes one the moment splitting moves to IMPORT time, where it has to go, because roles then persist in layout.json beside floors. Design the key for that now rather than twice.",
+      "tags": [
+        "buildings",
+        "church",
+        "raster"
+      ]
+    },
+    {
+      "id": "church-spire-placement-is-unguarded",
+      "what": "lay_spire can hover a cap over a gap, and takes an unnamed height",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3",
+      "evidence": "test:test_a_spire_never_hangs_over_a_gap",
+      "note": "The fixed 4x4 cap is defensible; the unchecked PLACEMENT is not.\n\nxs and zs in lay_spire are sorted DISTINCT coordinates, not a contiguous range, and the four pieces go down without ever testing membership in cells. A ring-shaped or split tower footprint therefore puts the cap in the gap between the parts, hovering over the nave -- and _lay_towers' by_building merges all of a building's tower cells into ONE set, so a west-front pair of towers is exactly that case. Guard: require the chosen 4x4 to be a subset of cells, and group tower cells by connected component rather than by building id.\n\nSecond: lay_spire takes a bare y float and never says whether it is a base or a top, and church_plans.py passes max(p.y for p in b.placements) -- the ORIGIN of the tallest placement anywhere on the map, not the top of anything. That is how a floating spire ships. Name the argument and derive it inside.",
+      "tags": [
+        "buildings",
+        "church",
+        "roof"
+      ]
+    },
+    {
+      "id": "church-plan-tests-are-tautologies",
+      "what": "Five of the plan guards restate the literal they check",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "test:test_the_arcade_actually_places_piers",
+      "note": "I wrote 22 tests to guard the plans after shipping a plan whose caption lied about its geometry. Re-review says five cannot catch a regression, and reading them back it is right -- **nothing in the file calls build()**, so _arcade and _tilemap are untested by construction.\n\n- test_the_arcade_leaves_an_aisle_on_each_side asserts PIER_SPACING >= 2: a constant against a constant, under a geometric name. _arcade returning 0 on a palette miss passes it.\n- test_every_church_plan_builds_what_its_name_says -- check()'s aisle clause also only reads PIER_SPACING, and the rest compares a string literal to a tuple literal in the same dict. It cannot see any geometry.\n- test_every_plan_terminates_in_a_chancel asserts PRESENCE, never position: a chancel at the west end passes.\n- test_every_plan_has_exactly_one_nave and test_no_nave_is_a_corridor restate the literal.\n\nThe five that do work call real code: the two subordinate_courses tests, the crawlspace floor, the transept/crossing adjacency computation, and the height-spread test.\n\n**And one of them is actively harmful.** test_no_nave_is_a_corridor asserts nave_width >= 8. An 8-wide nave four deep is 32 cells, so the suite has encoded the impossibility of fitting the MEDIAN REAL CHURCH at 65 cells. A guard written against a play complaint is now a guard against real data.",
+      "tags": [
+        "buildings",
+        "church",
+        "tests"
+      ]
+    },
+    {
       "id": "church-subdivide-the-polygon",
       "what": "Split the imported church polygon into nave and chancel",
       "state": "open",
