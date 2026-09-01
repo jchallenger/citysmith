@@ -766,6 +766,19 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\rscale4-*"
   },
+  "PROBE spire large": {
+   "board": "PROBE spire large",
+   "holds": "probe",
+   "source": "out\\spire\\large.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T16:33:17",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-large-*"
+  },
   "PROBE spire rotations": {
    "board": "PROBE spire rotations",
    "holds": "probe",
