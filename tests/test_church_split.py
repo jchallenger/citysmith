@@ -182,3 +182,51 @@ def test_a_spire_needs_room_for_its_cap(catalog_palette):
     small = {(x, z) for x in range(SPIRE_SIDE - 1)
              for z in range(SPIRE_SIDE - 1)}
     assert lay_spire(b, small, 0.0, "civic", "temple-0001") == 0
+
+
+# ------------------------------------------------------------- roof valleys
+
+
+def test_a_roof_does_not_eave_into_a_taller_wall():
+    """A side running into masonry is not an eave.
+
+    Left as a frontier, the ring flood starts an eaves course against the
+    taller wall, so the slope turns over and sheds *towards* it -- and its
+    underside, plus the ridge pieces that had nothing to lap onto, stand proud
+    of the masonry. That is what every junction in the five-volume church
+    looked like from overhead.
+
+    Asserted on the rings rather than on placements, because that is where the
+    decision is made and the pieces only follow it.
+    """
+    from citysmith.build import _roof_rings
+
+    lower = {(x, 1) for x in range(5)} | {(x, 2) for x in range(5)}
+    taller = frozenset((x, 0) for x in range(5))
+
+    open_side = _roof_rings(lower)
+    # With nothing to abut, the row against the wall is an eaves course.
+    assert all(open_side[(x, 1)] == 0 for x in range(5))
+
+    against = _roof_rings(lower, taller)
+    # Abutting the taller block, that row is no longer the outside of the roof:
+    # at least one cell on it has climbed off the eaves course.
+    assert any(against[(x, 1)] > 0 for x in range(5)), \
+        "the roof still eaves into the wall it runs into"
+
+
+def test_the_valley_is_not_a_church_special_case():
+    """A block is a set of cells at ONE storey count, so a two-storey house
+    beside a one-storey one is the same shape as a nave beside a chancel. The
+    argument is "against a taller thing", not "against a sibling"."""
+    from citysmith.build import _roof_rings
+
+    cottage = {(x, z) for x in range(3) for z in range(3)}
+    assert _roof_rings(cottage) == _roof_rings(cottage, frozenset())
+
+    # A taller neighbour along the north edge. The middle of that row stops
+    # being an eaves cell, because it no longer has an outside to shed to.
+    neighbour = frozenset((x, -1) for x in range(3))
+    walled = _roof_rings(cottage, neighbour)
+    assert _roof_rings(cottage)[(1, 0)] == 0
+    assert walled[(1, 0)] > 0, "the cottage still eaves into its neighbour"

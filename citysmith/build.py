@@ -5565,8 +5565,27 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
                            else roof_set(b.palette, tier, bid))
         return _cache[key]
 
+    # **Which ground is occupied by something TALLER than this block.**
+    # Computed once over every block rather than per wing: a block is a set of
+    # cells at one storey count, so anything at a higher one is a wall this
+    # block's roof may have to die into. On a church that is the chancel
+    # meeting the nave and the nave meeting the tower; on a terrace it is a
+    # two-storey house beside a one-storey one, which had the same defect and
+    # nobody had looked.
+    _by_height: dict[int, set[tuple[int, int]]] = {}
+    for _fl, _cells in blocks:
+        _by_height.setdefault(_fl, set()).update(_cells)
+
+    def taller_than(fl: int) -> frozenset[tuple[int, int]]:
+        out: set[tuple[int, int]] = set()
+        for h, cs in _by_height.items():
+            if h > fl:
+                out |= cs
+        return frozenset(out)
+
     for fl, cells in sorted(blocks, key=lambda t: min(t[1])):
         b.group = tm.building[min(cells)[1]][min(cells)[0]]
+        against = taller_than(fl)
         # The material follows the block's owning building, which is the same
         # id the group is tagged with. A terrace shares one roof, so a block
         # spanning two tiers takes the first one's -- deliberately, because a
@@ -5703,7 +5722,19 @@ def _lay_roofs(b: Builder, tm, base_y: float, storey_h: float, max_floors: int,
             (g_ox, g_oz, grid, g_side, g_corner, g_inner, g_cap, g_rise,
              g_eoff, g_coff, scale) = plan
 
-            rings = _roof_rings(grid)
+            # The wing's grid is world cells at the single scale and the
+            # wing's own 2x2 lattice at the double one, so `against` is mapped
+            # the same way `coarse_blocks` maps the wing. A world cell that
+            # touches the wing lands on the coarse cell it would occupy, which
+            # is what the frontier test needs -- it only asks whether the
+            # neighbour is masonry, not where exactly.
+            if scale == 1:
+                w_against = against
+            else:
+                w_against = frozenset(
+                    ((x - g_ox) // scale, (z - g_oz) // scale)
+                    for (x, z) in against)
+            rings = _roof_rings(grid, w_against)
             top_ring = max(rings.values())
 
             # One chimney per building, on its main wing.
@@ -6437,7 +6468,9 @@ def lay_spire(b: "Builder", cells: set[tuple[int, int]], base_y: float,
     return laid
 
 
-def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
+def _roof_rings(cells: set[tuple[int, int]],
+                against: frozenset[tuple[int, int]] = frozenset(),
+                ) -> dict[tuple[int, int], int]:
     """How many courses in from the eaves each cell sits, by breadth-first
     search inward from the block's real boundary.
 
@@ -6446,10 +6479,25 @@ def _roof_rings(cells: set[tuple[int, int]]) -> dict[tuple[int, int], int]:
     get counted as interior and float a course too high, and the box's empty
     corners are roofed over nothing. One L-shaped terrace on the Forest Church
     map had 27 such cells.
+
+    ``against`` is ground the block **abuts a taller neighbour on**, and it is
+    not an eave. A side that runs into masonry has no edge to shed off: the
+    roof keeps rising and dies into the wall, which is a valley. Left as a
+    frontier, the flood starts an eaves course there instead, so the slope
+    turns over and sheds *towards* the wall -- and its underside, and the
+    ridge pieces that had nothing to lap onto, stand proud of the masonry.
+    That is what every join in the multi-volume church looked like from
+    overhead.
+
+    Not a special case for churches: a lower range against a taller one is the
+    general shape, and it is why the argument is "against a taller thing"
+    rather than "against a sibling".
     """
     rings: dict[tuple[int, int], int] = {}
     frontier = [c for c in cells
-                if any((c[0] + dx, c[1] + dz) not in cells for dx, dz in NEIGHBOURS)]
+                if any((c[0] + dx, c[1] + dz) not in cells
+                       and (c[0] + dx, c[1] + dz) not in against
+                       for dx, dz in NEIGHBOURS)]
     depth = 0
     while frontier:
         nxt: list[tuple[int, int]] = []
