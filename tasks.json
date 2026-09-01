@@ -1319,6 +1319,70 @@
       ]
     },
     {
+      "id": "widening-the-nave-deleted-the-tower",
+      "what": "No church plan has a tower, because the width fix removed it",
+      "state": "open",
+      "doc": "docs/great-buildings.md 1.3",
+      "evidence": "citysmith.build.TOWER_INSET",
+      "note": "**VERIFIED. pick_towers returns ZERO cells for the aisled, cruciform and hall plans, and the minster's 25 tower cells are on temple-0004 -- the cloister RANGE. Ninety feet of tower over the dormitory and nothing over the church.**\n\nTOWER_MIN_ASPECT is 2.5 and it is a nave-SHAPE test. Measured: round one's 6x18 nave is aspect 3.00 and got 36 tower cells; round two's 9x18 is aspect 2.00 and gets none. The cruciform's 8x15 is 1.88. **The corridors had towers; the corrected naves do not.** So the fix for 'the tower is the full width of the nave' was to widen the nave, and widening the nave removed the tower altogether -- which is also why the same rule handed the minster's tower to a 5x15 range at aspect 3.0.\n\nThis is the same inversion tower-compact-plan already records from the other side: the aspect gate reads compactness as 'not a nave', and a compact plan at 90+ cells is a nave WITH AISLES, which is precisely the church that has a tower. Two independent findings now point at one gate.\n\n**And TOWER_INSET does not exist.** It is cited in tools/church_plans.py's own module docstring as the thing holding the tower a cell off each flank. Nothing in the codebase defines it. I wrote about a constant I never implemented, in the same file where I added a check against captions lying about geometry.\n\nSo both plan captions that mention a tower are false about their own geometry, again, one round after that exact failure was supposed to have been guarded.",
+      "tags": [
+        "buildings",
+        "church",
+        "tower",
+        "blocker"
+      ]
+    },
+    {
+      "id": "church-aisles-not-a-wider-vessel",
+      "what": "Add lean-to aisles under their own roofs; stop widening the nave",
+      "state": "open",
+      "doc": "docs/great-buildings.md 2",
+      "evidence": "citysmith.build.lay_aisle",
+      "note": "The width correction went too far and in the wrong form. 9 cells by 5 courses is 45 x 50 ft -- a nave you could roll on its side; the hall plan at 10 wide is a square section. Salisbury's nave is 34 x 84 ft, about 2.5:1, and a good parish arcade is 18-20 ft wide by 30-35 to the wallplate.\n\n**The mistake was widening the VESSEL instead of adding AISLES.** Piers one cell in give a 5 ft passage with no lean-to roof over it and no clerestory above, so all four plans are still single volumes IN SECTION -- which is the thing an aisled church is defined by. Keep the arcade span at 6-7 cells and hang 2-cell aisles under their own lower roofs; that is Lavenham, and unlike a wider box it reads from outside.\n\nIt also un-breaks widening-the-nave-deleted-the-tower: a 6-7 cell vessel keeps the aspect that earns a tower, and the aisles are separate volumes that do not enter the aspect test.\n\nThe 40 ft chancel against a 50 ft nave is right and should stay.\n\nRelated and worth doing together: A's east end now has chapel and vestry flanking the chancel, which gives three parallel roofs at 30/40/30 and BURIES the chancel gable and its east window. Vestry to the north only; the chapel belongs off the nave's east bay.",
+      "tags": [
+        "buildings",
+        "church"
+      ]
+    },
+    {
+      "id": "church-part-heights-are-resplit-after-banding",
+      "what": "building_ranges re-splits each part after SUBORDINATE_STEP",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "test:test_a_church_part_stands_one_height",
+      "note": "The part tables state one course count per volume and it is false for about 39% of every nave. building_ranges runs AFTER SUBORDINATE_STEP and splits a large footprint into two ranges at different heights, so every part is re-split behind the banding: aisled and minster naves come out 99 cells at 5 courses and 63 at 4; the hall church 100/60; the cruciform's nave 72/48 and its **crossing 40/24**.\n\nThe crossing is the one volume that must not step -- three equal gables meeting is the whole reason SUBORDINATE_STEP gives a transept the nave's own height -- and it steps.\n\nThe mid-nave ridge step is NOT new; a 6x18 nave splits 66/42 too. What is new is that the tables and the task notes now assert a single figure that the geometry does not carry. Either building_ranges skips a part with a church role, or the tables have to report both.",
+      "tags": [
+        "buildings",
+        "church"
+      ]
+    },
+    {
+      "id": "church-spire-belongs-on-the-tower",
+      "what": "The spire is a fleche mid-nave, not a cap on a tower",
+      "state": "open",
+      "doc": "docs/great-buildings.md 3",
+      "evidence": "test:test_a_spire_caps_a_tower_not_a_nave",
+      "note": "All four spires are four pieces on a 4x4 centred on the NAVE. On the cruciform it lands at z10-13 while the crossing is z19-26: a fleche squatting on a nave ridge, seven cells from the tower it was meant to cap. church_plans.py picks the nave because it is the first part, and lay_spire has no opinion about what it is capping.\n\nDownstream of widening-the-nave-deleted-the-tower: there is no tower to put it on. Fix that first, then call lay_spire from _lay_towers on the tower block rather than from the plan tool on whatever is biggest.\n\nProportion, separately: the fixed 4x4 cap is 40-44% of the nave's width and 20 ft tall on a 20 ft base -- a 45-degree cap. Ketton's broach is nearer 3:1. Once it stands on a tower rather than a nave the base is right, but the rise probably wants stacking rather than one course.",
+      "tags": [
+        "buildings",
+        "church",
+        "roof"
+      ]
+    },
+    {
+      "id": "church-check-passes-plans-it-cannot-see",
+      "what": "--check maps cloister to range and never looks at geometry",
+      "state": "open",
+      "doc": "docs/great-buildings.md 4.2",
+      "evidence": "test:test_the_check_reads_geometry_not_captions",
+      "note": "The guard I added against captions lying about geometry passes two plans whose captions lie about their geometry.\n\n- **The minster has no cloister.** One range, flush against the nave's east wall: no garth, nothing 'inset a cell', no walk. check() maps the word 'cloister' to the role 'range', finds a range, and passes.\n- **The hall church's chapel still hangs off the middle of the nave** (x10-14, z8-13; its chancel is at z20-25). The 'parts flank the chancel' correction never reached plan C at all, and nothing noticed.\n- Its aisle clause reads the global PIER_SPACING, so it can never fail for any plan.\n\ncheck() compares string literals to tuple literals in the same dict. It cannot see _tilemap, _arcade, pick_towers or the built slab, so it cannot answer any question worth asking. It has to read GEOMETRY -- is there a ring of parts round an open court, does the chapel touch the chancel, did the arcade lay pieces, did anything get a tower.",
+      "tags": [
+        "buildings",
+        "church",
+        "tests"
+      ]
+    },
+    {
       "id": "church-subdivide-the-polygon",
       "what": "Split the imported church polygon into nave and chancel",
       "state": "open",
