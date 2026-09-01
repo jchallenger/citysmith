@@ -467,6 +467,19 @@
    "disposable": false,
    "note": ""
   },
+  "MARKET cross 09-01": {
+   "board": "MARKET cross 09-01",
+   "holds": "probe",
+   "source": "out\\crossmkt\\xm.slab.txt",
+   "folder": "",
+   "stem": "",
+   "chunks": 0,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T17:05:52",
+   "disposable": true,
+   "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\market-cross-*"
+  },
   "PLAN cruciform": {
    "board": "PLAN cruciform",
    "holds": "probe",

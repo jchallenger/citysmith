@@ -8785,6 +8785,27 @@ def _stall_rotation(stall: Asset, axis: str, face: int) -> int:
     return rot
 
 
+def _lay_market_cross(b: Builder, cross, x: int, z: int,
+                      y: float) -> int:
+    """The market cross: four quarter-pieces on a 2x2, corner rotations.
+
+    **Measured off the user's hand-build** (`tests/fixtures/
+    handbuilt_turret.slab`), the third slab a person laid that settled what a
+    sweep of mine could not: `Palace Marble roof tower` is not a pinnacle, it
+    is a QUARTER of a two-stage domed turret, and the four quadrants take
+    `ROOF_CORNER_ROT` + 0 exactly -- the same table as the spire cap and the
+    verge before it. The probe that placed it whole, half-cell centred, was
+    using a quarter piece as a unit: `md_tower_wall_01` all over again.
+    (x, z) is the turret's low corner.
+    """
+    laid = 0
+    for dx, dz, quad in ((0, 0, "nw"), (1, 0, "ne"),
+                         (0, 1, "sw"), (1, 1, "se")):
+        b.add(place_tile(cross, x + dx, z + dz, y, ROOF_CORNER_ROT[quad]))
+        laid += 1
+    return laid
+
+
 def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
                   taper: dict[tuple[int, int], float | None]) -> bool:
     """Lay out the market on the plaza: stall rows, aisles, a well, goods.
@@ -8829,7 +8850,8 @@ def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
     goods = [g for g in (b.palette.resolve("market_goods", v) for v in range(4))
              if g is not None]
     well = b.palette.resolve("plaza_well")
-    if not stalls and not goods and well is None:
+    cross = b.palette.resolve("market_cross")
+    if not stalls and not goods and well is None and cross is None:
         return False
 
     door_fronts: set[tuple[int, int]] = set()
@@ -8839,6 +8861,7 @@ def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
             door_fronts.add((x + dx, z + dz))
 
     well_placed = False
+    cross_placed = False
     for comp in comps:
         # Seeded per square from its own lowest cell, the same way
         # `_notch_buildings` seeds per building -- so a rebuild lays the same
@@ -8920,9 +8943,32 @@ def _dress_market(b: Builder, tm, scatter: "Scatter", grade: float,
                         queue.append(n)
             return len(seen) == len(open_cells)
 
-        # The well: the square's one landmark, at the middle of the biggest
-        # square in town and nowhere else. Placed first so the rows keep a
-        # ring of standing room around it.
+        # The cross: the square's landmark, at the middle of the biggest
+        # square in town -- `docs/great-buildings.md` gives the centre to the
+        # cross, not the well. Placed before everything so the rows and the
+        # well keep clear of it; the well's own centroid walk then lands it a
+        # ring further out, which is where a well beside a cross stands.
+        if not cross_placed and cross is not None:
+            n = len(comp)
+            ccx = sum(c[0] for c in comp) / n
+            ccz = sum(c[1] for c in comp) / n
+            for x, z in sorted(
+                    (c for c in comp if clear(c)),
+                    key=lambda c: ((c[0] + 1.0 - ccx) ** 2
+                                   + (c[1] + 1.0 - ccz) ** 2, c)):
+                cover = {(x + dx, z + dz) for dx in (0, 1) for dz in (0, 1)}
+                if any(c not in comp or c in keep or not clear(c)
+                       for c in cover):
+                    continue
+                _lay_market_cross(b, cross, x, z, ground((x, z)))
+                cross_placed = True
+                blocked |= cover
+                for dx in range(-1, 3):
+                    for dz in range(-1, 3):
+                        keep.add((x + dx, z + dz))
+                break
+
+        # The well: displaced from the centre by the cross where one stands.
         if not well_placed and well is not None:
             n = len(comp)
             cx = sum(c[0] for c in comp) / n

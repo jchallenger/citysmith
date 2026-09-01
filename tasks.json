@@ -1569,10 +1569,10 @@
     {
       "id": "market-cross",
       "what": "Stand a market cross at the centre of the square",
-      "state": "open",
+      "state": "done",
       "doc": "docs/great-buildings.md 4.2",
       "evidence": "citysmith.build._lay_market_cross",
-      "note": "NO CANDIDATE PIECE EXISTS and none has been probed. Nearest by shape: Castle Ruins Pillar Base/Mid/Top, Moorgoth Buttress Spire, Palace Marble pillar base/mid. Shortlist by render with tools/asset_shots.py, then probe -- a render shortlists and a probe decides.",
+      "note": "NO CANDIDATE PIECE EXISTS and none has been probed. Nearest by shape: Castle Ruins Pillar Base/Mid/Top, Moorgoth Buttress Spire, Palace Marble pillar base/mid. Shortlist by render with tools/asset_shots.py, then probe -- a render shortlists and a probe decides.\n\nDONE 2026-09-01, **settled by a slab the user built by hand** (`tests/fixtures/handbuilt_turret.slab`) -- the fourth hand-build to beat a probe, and the second to correct a misuse of a quarter piece.\n\n`Palace Marble roof tower` (1x4x1) is not a pinnacle: it is a QUARTER of a two-stage domed turret -- arcaded body, teal dome, gold ornament -- and four of them on a 2x2 at `ROOF_CORNER_ROT` + 0 close it. That is the third hand-build in a row whose rotations are exactly the corner table: the spire cap, the verge, now this. My spire probe had placed the same piece WHOLE, half-cell centred, and called it a material clash; the actual failure was using a quarter as a unit, `md_tower_wall_01` all over again.\n\nWired: `palette` pins the piece under `market_cross` (OPTIONAL_ROLES, degrades to nothing), deliberately cross-pack -- Marble Palace on a medieval board is the owner's explicit call ('any style is fine'), and the medieval pack has no candidate at all. `_lay_market_cross` assembles the quadrants; `_dress_market` gives the CENTRE of the biggest square to the cross, per docs/great-buildings.md, and the well's centroid walk then lands it a ring further out. Keep-clear ring around the cross so the stall rows stand off.\n\nMeasured on the Forest Church market crop: 4 pieces at the exact hand-build rotations, centred, seated on the plaza. Pinned by `test_the_market_cross_matches_the_slab_the_user_built`.",
       "tags": [
         "market"
       ]

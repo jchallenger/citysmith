@@ -205,3 +205,32 @@ def test_the_spire_matches_the_slab_the_user_built():
             (0, half): ROOF_CORNER_ROT["sw"], (half, half): ROOF_CORNER_ROT["se"]}
     got = {(int(p.x), int(p.z)): p.rot for p in hand.placements}
     assert got == want, f"hand-build {got} != table {want}"
+
+
+def test_the_market_cross_matches_the_slab_the_user_built():
+    """Four quarter-pieces on a 2x2, at the corner table, no exceptions.
+
+    The user's hand-build settled it: `Palace Marble roof tower` is a QUARTER
+    of a two-stage domed turret -- the same authoring convention as
+    `md_tower_wall_01` being a quarter of a drum, and the same misuse cost:
+    a probe placed it whole as a half-cell pinnacle. Third hand-build in a
+    row whose rotations are `ROOF_CORNER_ROT` + 0.
+    """
+    import pathlib
+
+    import pytest
+
+    from citysmith import slab as slab_mod
+    from citysmith.build import ROOF_CORNER_ROT
+
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "handbuilt_turret.slab"
+    if not fixture.exists():
+        pytest.skip("no hand-built turret fixture in this checkout")
+    hand = slab_mod.decode(fixture.read_text(encoding="utf-8").strip())
+
+    assert len(hand.placements) == 4
+    assert len({p.asset_id for p in hand.placements}) == 1
+    want = {(0, 0): ROOF_CORNER_ROT["nw"], (1, 0): ROOF_CORNER_ROT["ne"],
+            (0, 1): ROOF_CORNER_ROT["sw"], (1, 1): ROOF_CORNER_ROT["se"]}
+    got = {(int(p.x), int(p.z)): p.rot for p in hand.placements}
+    assert got == want, f"hand-build {got} != table {want}"

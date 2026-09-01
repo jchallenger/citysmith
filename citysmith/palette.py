@@ -68,7 +68,7 @@ def gable_verge(palette, roof_piece):
 
 
 OPTIONAL_ROLES = frozenset({"market_stall", "plaza_well",
-                            "yard_smithy", "yard_trade"})
+                            "market_cross", "yard_smithy", "yard_trade"})
 
 #: Roles placed into a wall segment; all must share the wall's footprint.
 WALL_SEGMENT_ROLES = ("door", "wall_window", "wall_interior")
@@ -696,6 +696,20 @@ MEDIEVAL = Style(
         # The square's focal point. The name pin is the asset the street
         # dressing has always placed, so it is a known-good name, not a guess;
         # the group query behind it is for installs that lack it.
+        # The market cross: the square's landmark, a 2x2 domed turret
+        # assembled from FOUR of this piece, one per quadrant, at the corner
+        # rotations -- `build._lay_market_cross` is the assembly. **Settled by
+        # a slab the user built by hand** (`tests/fixtures/
+        # handbuilt_turret.slab`): the piece is a QUARTER of the turret, the
+        # same authoring convention as `md_tower_wall_01` being a quarter of
+        # a drum, and the same lesson -- a probe that placed it as a one-cell
+        # pinnacle was using a quarter piece whole. Deliberately cross-pack
+        # (Marble Palace on a medieval board): the owner's call, "any style
+        # is fine", and `market-cross` sat open with NO candidate inside the
+        # medieval pack at all.
+        "market_cross": [
+            _tile(name="Palace Marble roof tower"),
+        ],
         "plaza_well": [
             _prop(name="Well 01", **_MED),
             _prop(group="well", exclude_tags=_OFF_THEME,
