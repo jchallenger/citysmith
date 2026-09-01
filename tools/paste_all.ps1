@@ -15,7 +15,7 @@ $root = Join-Path $PSScriptRoot ".."
 # A letter after the date, because the plain date is already on four boards
 # from earlier runs today and two boards with one name is worse than a long
 # one. The campaign list clips around sixteen capitals, so keep it short.
-$stamp = (Get-Date -Format "MM-dd") + "f"
+$stamp = (Get-Date -Format "MM-dd") + "g"
 
 # `dir` is the output folder and `stem` is the slab prefix inside it; they
 # are not the same string and assuming they were is how a run pasted nothing.
@@ -27,7 +27,7 @@ $towns = @(
 )
 
 foreach ($t in $towns) {
-  $out = Join-Path $root "out\regen3\$($t.dir)"
+  $out = Join-Path $root "out\regen4\$($t.dir)"
   if (-not (Test-Path (Join-Path $out "$($t.stem)-paste-order.txt"))) {
     "SKIP $($t.dir): no paste order -- rebuild with --by-region"
     continue
