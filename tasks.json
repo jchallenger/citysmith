@@ -505,6 +505,32 @@
       ]
     },
     {
+      "id": "dblrclick-does-not-fire-synthetically",
+      "what": "The double-right-click centring cannot be driven by ts.ps1 as written",
+      "state": "open",
+      "doc": "docs/camera-model.md",
+      "evidence": "test:test_dblrclick_centres_the_camera",
+      "note": "CLAUDE.md records the community finding that a double RIGHT click centres the camera on the point clicked (measured once: frame moved 39.06, pines centred), and calls it the primitive the planner was missing. DRIVEN 2026-09-01 it does not fire: `ts.ps1 dblrclick` (two raw RDOWN/RUP pairs, 70 ms then 140 ms apart, cursor moved once, 40 ms holds) moved the frame 0.88 against a 0.5 noise floor -- four attempts, in and out of build mode. Two `Press` calls are worse: the 250 ms post-button sleep busts the double-click window entirely.\n\nSo either the original measurement was made by hand, or the gesture needs something the synthetic path is not providing -- real pointer MOTION between the clicks is the prime suspect, since that is exactly what carried creatures needed (`mouse_event` motion vs `SetCursorPos`). Next probe: two clicks with a 1 px relative `MOUSEEVENTF_MOVE` between them, and a hand test to confirm the gesture works at all in this build.\n\nUntil it fires, the aim route has no self-correcting hop, which is what the Forest Church money-shot attempt spent ~15 frames discovering.",
+      "tags": [
+        "talespire",
+        "camera",
+        "driving"
+      ]
+    },
+    {
+      "id": "towns-carry-a-camera-target",
+      "what": "Build a calibration target into every town, at the origin marker",
+      "state": "open",
+      "doc": "docs/camera-model.md",
+      "evidence": "citysmith.build.lay_camera_target",
+      "note": "THE missing piece of the aim route, named precisely by the 2026-09-01 money-shot attempt on Forest Church 09-01f.\n\nEverything else already works and was exercised for real: the UI's camera engine planned the framing (focus (74,76), dist 31.9, pitch 60, cross in frame, 63 px/tile), driving into the measured stops gives dist and pitch BY CONSTRUCTION, `_roof_rings`-style arithmetic gives the zoom tick count, and the rasterised ASCII plan locates any feature in map coordinates. What no tool can supply on a town board is the camera's CURRENT focus and yaw: `camera_read.py` recovers a full pose from one screenshot **of the calibration target**, and a town board has no target. That is `camera-drive-open-loop`'s gap, met on a real errand.\n\nThe fix is to make every town its own calibration board: lay the camtarget pattern (or any known asymmetric pattern of cheap tiles) at a KNOWN MAP LOCATION -- beside the origin registration marker is the natural spot, since every chunk already agrees about it -- so `camera_read` works on any pasted town, and `camera_aim --from shot.png` can then emit moves in MAP coordinates. A dozen tiles of cobble in a corner nobody plays on, in exchange for closed-loop camera drives on every board.\n\nWithout it, navigation degenerates to flying by scene-reading, which cost six shots on 09-01e and ~15 on this attempt before the stop rule fired both times. The wandering is not a skill problem; it is a missing instrument.",
+      "tags": [
+        "talespire",
+        "camera",
+        "build"
+      ]
+    },
+    {
       "id": "board-switcher-hud-state",
       "what": "Make ts.ps1 boards read HUD state instead of pressing Space blind",
       "state": "done",

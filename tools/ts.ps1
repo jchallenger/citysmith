@@ -344,6 +344,19 @@ switch ($Cmd) {
   'click'   { Focus-TS; Press $X $Y ([TSIn]::LDOWN) ([TSIn]::LUP); "clicked $X,$Y" }
   'move'    { Focus-TS; [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 200; "moved to $X,$Y" }
   'drop'    { Focus-TS; Press $X $Y ([TSIn]::RDOWN) ([TSIn]::RUP) 40; "dropped" }
+  'dblrclick' {
+    # Double RIGHT click centres the camera on the point clicked -- the
+    # community finding CLAUDE.md records as the primitive the planner was
+    # missing. The two taps are inlined raw rather than made of two Press
+    # calls, because Press sleeps 250 ms after the button and the pair then
+    # misses the double-click window -- measured: two Presses moved nothing.
+    Focus-TS
+    [TSIn]::Move($X,$Y); Start-Sleep -Milliseconds 120
+    [TSIn]::Btn([TSIn]::RDOWN,[TSIn]::RUP,40)
+    Start-Sleep -Milliseconds 140
+    [TSIn]::Btn([TSIn]::RDOWN,[TSIn]::RUP,40)
+    "double right-clicked $X,$Y"
+  }
   'clear'   {
     # Empty the hand. A right-click does it -- but it has to be a *tap*.
     #
