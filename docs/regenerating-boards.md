@@ -346,6 +346,37 @@ inside the ring of crenellations, which is the arrangement `lay_spire` was
 designed around -- the parapet takes the margin the fixed 4x4 cap leaves.
 
 
+### Phase 2+3 RUN: all four on the market cross, boards 09-01f, 2026-09-01
+
+Rebuilt into `out/regen3/<town>/` and pasted with `tools/paste_all.ps1`. The
+one functional change from the 09-01e run is the **market cross**: every town
+now stands the user's turret -- four `Palace Marble roof tower` quadrants at
+the corner rotations -- at the centre of its biggest square, with the well
+displaced a ring out.
+
+| town | assets | chunks | largest slab | crosses |
+|---|---|---|---|---|
+| Forest Church | 28,381 | 9 | 22,008 | 1 |
+| Pelvesthollow | 21,710 | 9 | 13,827 | 1 |
+| Graybank | 91,090 | 22 | 22,752 | 1 |
+| East Tradebourne | 391,414 | 114 | 23,739 | 1 |
+
+Cross counts measured off the written slabs, four pieces at rots {0, 6, 12,
+18} each. Seams moved slightly DOWN against 09-01e (Forest Church 5,128 ->
+5,056) because the cross's keep-clear displaces a stall or two. The close-up
+of the cross in game is on `MARKET cross 09-01` (the crop board); on the full
+boards it was confirmed present in the slabs and not photographed up close --
+six navigation shots failed to frame the square before the height cap ended
+the attempt, which is the wandering CLAUDE.md warns about and the reason to
+stop.
+
+**The Campaign Boards filter is now a proven switch path.** Paste the stamp
+into the filter (`setclip` + click the box + Ctrl+V), and the list cuts to
+the matching boards at the documented row arithmetic. **The play arrow needs
+two clicks** -- the first lands as hover, the second fires -- and a 28k-asset
+board then loads in about 20 s. `board-filter-switch` carries the details.
+
+
 ## Phase 4 — README
 
 New screenshots into `docs/images`, and the feature list catches up: grown

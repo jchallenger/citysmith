@@ -233,6 +233,19 @@
    "disposable": false,
    "note": ""
   },
+  "East Tradebourne 09-01f": {
+   "board": "East Tradebourne 09-01f",
+   "holds": "town",
+   "source": "East Tradebourne.geojson",
+   "folder": "",
+   "stem": "et",
+   "chunks": 114,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T18:16:28",
+   "disposable": false,
+   "note": ""
+  },
   "FENCE A drystone": {
    "board": "FENCE A drystone",
    "holds": "probe",
@@ -363,6 +376,19 @@
    "disposable": false,
    "note": ""
   },
+  "Forest Church 09-01f": {
+   "board": "Forest Church 09-01f",
+   "holds": "town",
+   "source": "forest_church.json",
+   "folder": "",
+   "stem": "forest",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T17:48:28",
+   "disposable": false,
+   "note": ""
+  },
   "GRB/T123 Chapel of Hermes Interior": {
    "board": "GRB/T123 Chapel of Hermes Interior",
    "holds": "scene",
@@ -464,6 +490,19 @@
    "assets": 0,
    "digest": "",
    "recorded": "2026-09-01T12:59:58",
+   "disposable": false,
+   "note": ""
+  },
+  "Graybank 09-01f": {
+   "board": "Graybank 09-01f",
+   "holds": "town",
+   "source": "Graybank.geojson",
+   "folder": "",
+   "stem": "gb",
+   "chunks": 22,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T17:46:02",
    "disposable": false,
    "note": ""
   },
@@ -1062,6 +1101,19 @@
    "assets": 0,
    "digest": "",
    "recorded": "2026-09-01T12:54:23",
+   "disposable": false,
+   "note": ""
+  },
+  "Pelvesthollow 09-01f": {
+   "board": "Pelvesthollow 09-01f",
+   "holds": "town",
+   "source": "Pelvesthollow.geojson",
+   "folder": "",
+   "stem": "pelves",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T17:40:26",
    "disposable": false,
    "note": ""
   },
