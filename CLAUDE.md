@@ -865,6 +865,30 @@ every frame then lands in the same pixels. `tools/panel_review.ps1`. The row
 alternative is flying, and WASD ramps -- on a 151-tile row, 1.6 s of `a` moved
 most of a panel and 2.2 s went off the map.
 
+**A TOWN CHUNK CANNOT BE FRAMED FROM ITS OWN ANCHOR, and it reads exactly like
+a broken paste (MEASURED 2026-09-01).** Every chunk carries the whole *map's*
+registration box so that all of them go down at one cursor cell -- which means
+a chunk anchors on the map's centre and its own geometry lands wherever it
+sits in the map, up to a hundred tiles away. Against the ~40-tile frame cap
+directly above, that geometry is simply never in shot. Pasting East
+Tradebourne's `r01c03sw` on a fresh board therefore leaves bare ground under
+the cursor and looks precisely like a Ctrl+V that did nothing.
+
+Four pastes were diagnosed as dead input before that landed: the clipboard was
+verified byte-identical to the file, the foreground window was TaleSpire, the
+build plane read off, no modifier was stuck, and single keys demonstrably
+arrived (`k` toggled its own tool on screen). All true, all irrelevant. What
+settled it was pasting a *small* slab at the same cursor in the same session
+-- it appeared instantly, so the machinery had been working the whole time.
+
+**So to LOOK at a feature, build a standalone slab whose content sits at its
+own origin**, the way the probes in `tools/` do; `out/vergeview.slab.txt` is
+the worked example, two wings side by side through the shipped
+`_lay_gabled_wing`. `--crop` is NOT that tool and is a trap here for a second
+reason: it re-runs the import, and quarters are derived from the whole
+settlement, so cropping a gabled district can turn every wing back into a hip
+and the feature vanishes from the very frame chosen to show it.
+
 **The haze is board state, not the camera.** The left tool column's third icon
 is **Atmosphere Settings**: Day Cycle with a sun dial, **Fog Multiplier**,
 Exposure and Post Effects, plus "Apply to Game Board". East Tradebourne's warm
