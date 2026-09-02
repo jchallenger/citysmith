@@ -246,6 +246,19 @@
    "disposable": false,
    "note": ""
   },
+  "East Tradebourne 09-01g": {
+   "board": "East Tradebourne 09-01g",
+   "holds": "town",
+   "source": "East Tradebourne.geojson",
+   "folder": "",
+   "stem": "et",
+   "chunks": 114,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T20:19:02",
+   "disposable": false,
+   "note": ""
+  },
   "FENCE A drystone": {
    "board": "FENCE A drystone",
    "holds": "probe",
@@ -389,6 +402,19 @@
    "disposable": false,
    "note": ""
   },
+  "Forest Church 09-01g": {
+   "board": "Forest Church 09-01g",
+   "holds": "town",
+   "source": "forest_church.json",
+   "folder": "",
+   "stem": "forest",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T19:51:05",
+   "disposable": false,
+   "note": ""
+  },
   "GRB/T123 Chapel of Hermes Interior": {
    "board": "GRB/T123 Chapel of Hermes Interior",
    "holds": "scene",
@@ -503,6 +529,19 @@
    "assets": 0,
    "digest": "",
    "recorded": "2026-09-01T17:46:02",
+   "disposable": false,
+   "note": ""
+  },
+  "Graybank 09-01g": {
+   "board": "Graybank 09-01g",
+   "holds": "town",
+   "source": "Graybank.geojson",
+   "folder": "",
+   "stem": "gb",
+   "chunks": 22,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T19:48:39",
    "disposable": false,
    "note": ""
   },
@@ -896,6 +935,19 @@
    "disposable": true,
    "note": "probe panel from tools/panel_review.ps1; shots in out\\flyby\\spire-sweep-*"
   },
+  "PROBE spooky forest": {
+   "board": "PROBE spooky forest",
+   "holds": "town",
+   "source": "spooky",
+   "folder": "",
+   "stem": "spooky",
+   "chunks": 4,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-02T08:40:51",
+   "disposable": false,
+   "note": ""
+  },
   "PROBE through-roof": {
    "board": "PROBE through-roof",
    "holds": "probe",
@@ -1140,6 +1192,19 @@
    "assets": 0,
    "digest": "",
    "recorded": "2026-09-01T17:40:26",
+   "disposable": false,
+   "note": ""
+  },
+  "Pelvesthollow 09-01g": {
+   "board": "Pelvesthollow 09-01g",
+   "holds": "town",
+   "source": "Pelvesthollow.geojson",
+   "folder": "",
+   "stem": "pelves",
+   "chunks": 9,
+   "assets": 0,
+   "digest": "",
+   "recorded": "2026-09-01T19:43:03",
    "disposable": false,
    "note": ""
   },
