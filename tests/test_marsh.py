@@ -192,8 +192,15 @@ def test_a_fen_that_built_as_ordinary_ground_fails_loudly():
     tm = R.rasterize(_fen())
     builder = build_from_tilemap(tm, p, storeys=1)
 
+    # Every variant of each role, not the one `resolve` settles on. The
+    # terrain pass deals the three swamp blocks between cells, so stripping a
+    # single id leaves two thirds of the fen standing and this test -- whose
+    # whole job is to prove the FAIL branch fires -- passes for the wrong
+    # reason.
+    from citysmith.palette import role_variants
+
     wet = {a.id for r in ("marsh_2x2", "marsh_reed", "marsh_lily")
-           for a in (p.resolve(r),) if a is not None}
+           for a in role_variants(p, r)}
     builder.placements = [pl for pl in builder.placements
                           if pl.asset_id not in wet]
 

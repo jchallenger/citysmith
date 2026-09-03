@@ -410,7 +410,12 @@ def test_a_yard_quad_is_not_sheeted_in_grass():
     cells = {c for cs in yard_cells(tm).values() for c in cs}
     assert cells
 
-    lawn = {palette.require("ground").id, palette.require("ground_2x2").id}
+    # Every grass variant, not the one `resolve` settles on: the block pass
+    # deals between the role's interchangeable tiles, so naming a single id
+    # would leave half the lawn invisible to the check that a yard is not
+    # sheeted in it -- and this test would then pass by not looking.
+    lawn = {a.id for role in ("ground", "ground_2x2")
+            for a in palette.variants(role)}
     for p in b.placements:
         asset = palette.catalog.by_id(p.asset_id)
         if asset is None or asset.kind != "tile" or p.y > 0.01:

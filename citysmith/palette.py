@@ -369,7 +369,21 @@ MEDIEVAL = Style(
         #: only edged in 1x1, which cuts the tile count for a field of grass by
         #: about four -- the difference between a village fitting the board
         #: comfortably and a town crowding the 1M asset cap.
-        "ground_2x2": [_tile(name="Grass - Lush", **_MED)],
+        #:
+        #: **Two names in one query, dealt per block by `Palette.deal`.**
+        #: Pinned to `Grass - Lush` alone, open country read as a tiled floor:
+        #: from overhead every 2x2 boundary is a seam and the blocks can be
+        #: counted, which is the one thing a ground plane must not allow. It is
+        #: also most of what anyone sees -- 52.6% of East Tradebourne's cells
+        #: and 87% of a forest board's. `Grass - Sparse` is the same 2.0 x 0.5
+        #: x 2.0, the same `folder='Nature'`, the same `group_tag='grassland'`,
+        #: and was placed **zero times on every board this project has ever
+        #: built** because it sat as the unreachable second query of ``field``.
+        #: Dealing the two costs no extra assets at all.
+        #:
+        #: One query holding both names, for the reason `marsh_2x2` states
+        #: below.
+        "ground_2x2": [_tile(name=("Grass - Lush", "Grass - Sparse"), **_MED)],
         "field": [
             _tile(name="Tilled Earth", **_MED),
             _tile(name="Grass - Sparse", **_MED),
@@ -1208,6 +1222,33 @@ CYBERPUNK = Style(
 STYLES: dict[str, Style] = {s.name: s for s in (MEDIEVAL, CYBERPUNK)}
 
 
+def role_variants(palette, role: str) -> list[Asset]:
+    """Every interchangeable asset for ``role``, from any palette-shaped object.
+
+    :meth:`Palette.variants` is the real answer. This exists because a
+    *palette* here is a duck type, not a base class: the suite is full of
+    four-line doubles that answer `resolve` and nothing else, deliberately --
+    a chunker test has no business knowing what a wall kit is. A double that
+    predates the deal pins one asset per role, and one asset per role is
+    exactly what its single-element list should be, so the fallback is the
+    correct answer rather than a shrug.
+
+    Same shape and the same reason as `verify._fences_built`'s role fallback:
+    "the role fallback stays for a builder that predates it".
+    """
+    got = getattr(palette, "variants", None)
+    if got is not None:
+        return list(got(role))
+    one = palette.resolve(role)
+    return [one] if one is not None else []
+
+
+def deal_variant(palette, role: str, key: int) -> Asset | None:
+    """One of ``role``'s interchangeable variants, chosen by ``key``."""
+    got = role_variants(palette, role)
+    return got[key % len(got)] if got else None
+
+
 class Palette:
     """Resolves a :class:`Style` against a :class:`Catalog`, with caching.
 
@@ -1221,6 +1262,7 @@ class Palette:
         self.style = style
         self.seed = seed
         self._cache: dict[tuple[str, int], Asset | None] = {}
+        self._variants: dict[str, list[Asset]] = {}
 
     @classmethod
     def named(cls, catalog: Catalog, style_name: str, seed: int = 0) -> "Palette":
@@ -1256,6 +1298,66 @@ class Palette:
                 break
         self._cache[key] = chosen
         return chosen
+
+    def variants(self, role: str) -> list[Asset]:
+        """Every asset the role's first matching query offers, in catalog order.
+
+        The *interchangeable* set for a role, which is a narrower thing than
+        "everything that could satisfy it". A role's queries are a fallback
+        chain -- `ground_2x2` under cyberpunk is a preferred deck and then a
+        different one if the pack is missing -- so only the query that matched
+        describes pieces the style meant as equals. Reaching past it and
+        pooling the fallbacks would deal the substitute alongside the thing it
+        substitutes for.
+
+        `Catalog.find` already sorts by ``(name, id)``, so the order is stable
+        across installs and the deal below is reproducible.
+
+        **Not `walls.stem_of`, and not the group tag** -- both were measured
+        against this role and both are wrong here:
+
+        * `stem_of` looks for pieces differing only by a trailing index. The
+          two grass blocks stem to ``grass - lush`` and ``grass - sparse``, so
+          it says they are as unrelated as Shogun's plaster and paper screens.
+          It is right about wall panels and blind to a kit that names its
+          variants rather than numbering them.
+        * ``group_tag='grassland'`` looks like the structured filter this
+          project prefers, and it is worse: it holds `Grassy Road`, three road
+          junction pieces, an 8x8 `Grass Foam (4x4)` and `Tilled Earth`, whose
+          own tags are ``dirt, farm``. Dealing on it sheets open country in
+          cart tracks and ploughed soil.
+
+        What is left is the style's own list, which is the rule this whole
+        module already runs on: *pin the look by name*.
+        """
+        got = self._variants.get(role)
+        if got is None:
+            got = []
+            for terms, kwargs in self._candidates(role):
+                matches = self.catalog.find(*terms, **kwargs)
+                if matches:
+                    got = matches
+                    break
+            self._variants[role] = got
+        return got
+
+    def deal(self, role: str, key: int) -> Asset | None:
+        """One of the role's interchangeable variants, chosen by ``key``.
+
+        Same shape as :meth:`walls.WallFamily.deal`, deliberately: index the
+        list by ``key % len``. A role with one variant returns that one for
+        every key, which is not a fallback and not a special case -- it is what
+        the arithmetic already does, and it is why a style that ships a single
+        grass tile still builds.
+
+        **Not `resolve(role, variant)`.** That seeds a `random.Random` per
+        variant and calls `choice`, so two variants can independently land on
+        the same asset -- with two candidates that is a coin flip per key, and
+        collapsing the deal back to one tile is exactly the "5 civic, 46
+        identical" failure `CLAUDE.md` records against the old wall deal.
+        Indexing spreads them evenly by construction.
+        """
+        return deal_variant(self, role, key)
 
     def require(self, role: str, variant: int = 0) -> Asset:
         asset = self.resolve(role, variant)

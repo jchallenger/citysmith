@@ -1521,11 +1521,16 @@ def feature_report(builder, tm, layout=None, seed: int = 0
     used: set[str] = {p.asset_id for p in builder.placements}
 
     def built(roles) -> int:
-        ids = set()
-        for role in roles:
-            asset = builder.palette.resolve(role)
-            if asset is not None:
-                ids.add(asset.id)
+        # Every variant of each role, not the one `resolve` settled on. The
+        # terrain pass deals between a role's interchangeable tiles, so a
+        # role's output is a *set* of ids -- `marsh_2x2` is three swamp
+        # blocks. Asking about one of them would report a fen that is on the
+        # board as absent, which is the exact false FAIL this whole report
+        # exists to avoid.
+        from .palette import role_variants
+
+        ids = {a.id for role in roles
+               for a in role_variants(builder.palette, role)}
         return len(ids & used)
 
     # -- gabled ridge ends ---------------------------------------------------

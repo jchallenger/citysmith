@@ -3058,6 +3058,90 @@ def test_an_npc_mark_does_not_take_the_ground_from_the_cells_around_it():
         "make it visible")
 
 
+def test_open_ground_deals_more_than_one_variant():
+    """Open country is not one tile repeated.
+
+    Pinned to a single 2x2 block, the ground plane read as a tiled floor: from
+    overhead every block boundary is a seam and you can count them, on the
+    surface that is 52.6% of East Tradebourne's cells. `Grass - Sparse` is the
+    same 2.0 x 0.5 x 2.0 as `Grass - Lush` and had been placed **zero times on
+    every board this project ever built**, because it sat as the unreachable
+    second query of ``field``.
+
+    Four claims, and the last two are the ones that make it safe:
+
+    1. the style offers more than one name for ``ground_2x2``;
+    2. a real build of open country lays both, neither as a rump;
+    3. a role with one candidate still lays, every cell, one material -- the
+       case that must not become a crash or a fall back to another kit;
+    4. the deal is stable in-process. Across processes is
+       `tests/test_determinism.py`, which is the one that can see a salted
+       hash, and `build.cell_deal_key` is `crc32` for exactly that reason.
+    """
+    import collections
+
+    from citysmith.build import build_from_tilemap, cell_deal_key
+    from citysmith.catalog import load_or_build
+    from citysmith.palette import MEDIEVAL, Palette
+    from citysmith.raster import TileMap
+
+    assert len(MEDIEVAL.roles["ground_2x2"][0][1]["name"]) > 1, (
+        "the style itself has to offer the choice; one name in the query and "
+        "the deal below is arithmetic over a list of one")
+
+    palette = Palette(load_or_build(), MEDIEVAL)
+    blocks = palette.variants("ground_2x2")
+    assert len(blocks) > 1, "no second grass block in the installed packs"
+    assert len({(a.size_x, a.size_y, a.size_z) for a in blocks}) == 1, (
+        "same-shape siblings only -- a variant of another size would overhang "
+        "its neighbours or step above them")
+
+    tm = TileMap.blank(24, 24)
+    b = build_from_tilemap(tm, palette, storeys=1, roofs=False)
+    laid = collections.Counter(
+        p.asset_id for p in b.placements
+        if p.asset_id in {a.id for a in blocks})
+    assert len(laid) == len(blocks), (
+        f"{len(laid)} of {len(blocks)} grass blocks reached the board -- "
+        "a deal that lands on one variant is the pin it replaced")
+    rarest = min(laid.values()) / sum(laid.values())
+    assert rarest > 0.25, (
+        f"the rarest variant is {rarest:.0%} of the ground; a handful of "
+        "scattered blocks reads as a defect, not as texture")
+
+    # A role with one candidate: `field` resolves to `Tilled Earth` alone,
+    # because its second query is a fallback and the first one matched.
+    one = palette.variants("field")
+    assert len(one) == 1, "expected a single-candidate role to exercise here"
+    assert {palette.deal("field", k) for k in range(50)} == {one[0]}, (
+        "one variant means that tile for every key -- not None, not a raise, "
+        "and not somebody else's kit")
+
+    again = build_from_tilemap(TileMap.blank(24, 24), palette,
+                               storeys=1, roofs=False)
+    assert [(p.asset_id, p.x, p.y, p.z) for p in b.placements] == \
+           [(p.asset_id, p.x, p.y, p.z) for p in again.placements], (
+        "the same layout must build the same board")
+
+    # **The key has to be mixed, not merely balanced.** `crc32` is linear, so
+    # over a lattice of cells its low bit is a lattice too: the bare
+    # `crc32(f"g:{x}:{z}") % 2` splits 50.006% and draws a period-5 stripe
+    # across the whole map. A count cannot see that and this can.
+    same = tot = 0
+    for z in range(0, 600, 2):
+        prev = None
+        for x in range(0, 740, 2):
+            v = cell_deal_key("terrain:ground_2x2", x, z) % 2
+            if prev is not None:
+                tot += 1
+                same += v == prev
+            prev = v
+    assert 0.45 < same / tot < 0.55, (
+        f"{same / tot:.4f} of horizontal neighbours match against an ideal "
+        "0.5 -- the deal is patterned, and a striped ground plane is no "
+        "better than a countable one")
+
+
 # -- scatter clearance --------------------------------------------------------
 
 def test_the_wall_clears_woodland_the_way_a_building_does():
