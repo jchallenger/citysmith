@@ -283,3 +283,49 @@ market street are told apart by their *ground* and by nothing else.
 whole Medieval Fantasy pack, so trade deliberately shares the house's wall --
 but with quarters now measurable there is a second axis to hang a fabric on
 that did not exist when that decision was made.
+
+## 11. Elevation: DECIDED NO (2026-09-03)
+
+Asked for directly, considered against a board built for the question
+(`tools/spooky_forest.py`, pasted as `PROBE spooky forest`), and **declined**.
+The reasoning is kept because "we thought about relief once" is the kind of
+thing that gets re-litigated every six months.
+
+**What is actually true underfoot**, measured through the whole stack rather
+than off the lowest tiles:
+
+| | height |
+|---|---|
+| land, everywhere | top 3.5 |
+| water surface | top 2.5 |
+| riverbed | top 0.5 |
+| map edge, outer ring | stepped 0.5, and ragged |
+
+So watercourses *already* have depth -- a full tile below the bank and three
+to the bed -- and the land is the part that is uniform. The first reading of
+this, off the lowest tiles alone, was that the ground sat at 0.5 and the river
+was a sheet of water lying on the lawn. That was wrong, and it is worth saying
+so: **a height read off one end of a stack is not a height.**
+
+**Why no height field.** Terrain is one tile per cell at a single scalar
+`grade`, so a cell of rise costs a whole tile of fill beneath it, on the
+largest surface on the board:
+
+- East Tradebourne carries ~151,700 surface tiles of 391,651 total. One course
+  of relief is **+20-38%**, on a town whose largest chunk already sits at
+  **23,766 bytes against the 30,720 cap** -- 77%. It would go over, and
+  `--max-assets` would have to come down, taking 114 chunks to about 150.
+- It puts four verification invariants in play at once -- `chunk_datum`,
+  `anchor_on_a_whole_tile`, `shells_rest_on_their_floors` and the paste datum
+  itself all assume every chunk reaches `y=0` and every shell sits on a floor
+  at a known height. Each of those exists because it caught a shipped defect.
+
+**And the board did not argue for it.** Flat land was the least of what was
+wrong underfoot: the lawn reading as a tiled floor is far more visible, and it
+is fixed with variance at no cost in assets at all. That is
+`ground-variants-break-the-grid`, and it is the work that was done instead.
+
+If relief is ever wanted, the place to try it is a scene-scale board -- 9,394
+assets against a million-asset ceiling -- where the budget is irrelevant and
+the invariants can be exercised before a 400,000-asset town is put at risk.
+
