@@ -1519,6 +1519,83 @@ def test_an_authored_forest_pulls_the_wood_inside_its_line(catalog_palette):
     assert out1 < out0, "and thin outside it -- redistributed, not added"
 
 
+# -- lane clutter --------------------------------------------------------------
+
+CLUTTER = Asset(id="5" * 8 + "-1111-2222-3333-444444444444", name="log pile",
+                kind="prop", pack="p", group_tag="prop", tags=(), folder="",
+                size_x=0.6, size_y=0.5, size_z=0.6)
+
+
+class _LanePalette:
+    """The conftest stub with `yard_clutter` filled in.
+
+    That is the one role the lane branch places from, and the catalog finds
+    nothing -- so the wheat, the ferns, the barrels and the well are all
+    absent and what lands on the board comes from the branch under test."""
+
+    def __init__(self, base) -> None:
+        self._base = base
+        self.catalog = _FindNothing()
+
+    def resolve(self, role, variant=0):
+        if role == "yard_clutter":
+            return CLUTTER
+        return self._base.resolve(role, variant)
+
+    def require(self, role, variant=0):
+        asset = self.resolve(role, variant)
+        if asset is None:
+            raise KeyError(role)
+        return asset
+
+    def prop(self, category, rng):
+        return self._base.prop(category, rng)
+
+
+def test_lane_clutter_stands_against_a_building(catalog_palette):
+    """A cart is left against a wall, never in the middle of the footpath.
+
+    The lane branch of `_dress_districts` said "sparsely and against a wall"
+    in a comment and then rolled on every lane cell, so on a forest board 16
+    props stood wholly inside its 157 route cells with nothing to lean on.
+    One lane, most of it out in the open and a stretch of it running past a
+    house: everything laid on the lane has to be on that stretch.
+    """
+    from citysmith import raster as R
+    from citysmith.build import cell_of
+    from citysmith.raster import TileMap
+
+    tm = TileMap.blank(60, 40, "lane")
+    for x in range(tm.width):
+        tm.surface[20][x] = R.LANE
+    for z in range(17, 20):                    # a long wall along the north side
+        for x in range(5, 31):
+            tm.building[z][x] = "house-0001"
+
+    def walled(x: int, z: int) -> bool:
+        return any(tm.building[z + dz][x + dx]
+                   for dz in (-1, 0, 1) for dx in (-1, 0, 1)
+                   if tm.inside(x + dx, z + dz))
+
+    open_lane = [x for x in range(tm.width) if not walled(x, 20)]
+    assert len(open_lane) > tm.width // 2, (
+        "most of the lane must be in the open, or the assertion below is "
+        "about a two-cell stretch and proves nothing")
+
+    cells = [cell_of(p, CLUTTER) for p in _dressed(tm, _LanePalette(catalog_palette))
+             if p.asset_id == CLUTTER.id]
+    on_lane = [(x, z) for x, z in cells if tm.surface[z][x] == R.LANE]
+
+    assert not [c for c in on_lane if not walled(*c)], (
+        f"clutter standing in the open lane: "
+        f"{sorted(c for c in on_lane if not walled(*c))}")
+    # And the branch is not simply dead: clutter in a lane is the point, it
+    # just has to hug the one wall this map offers.
+    assert len(on_lane) >= 3, (
+        f"the lane went bare -- {len(on_lane)} piece(s) against "
+        f"{len([x for x in range(tm.width) if walled(x, 20)])} eligible cells")
+
+
 # -- map edge taper -----------------------------------------------------------
 
 def test_tapered_ground_is_still_open_country():

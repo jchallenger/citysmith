@@ -9510,8 +9510,34 @@ def _dress_districts(b: Builder, tm, grade: float,
             # `_dress_market` above -- rows and aisles, not a per-cell roll.
 
             elif surf == R.LANE:
-                # Lanes are where things get left, sparsely and against a wall.
-                if yard and rng.random() < 0.07 * detail:
+                # Lanes are where things get left, sparsely and against a wall
+                # -- which this comment has said since it was written while the
+                # branch placed on any lane cell at all. Measured on the forest
+                # board, 16 props stood wholly inside its 157 route cells, all
+                # 16 from here: a cart square in the middle of a footpath. Same
+                # test as the street branch below, and deliberately the same
+                # call, because two adjacency rules that drift apart are how a
+                # rule becomes a coincidence.
+                if not near(x, z, frozenset()):  # building adjacency only
+                    continue
+                # **Unlike the street set, this one is not narrow on a town.**
+                # Lane cells with a building within one cell, apron excluded:
+                # 8,246 of 12,790 on East Tradebourne, 482 of 833 on Graybank,
+                # 475 of 774 on Forest Church, 116 of 181 on Pelvesthollow --
+                # 58% to 65% everywhere, because a lane is what runs *between*
+                # buildings. The narrow case is the forest board, 17 of 119,
+                # where the lanes run through woodland and there is genuinely
+                # nothing to lean against.
+                #
+                # So the rate is raised by the town ratio (1.55x, 0.07 ->
+                # 0.11), not by the forest one. That keeps a town's lane
+                # clutter at the count it already had and merely moves every
+                # piece against a wall -- East Tradebourne 791 pieces before,
+                # 767 after -- while the forest board drops to the handful
+                # beside its four buildings. Raising it far enough to hold
+                # *that* board's 16 would want 0.49 and put four thousand
+                # barrels in East Tradebourne's alleys.
+                if yard and rng.random() < 0.11 * detail:
                     scatter.one(yard[rng.randrange(len(yard))],
                                 x + 0.5, z + 0.5, here, rng.randrange(24))
 
